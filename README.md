@@ -1,18 +1,37 @@
 # Vizmith
 
-> Turn data into dashboards with AI — transparently, locally, and open source.
+Ask a question in plain language, get a chart back.
 
-Vizmith is an open-source, self-hostable AI dashboard builder. Connect a data source, describe the insight you need, and get an editable dashboard backed by transparent, read-only queries.
+Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees your raw rows.
 
-## Principles
+**Status: early development. Nothing works yet.**
 
-- **Your data stays yours.** Vizmith connects to your data source; it does not train on or copy your data.
-- **Transparent by default.** Every generated visualization can show the query and assumptions behind it.
-- **Bring your own model.** Use your own API key or an OpenAI-compatible self-hosted model.
-- **Open source first.** Vizmith is built in public under the Apache-2.0 license.
+## Why metadata and not the data
 
-## Status
+The LLM receives a profile of your tables, not their contents. That keeps token cost bounded, keeps results reproducible, and means the tool can pass a data governance review: no customer records leave your infrastructure through the model.
 
-Vizmith is at the very beginning. The first milestone is deliberately small: connect to Postgres, turn a plain-language request into a safe read-only query, and render one editable chart.
+## Design
 
-See the [open issues](../../issues) for the current work.
+```
+question -> catalog + profile -> query -> result set -> chart spec -> renderer
+```
+
+The chart spec is versioned JSON, validated against a schema, diffable in git. Every feature produces the same output type:
+
+- Type a question, get a spec.
+- Adjust the spec by hand if you want more control.
+- Save a set of specs as a dashboard.
+
+Nothing generated is executed as code.
+
+## Bring your own model
+
+Vizmith targets the OpenAI-compatible `base_url` convention, so one adapter covers hosted providers, Azure OpenAI, Ollama, vLLM and LM Studio. You supply the key and the endpoint. Vizmith ships with no model access of its own.
+
+## Stack
+
+Python (FastAPI) backend, React frontend, ECharts for rendering, DuckDB and Databricks as the first two connectors.
+
+## Licence
+
+Apache-2.0. See [LICENSE](LICENSE).
