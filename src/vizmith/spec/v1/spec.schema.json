@@ -18,9 +18,16 @@
       "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"
     },
 
-    "column_ref": {
+    "table_ref": {
+      "description": "One to three segments, catalog.schema.table. A source with a single namespace uses one.",
       "type": "string",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62})?$"
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62}){0,2}$"
+    },
+
+    "column_ref": {
+      "description": "An optional table reference plus a column, so at most four segments. The last segment is always the column, which is why a reference is split from the right.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62}){0,3}$"
     },
 
     "scalar": {
@@ -32,7 +39,7 @@
       "required": ["from", "limit"],
       "additionalProperties": false,
       "properties": {
-        "from": { "$ref": "#/$defs/identifier" },
+        "from": { "$ref": "#/$defs/table_ref" },
         "joins": {
           "type": "array",
           "maxItems": 8,
@@ -89,7 +96,7 @@
       "required": ["table", "on"],
       "additionalProperties": false,
       "properties": {
-        "table": { "$ref": "#/$defs/identifier" },
+        "table": { "$ref": "#/$defs/table_ref" },
         "type": { "enum": ["inner", "left"], "default": "inner" },
         "on": {
           "type": "array",
