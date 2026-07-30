@@ -43,6 +43,17 @@ question -> catalog + profile -> query -> result set -> chart spec -> renderer
 
 Python 3.12, FastAPI, DuckDB, React, ECharts.
 
+## Skills
+
+Project skills live in `.claude/skills/`. Read the relevant one before starting, not after.
+
+- **`vizmith-design`**, before any screen, component, mockup or chart. Layout, tokens, component specs, copy rules, and the list of things that were tried and cut. Charts fall back to the data viz method for anything it does not cover.
+- **`vizmith-packaging`**, before touching the CLI entry point, installers, a desktop shell, code signing or a release.
+- **`vizmith-issues`**, before writing, picking up, implementing or closing a GitHub issue.
+- **`vizmith-commits`**, before staging anything. This repository is public, so a commit is a publication.
+
+One rule from the packaging skill constrains code written today: the frontend calls nothing but the HTTP API, no native dialogs and no desktop specific calls. That is what keeps a Tauri or Electron build a packaging job rather than a rewrite.
+
 ## Code style
 
 - Minimum complexity that works. No abstractions for a second use case that does not exist yet.

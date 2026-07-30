@@ -13,9 +13,14 @@ build/
 *.duckdb
 *.duckdb.wal
 data/
+!tests/fixtures/data/
+
+.claude/
 
 .DS_Store
 .idea/
 .vscode/
 .pytest_cache/
 .ruff_cache/
+
+CLAUDE.md
