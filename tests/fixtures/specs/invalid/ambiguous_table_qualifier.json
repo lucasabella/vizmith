@@ -1,0 +1,26 @@
+{
+  "spec_version": "1",
+  "title": "Orders by status across two schemas",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "joins": [
+      {
+        "table": "vizmith.archive.orders",
+        "on": [
+          { "left": "vizmith.shop.orders.id", "right": "vizmith.archive.orders.id" }
+        ]
+      }
+    ],
+    "group_by": [{ "column": "orders.status" }],
+    "aggregates": [{ "fn": "count", "as": "order_count" }],
+    "order_by": [{ "column": "order_count", "direction": "desc" }],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "status", "type": "nominal" },
+      "y": { "field": "order_count", "type": "quantitative" }
+    }
+  }
+}

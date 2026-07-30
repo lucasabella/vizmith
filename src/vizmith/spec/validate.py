@@ -47,12 +47,20 @@ def _semantic_errors(spec: dict) -> list[str]:
     qualification_required = len(tables) > 1
 
     for ref, where in _column_refs(query):
-        if "." in ref:
-            table = ref.split(".", 1)[0]
-            if table not in tables:
-                errors.append(f"{where}: '{ref}' refers to table '{table}', which is not in the query")
-        elif qualification_required:
-            errors.append(f"{where}: '{ref}' must be qualified with a table name when the query joins")
+        qualifier = ref.rpartition(".")[0]
+        if not qualifier:
+            if qualification_required:
+                errors.append(f"{where}: '{ref}' must be qualified with a table name when the query joins")
+            continue
+
+        named = sorted(t for t in tables if _names(t, qualifier))
+        if not named:
+            errors.append(f"{where}: '{ref}' refers to table '{qualifier}', which is not in the query")
+        elif len(named) > 1:
+            errors.append(
+                f"{where}: '{ref}' is ambiguous, '{qualifier}' names "
+                f"{' and '.join(repr(t) for t in named)}, so qualify it with more segments"
+            )
 
     for filter_ in query.get("filters", []):
         if filter_["op"] in ("is_null", "is_not_null") and "value" in filter_:
@@ -109,6 +117,15 @@ def _semantic_errors(spec: dict) -> list[str]:
         )
 
     return errors
+
+
+def _names(table: str, qualifier: str) -> bool:
+    """Whether a qualifier names a table. Any trailing part of the reference counts, so
+    'orders' and 'shop.orders' both name 'warehouse.shop.orders'. A model that had to
+    repeat three segments in every column reference would get one of them wrong."""
+    segments = table.split(".")
+    wanted = qualifier.split(".")
+    return len(wanted) <= len(segments) and segments[-len(wanted) :] == wanted
 
 
 def _column_refs(query: dict):

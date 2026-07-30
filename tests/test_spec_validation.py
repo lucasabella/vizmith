@@ -44,6 +44,10 @@ EXPECTED_ERROR = {
         "query.limit_by: 'column' and 'by' must differ, ranking needs a measure"
     ),
     "multi_series_without_limit_by.json": "query: a multi series chart needs 'limit_by'",
+    "ambiguous_table_qualifier.json": (
+        "query.group_by: 'orders.status' is ambiguous, 'orders' names "
+        "'vizmith.archive.orders' and 'vizmith.shop.orders', so qualify it with more segments"
+    ),
 }
 
 
@@ -114,6 +118,66 @@ def test_a_null_check_carrying_a_value_is_rejected_in_words():
 @pytest.mark.parametrize("spec", [None, [], "spec", 7, {"spec_version": "2"}])
 def test_a_spec_of_the_wrong_shape_returns_errors_rather_than_raising(spec):
     assert validate_spec(spec)
+
+
+def qualified(column: str) -> dict:
+    """A two table query over the same schema, with one column reference to vary."""
+    return {
+        "spec_version": "1",
+        "query": {
+            "from": "vizmith.shop.orders",
+            "joins": [
+                {
+                    "table": "vizmith.shop.customers",
+                    "on": [
+                        {
+                            "left": "vizmith.shop.orders.customer_id",
+                            "right": "vizmith.shop.customers.id",
+                        }
+                    ],
+                }
+            ],
+            "group_by": [{"column": column, "as": "grouped"}],
+            "aggregates": [{"fn": "count", "as": "order_count"}],
+            "limit": 10,
+        },
+        "chart": {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "grouped", "type": "nominal"},
+                "y": {"field": "order_count", "type": "quantitative"},
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        "vizmith.shop.customers.country",
+        "shop.customers.country",
+        "customers.country",
+    ],
+)
+def test_any_trailing_part_of_a_table_reference_names_it(column):
+    assert validate_spec(qualified(column)) == []
+
+
+def test_a_qualifier_naming_no_table_in_the_query_is_still_rejected():
+    assert validate_spec(qualified("vizmith.archive.customers.country")) == [
+        (
+            "query.group_by: 'vizmith.archive.customers.country' refers to table "
+            "'vizmith.archive.customers', which is not in the query"
+        )
+    ]
+
+
+def test_the_last_segment_is_the_column_however_long_the_reference():
+    spec = qualified("vizmith.shop.customers.country")
+    del spec["query"]["group_by"][0]["as"]
+    spec["chart"]["encoding"]["x"]["field"] = "country"
+
+    assert validate_spec(spec) == []
 
 
 def test_a_left_join_fixture_exists_because_the_query_builder_needs_one():

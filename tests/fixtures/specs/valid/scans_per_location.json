@@ -1,0 +1,18 @@
+{
+  "spec_version": "1",
+  "title": "Scans per location",
+  "query": {
+    "from": "vizmith.shop.shipment_scans",
+    "group_by": [{ "column": "vizmith.shop.shipment_scans.location_code" }],
+    "aggregates": [{ "fn": "count", "as": "scan_count" }],
+    "order_by": [{ "column": "scan_count", "direction": "desc" }],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "location_code", "type": "nominal", "title": "Location" },
+      "y": { "field": "scan_count", "type": "quantitative" }
+    }
+  }
+}
