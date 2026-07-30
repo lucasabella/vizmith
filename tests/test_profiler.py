@@ -1,59 +1,18 @@
 import json
 
-import pytest
-from generate_data import COLUMNS, NULLABLE
+from conftest import DUCKDB, FixtureCatalog
 
-from vizmith.catalog import DATE, DECIMAL, INTEGER, STRING, TIMESTAMP, Column, Dialect, Table
+from vizmith.catalog import Dialect
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
 
-DUCKDB = Dialect(
-    quote='"',
-    approx_distinct="approx_count_distinct({column})",
-    distinct_values="array_agg(DISTINCT {column})",
-)
 # A source that offers no approximate count, so the exact branch is covered without a
 # second database.
-EXACT = Dialect(quote='"', approx_distinct=None, distinct_values=DUCKDB.distinct_values)
-
-TYPES = {
-    "INTEGER": INTEGER,
-    "VARCHAR": STRING,
-    "DATE": DATE,
-    "TIMESTAMP": TIMESTAMP,
-    "DECIMAL(10,2)": DECIMAL,
-}
-
-
-class FixtureCatalog:
-    """The profiler's queries run against the DuckDB fixture database. Records every
-    statement it is asked to execute, which is how the cost rules are tested."""
-
-    def __init__(self, connection, dialect=DUCKDB):
-        self.dialect = dialect
-        self._connection = connection
-        self.statements = []
-
-    def tables(self):
-        return [f"vizmith.shop.{name}" for name in sorted(COLUMNS)]
-
-    def describe(self, name):
-        table = name.rsplit(".", 1)[-1]
-        return Table(
-            name=f"vizmith.shop.{table}",
-            columns=tuple(
-                Column(name=column, type=TYPES[type_], nullable=(table, column) in NULLABLE)
-                for column, type_ in COLUMNS[table]
-            ),
-        )
-
-    def run(self, sql):
-        self.statements.append(sql)
-        return self._connection.execute(sql).fetchall()
-
-
-@pytest.fixture
-def catalog(fixture_db):
-    return FixtureCatalog(fixture_db)
+EXACT = Dialect(
+    quote='"',
+    approx_distinct=None,
+    distinct_values=DUCKDB.distinct_values,
+    parameter=DUCKDB.parameter,
+)
 
 
 def column(profile, name):

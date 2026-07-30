@@ -53,7 +53,7 @@ def _semantic_errors(spec: dict) -> list[str]:
                 errors.append(f"{where}: '{ref}' must be qualified with a table name when the query joins")
             continue
 
-        named = sorted(t for t in tables if _names(t, qualifier))
+        named = sorted(t for t in tables if names_table(t, qualifier))
         if not named:
             errors.append(f"{where}: '{ref}' refers to table '{qualifier}', which is not in the query")
         elif len(named) > 1:
@@ -80,10 +80,7 @@ def _semantic_errors(spec: dict) -> list[str]:
     if group_by and not aggregates:
         errors.append("query: 'group_by' without 'aggregates' produces no measure")
 
-    output: list[str] = []
-    for item in [*select, *group_by]:
-        output.append(item.get("as") or item["column"].rsplit(".", 1)[-1])
-    output.extend(a["as"] for a in aggregates)
+    output = output_columns(query)
 
     duplicates = {name for name in output if output.count(name) > 1}
     for name in sorted(duplicates):
@@ -119,7 +116,21 @@ def _semantic_errors(spec: dict) -> list[str]:
     return errors
 
 
-def _names(table: str, qualifier: str) -> bool:
+def output_columns(query: dict) -> list[str]:
+    """The names the query produces, in the order the builder emits them: every select or
+    group_by item by its alias or the last segment of its column, then every aggregate
+    alias. The validator checks references against this list and the builder compiles the
+    list into the SELECT, so the result set contract has one definition rather than two
+    that can disagree."""
+    names = [
+        item.get("as") or item["column"].rsplit(".", 1)[-1]
+        for item in [*query.get("select", []), *query.get("group_by", [])]
+    ]
+    names.extend(aggregate["as"] for aggregate in query.get("aggregates", []))
+    return names
+
+
+def names_table(table: str, qualifier: str) -> bool:
     """Whether a qualifier names a table. Any trailing part of the reference counts, so
     'orders' and 'shop.orders' both name 'warehouse.shop.orders'. A model that had to
     repeat three segments in every column reference would get one of them wrong."""
