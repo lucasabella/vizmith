@@ -32,6 +32,8 @@ Milestones and the decisions behind them. Task level work lives in issues.
 
 **Aggregation lives in the query, never in the renderer.** The renderer draws what it is given. This keeps one source of truth for what a number means.
 
+**Schema constrained output is a capability an endpoint reports, not a convention it shares.** An OpenAI-compatible `base_url` says nothing about whether the endpoint accepts a JSON Schema. Checked in July 2026: OpenAI, vLLM from 0.8.5, LM Studio and Azure OpenAI through its `/openai/v1/` surface all take a `json_schema` response format, and Ollama's OpenAI-compatible route refuses it and wants its own `format` parameter instead. So the adapter asks. `constrains_output` sends one small request and reads the answer: a refusal means no, a timeout or a broken server means the question was not answered and raises rather than reporting no, because reporting no would send a caller down the unconstrained path for a reason that has nothing to do with the endpoint. The cost is one billable request per check, which is why it is a method a caller runs once rather than something the adapter does on construction. Azure needed a second look and turned out cleaner than assumed: the `/openai/v1/` base URL takes an ordinary bearer key, so it is configuration rather than a second code path, with the deployment name going in the `model` field.
+
 **Hosted API first, self hosted second.** Both are targets, but development happens against a hosted OpenAI-compatible endpoint because structured output is reliable there. Small local models fail schema validation more often, which makes the retry loop the dominant UX. That loop gets designed once the schema is proven, not before.
 
 ## Milestones
@@ -42,7 +44,7 @@ Milestones and the decisions behind them. Task level work lives in issues.
 
 **M3, query builder.** Query IR to SQL, executed against a SQL warehouse. Done when every valid fixture returns a result set the renderer accepts.
 
-**M4, LLM adapter.** OpenAI-compatible `base_url`, user supplied key and endpoint. Question plus profile in, spec out, validated, rejected and retried on failure with the validator errors as feedback. Structured output support differs across providers and needs verifying against current docs before the interface is fixed.
+**M4, LLM adapter.** OpenAI-compatible `base_url`, user supplied key and endpoint. Question plus profile in, spec out, validated, rejected and retried on failure with the validator errors as feedback. Structured output support differs across providers; what that check found is recorded above.
 
 **M5, eval harness.** A fixture question set scored for correctness. This is what makes prompt changes measurable instead of anecdotal.
 

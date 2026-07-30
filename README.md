@@ -30,6 +30,27 @@ Nothing generated is executed as code.
 
 Vizmith targets the OpenAI-compatible `base_url` convention, so one adapter covers hosted providers, Azure OpenAI, Ollama, vLLM and LM Studio. You supply the key and the endpoint. Vizmith ships with no model access of its own.
 
+A compatible base URL does not mean a compatible feature set. Vizmith asks the model for a chart spec constrained to a JSON Schema, and support for that differs. Checked against each vendor's documentation in July 2026, not against a running instance except where stated:
+
+| Endpoint | JSON Schema response format | Notes |
+|---|---|---|
+| OpenAI | Yes | `response_format` with `strict: true`. |
+| Azure OpenAI | Yes | Only through the `/openai/v1/` base URL, which takes a plain bearer key. `model` is the deployment name, not the model name. |
+| vLLM | Yes | 0.8.5 and later. The older `guided_json` parameter is deprecated in favour of `response_format`. |
+| LM Studio | Yes | `json_schema` only, no `json_object` mode. |
+| Ollama | No | Its OpenAI-compatible route takes a `format` parameter instead, so the schema is refused here. |
+
+None of these were verified against a live endpoint in this repository, because the test suite makes no model calls. The adapter therefore asks rather than assumes: `Model.constrains_output()` sends one small request and reports what the endpoint did with it. Smoke check a real endpoint before trusting the table:
+
+```
+.venv/bin/python -c "
+from vizmith.model import Endpoint, Model
+m = Model(Endpoint(base_url='https://api.example.com/v1', model='a-model', api_key='YOUR-KEY'))
+print('schema constrained:', m.constrains_output())
+print(m.complete('Answer with the word ready.').text)
+"
+```
+
 ## Stack
 
 Python (FastAPI) backend, React frontend, ECharts for rendering, Databricks Unity Catalog as the connector. DuckDB is the test harness, not a source you point Vizmith at.

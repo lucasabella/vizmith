@@ -1,0 +1,134 @@
+import json
+
+import httpx
+import pytest
+
+from vizmith.model import Completion, Endpoint, Model, ModelError
+
+KEY = "not-a-real-key-and-must-never-be-read-back"
+ENDPOINT = Endpoint(base_url="https://endpoint.invalid/v1", model="a-model", api_key=KEY, timeout=7.0)
+
+ANSWER = {
+    "model": "a-model",
+    "choices": [{"message": {"content": "hello"}, "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+}
+
+
+def model(handler) -> Model:
+    """The adapter over a transport that answers without a network."""
+    return Model(ENDPOINT, httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def answering(payload, status=200, capture=None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if capture is not None:
+            capture.append(request)
+        return httpx.Response(status, json=payload)
+
+    return handler
+
+
+def raising(error):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error
+
+    return handler
+
+
+def test_a_completion_carries_the_text_and_enough_to_debug_it():
+    completion = model(answering(ANSWER)).complete("a question")
+
+    assert completion == Completion(
+        text="hello", model="a-model", finish_reason="stop", usage=ANSWER["usage"]
+    )
+
+
+def test_a_request_names_the_model_and_carries_the_prompt():
+    sent = []
+    model(answering(ANSWER, capture=sent)).complete("a question")
+
+    body = json.loads(sent[0].content)
+    assert sent[0].url == httpx.URL("https://endpoint.invalid/v1/chat/completions")
+    assert body["model"] == "a-model"
+    assert body["messages"] == [{"role": "user", "content": "a question"}]
+    assert "response_format" not in body, "a prompt without a schema asks for no format"
+
+
+def test_a_schema_is_sent_as_a_strict_json_schema_response_format():
+    sent = []
+    schema = {"type": "object", "properties": {"spec_version": {"type": "string"}}}
+    model(answering(ANSWER, capture=sent)).complete("a question", schema)
+
+    response_format = json.loads(sent[0].content)["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["schema"] == schema
+    assert response_format["json_schema"]["strict"] is True
+
+
+def test_the_key_travels_in_a_header_and_nowhere_else():
+    sent = []
+    model(answering(ANSWER, capture=sent)).complete("a question")
+
+    assert sent[0].headers["authorization"] == f"Bearer {KEY}"
+    assert KEY not in sent[0].content.decode()
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        answering({"error": f"your key {KEY} is not valid"}, status=401),
+        answering({"echo": {"headers": {"authorization": f"Bearer {KEY}"}}}, status=400),
+    ],
+    ids=["in the message", "echoed back"],
+)
+def test_a_key_an_endpoint_repeats_is_redacted_before_it_becomes_an_error(handler):
+    """Several endpoints echo the request they refused. Without this the key reaches a
+    stack trace, a log line and whatever reads either."""
+    with pytest.raises(ModelError) as failure:
+        model(handler).complete("a question")
+
+    assert KEY not in str(failure.value)
+    assert KEY not in repr(failure.value)
+    assert "***" in str(failure.value)
+
+
+def test_a_timeout_is_a_model_error_naming_the_limit():
+    with pytest.raises(ModelError, match="did not answer within 7.0s"):
+        model(raising(httpx.ConnectTimeout("timed out"))).complete("a question")
+
+
+def test_a_connection_failure_is_a_model_error_rather_than_a_client_exception():
+    with pytest.raises(ModelError, match="could not reach"):
+        model(raising(httpx.ConnectError("refused"))).complete("a question")
+
+
+def test_an_answer_without_a_completion_is_a_model_error():
+    with pytest.raises(ModelError, match="without a completion"):
+        model(answering({"choices": []})).complete("a question")
+
+
+def test_a_refused_schema_reports_an_endpoint_that_cannot_constrain_output():
+    """Ollama's OpenAI-compatible route takes no json_schema response format. Asking is
+    the only way to find that out, so a refusal is the answer rather than a failure."""
+    assert model(answering({"error": "unknown parameter"}, status=400)).constrains_output() is False
+
+
+def test_an_accepted_schema_reports_an_endpoint_that_can():
+    assert model(answering(ANSWER)).constrains_output() is True
+
+
+def test_a_probe_that_never_got_an_answer_raises_rather_than_reporting_no():
+    """A timeout says nothing about the endpoint's capabilities, and answering False would
+    send the caller down the unconstrained path for the wrong reason."""
+    with pytest.raises(ModelError):
+        model(raising(httpx.ConnectError("refused"))).constrains_output()
+
+    with pytest.raises(ModelError):
+        model(answering({"error": "overloaded"}, status=503)).constrains_output()
+
+
+def test_nothing_reaches_a_service_without_configuration():
+    """There is no default endpoint, model or key anywhere in the dataclass."""
+    with pytest.raises(TypeError):
+        Endpoint()  # type: ignore[call-arg]
