@@ -48,15 +48,47 @@ class Table:
     columns: tuple[Column, ...]
 
 
+@dataclass(frozen=True)
+class Dialect:
+    """The parts of a source's SQL that differ between sources, so that everything above
+    writes one query and the source names the pieces. Templates rather than function
+    names, because the shape differs too: a set of distinct values is `collect_set(c)`
+    here and `array_agg(DISTINCT c)` there. `approx_distinct` is None for a source that
+    offers no approximate count, and a caller then pays for an exact one."""
+
+    quote: str
+    approx_distinct: str | None
+    distinct_values: str
+
+    def quoted(self, identifier: str) -> str:
+        return f"{self.quote}{identifier.replace(self.quote, self.quote * 2)}{self.quote}"
+
+    def qualified(self, name: str) -> str:
+        return ".".join(self.quoted(segment) for segment in name.split("."))
+
+
 class Catalog(Protocol):
+    dialect: Dialect
+
     def tables(self) -> list[str]:
         """Qualified names, one per table."""
 
     def describe(self, name: str) -> Table:
         """A table by qualified name. Fewer segments than the source uses are filled in."""
 
+    def run(self, sql: str) -> list[tuple]:
+        """Rows for a statement built above this layer. The Databricks warehouse round
+        trip belongs to the query builder, so the fixture catalog in the tests is the
+        only implementation today."""
+
 
 class DatabricksCatalog:
+    dialect = Dialect(
+        quote="`",
+        approx_distinct="approx_count_distinct({column})",
+        distinct_values="collect_set({column})",
+    )
+
     def __init__(self, profile: str, catalog: str, schema: str):
         self._profile = profile
         self._catalog = catalog
