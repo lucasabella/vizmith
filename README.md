@@ -63,6 +63,8 @@ Tests and lint:
 .venv/bin/ruff check .
 ```
 
+The suite runs offline against DuckDB. With a profile and a warehouse in `.env` it also compiles and runs every fixture spec against the workspace, through the query builder and through the HTTP API. Without one those tests skip.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).

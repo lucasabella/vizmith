@@ -1,8 +1,45 @@
+import json
+import os
+from pathlib import Path
+
 import duckdb
 import pytest
+from dotenv import load_dotenv
 from generate_data import COLUMNS, DATA_DIR, NULLABLE
 
-from vizmith.catalog import DATE, DECIMAL, INTEGER, STRING, TIMESTAMP, Column, Dialect, Table
+from vizmith.catalog import (
+    DATE,
+    DECIMAL,
+    INTEGER,
+    STRING,
+    TIMESTAMP,
+    Column,
+    DatabricksCatalog,
+    Dialect,
+    Table,
+)
+
+# The same .env the serve command reads, so a workspace that is configured for running the
+# application is also configured for testing against it. Without one the live tests skip
+# and the suite stays offline, which is what a checkout with no credentials gets.
+load_dotenv()
+
+# What Unity Catalog answered about the fixture tables. Live tests take their credentials
+# from the environment but their catalog and schema from here, so a .env pointed at other
+# data cannot quietly send them somewhere the fixture specs do not describe.
+RECORDING = Path(__file__).parent / "fixtures" / "catalog" / "tables.json"
+RECORDED = json.loads(RECORDING.read_text())
+CATALOG, SCHEMA = RECORDED[0]["full_name"].split(".")[:2]
+
+PROFILE = os.environ.get("VIZMITH_DATABRICKS_PROFILE")
+WAREHOUSE = os.environ.get("VIZMITH_DATABRICKS_WAREHOUSE")
+
+# Empty rather than absent, because .env.example ships the names with no values and a
+# copy of it that was never filled in should skip rather than fail on authentication.
+needs_warehouse = pytest.mark.skipif(
+    not PROFILE or not WAREHOUSE,
+    reason="set VIZMITH_DATABRICKS_PROFILE and VIZMITH_DATABRICKS_WAREHOUSE to use a warehouse",
+)
 
 DUCKDB = Dialect(
     quote='"',
@@ -79,3 +116,9 @@ def other_fixture_db():
 @pytest.fixture
 def catalog(fixture_db):
     return FixtureCatalog(fixture_db)
+
+
+@pytest.fixture(scope="session")
+def live_catalog():
+    """The same fixture data, in the workspace, reached the way a user reaches it."""
+    return DatabricksCatalog(profile=PROFILE, catalog=CATALOG, schema=SCHEMA, warehouse=WAREHOUSE)

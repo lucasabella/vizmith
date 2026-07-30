@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import needs_warehouse
 from fastapi.testclient import TestClient
 from test_spec_validation import EXPECTED_ERROR
 
@@ -103,6 +104,24 @@ def test_validating_a_valid_spec_reaches_no_source(client, catalog):
 
     assert response.json() == {"errors": []}
     assert catalog.statements == []
+
+
+@needs_warehouse
+def test_the_api_answers_with_rows_from_the_warehouse(live_catalog):
+    """The whole path a user's chart takes: spec in over HTTP, warehouse round trip, rows
+    out in the renderer's contract. Nothing below this is mocked."""
+    spec = load(REVENUE_BY_COUNTRY)
+    app.dependency_overrides[source] = lambda: live_catalog
+    try:
+        response = TestClient(app).post("/api/execute", json={"spec": spec})
+    finally:
+        app.dependency_overrides.clear()
+
+    body = response.json()
+    assert response.status_code == 200
+    assert [list(row) for row in body["rows"]] == [output_columns(spec["query"])] * len(body["rows"])
+    assert all(isinstance(row["revenue"], (int, float)) for row in body["rows"])
+    assert "SELECT" not in response.text
 
 
 def test_a_request_cannot_name_a_source_or_carry_sql(client, catalog):

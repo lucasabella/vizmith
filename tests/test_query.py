@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import FixtureCatalog
+from conftest import FixtureCatalog, needs_warehouse
 
 from vizmith.query import build, execute
 from vizmith.spec import output_columns
@@ -153,6 +153,23 @@ def test_a_left_join_keeps_the_rows_an_inner_join_drops(catalog):
     assert len(left) > len(rows)
     assert sum(row["shipment_count"] for row in left) > sum(row["shipment_count"] for row in rows)
     assert any(row["carrier"] is None for row in left)
+
+
+@needs_warehouse
+@pytest.mark.parametrize("path", VALID, ids=lambda p: p.name)
+def test_a_valid_fixture_executes_against_the_warehouse(path, live_catalog, catalog):
+    """DuckDB says the SQL is right. This says it is right in the dialect that ships, which
+    is the only claim a user's chart depends on. Both sources hold the same fixture data,
+    so a row count that differs means the two disagree about the query rather than about
+    the data, and that is the failure worth catching here."""
+    spec = load(path)
+    rows = execute(spec, live_catalog)
+
+    assert rows
+    assert list(rows[0]) == output_columns(spec["query"])
+    assert len(rows) == len(execute(spec, catalog)), (
+        "the workspace copy of the fixture data may be stale"
+    )
 
 
 def test_a_truncated_column_carries_its_alias(catalog):
