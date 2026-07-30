@@ -14,6 +14,10 @@ Milestones and the decisions behind them. Task level work lives in issues.
 
 **Relationships are catalog metadata, confirmed once, not inferred per query.** Dragging a field into a chart has to produce a join path, and that can only come from three places: the model, a resolver, or nowhere. Asking the model on every drag makes direct manipulation slow and unrepeatable, which removes the reason to offer direct manipulation at all. So the catalog builds a relationship graph when it profiles a source: declared foreign keys are read where they exist, the rest is suggested from column names and types and confirmed by a person once. Joins then resolve as the shortest path through that graph, deterministically and without a model call. The model receives the graph too, so a join it proposes can be checked against something rather than trusted. The cost is a concept the product did not have and a screen to maintain it, and since DuckDB files built from CSV or Parquet usually declare no foreign keys, the suggest-and-confirm path is the common case rather than the exception.
 
+**A table is named on up to three levels, and the target source is a warehouse.** Vizmith is aimed at data held in a lakehouse or warehouse, where a table is addressed as `catalog.schema.table`. DuckDB stays first in the build order, but as the test harness rather than the destination: it runs in a test with no network and no credentials, which is what keeps the catalog, the profiler and the query builder testable at all. The spec grammar therefore accepts one to three segments and resolves a column qualifier against any unambiguous suffix, so a local file keeps its bare names and a warehouse gets its full ones. The cost is that every reference now has to be split from the right rather than the left, and that an ambiguous qualifier is an error someone has to read. Deciding this after the query builder existed would have meant changing the SQL generation and the escaping at the same time, which is the one place where getting a name wrong is a security problem rather than a bug.
+
+**A profile is cheap by requirement.** Against an event table of hundreds of millions of rows, a query is billed and a scan per column is not affordable, so profiling one table is one pass over it and a distinct count is approximate where the source offers an approximate function. A profile records whether each figure is exact, because an estimate presented as a fact ends up in a prompt. The cost is a profile that is less precise than it could be on a small table, which is the wrong thing to optimise for. The fixture dataset carries one deliberately larger event table so that this is testable by asserting which queries get emitted rather than by timing them.
+
 **Aggregation lives in the query, never in the renderer.** The renderer draws what it is given. This keeps one source of truth for what a number means.
 
 **Hosted API first, self hosted second.** Both are targets, but development happens against a hosted OpenAI-compatible endpoint because structured output is reliable there. Small local models fail schema validation more often, which makes the retry loop the dominant UX. That loop gets designed once the schema is proven, not before.
@@ -22,7 +26,7 @@ Milestones and the decisions behind them. Task level work lives in issues.
 
 **M1, spec and renderer.** JSON Schema, semantic validator, golden fixtures, ECharts renderer driven by those fixtures. No database, no LLM. Done when a spec file renders a correct chart and every invalid fixture is rejected for the right reason.
 
-**M2, catalog and profiler.** DuckDB connector over synthetic e-commerce data. Types, cardinality, null rate, min/max, distinct samples for low cardinality columns. Deterministic and cacheable. Done when the profile of a fixed database is byte identical across runs.
+**M2, catalog and profiler.** DuckDB connector over the synthetic fixture dataset. Types, cardinality, null rate, min/max, distinct samples for low cardinality columns. Deterministic and cacheable. Done when the profile of a fixed database is byte identical across runs.
 
 **M3, query builder.** Query IR to SQL, executed against DuckDB. Done when every valid fixture returns a result set the renderer accepts.
 
@@ -34,7 +38,7 @@ Milestones and the decisions behind them. Task level work lives in issues.
 
 ## Deferred
 
-**Databricks connector.** The interface assumes a third source gets added by someone who has neither DuckDB nor Databricks. Implementation waits until the DuckDB path is proven.
+**Databricks connector.** Not deferred as a target, only as an implementation. It is where the data this is built for actually lives, so the catalog interface, the naming grammar and the profiler's cost rules are decided against it from the start. The code waits until the DuckDB path is proven, because a connector needing credentials and a network cannot carry the tests that prove the layers above it are right. The interface still assumes a third source gets added later by someone who has neither.
 
 **Rebuilding a dashboard from a screenshot.** Needs a vision model. Vision support across self hosted OpenAI-compatible servers is uneven, so this breaks the single adapter assumption. Revisit after M6.
 
