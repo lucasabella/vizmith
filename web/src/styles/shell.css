@@ -210,6 +210,15 @@ button:focus-visible {
   overflow: auto;
 }
 
+.chart {
+  height: 100%;
+  min-height: 260px;
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
 .empty {
   height: 100%;
   display: grid;
