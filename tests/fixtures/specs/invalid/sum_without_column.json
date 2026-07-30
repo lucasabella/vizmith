@@ -1,0 +1,31 @@
+{
+  "spec_version": "1",
+  "query": {
+    "from": "orders",
+    "group_by": [
+      {
+        "column": "status"
+      }
+    ],
+    "aggregates": [
+      {
+        "fn": "sum",
+        "as": "revenue"
+      }
+    ],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": {
+        "field": "status",
+        "type": "nominal"
+      },
+      "y": {
+        "field": "revenue",
+        "type": "quantitative"
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "spec_version": "1",
+  "query": {
+    "from": "order_items",
+    "joins": [
+      {
+        "table": "products",
+        "on": [
+          {
+            "left": "order_items.product_id",
+            "right": "products.id"
+          }
+        ]
+      }
+    ],
+    "group_by": [
+      {
+        "column": "products.category"
+      }
+    ],
+    "aggregates": [
+      {
+        "fn": "sum",
+        "column": "order_items.line_total",
+        "as": "revenue"
+      }
+    ],
+    "limit_by": {
+      "column": "revenue",
+      "by": "revenue",
+      "limit": 5
+    },
+    "limit": 100
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": {
+        "field": "category",
+        "type": "nominal"
+      },
+      "y": {
+        "field": "revenue",
+        "type": "quantitative"
+      }
+    }
+  }
+}

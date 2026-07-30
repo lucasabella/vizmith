@@ -1,0 +1,29 @@
+{
+  "spec_version": "1",
+  "title": "Revenue per country by product category",
+  "query": {
+    "from": "order_items",
+    "joins": [
+      { "table": "orders", "on": [{ "left": "order_items.order_id", "right": "orders.id" }] },
+      { "table": "customers", "on": [{ "left": "orders.customer_id", "right": "customers.id" }] },
+      { "table": "products", "on": [{ "left": "order_items.product_id", "right": "products.id" }] }
+    ],
+    "group_by": [
+      { "column": "customers.country" },
+      { "column": "products.category" }
+    ],
+    "aggregates": [{ "fn": "sum", "column": "order_items.line_total", "as": "revenue" }],
+    "order_by": [{ "column": "revenue", "direction": "desc" }],
+    "limit_by": { "column": "country", "by": "revenue", "limit": 10, "direction": "desc" },
+    "limit": 500
+  },
+  "chart": {
+    "mark": "bar",
+    "stack": true,
+    "encoding": {
+      "x": { "field": "country", "type": "nominal" },
+      "y": { "field": "revenue", "type": "quantitative" },
+      "color": { "field": "category", "type": "nominal" }
+    }
+  }
+}

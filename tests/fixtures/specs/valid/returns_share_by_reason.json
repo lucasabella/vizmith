@@ -1,0 +1,18 @@
+{
+  "spec_version": "1",
+  "title": "Returns by reason",
+  "query": {
+    "from": "returns",
+    "group_by": [{ "column": "reason" }],
+    "aggregates": [{ "fn": "count", "as": "returns_count" }],
+    "order_by": [{ "column": "returns_count", "direction": "desc" }],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "arc",
+    "encoding": {
+      "x": { "field": "reason", "type": "nominal" },
+      "y": { "field": "returns_count", "type": "quantitative" }
+    }
+  }
+}

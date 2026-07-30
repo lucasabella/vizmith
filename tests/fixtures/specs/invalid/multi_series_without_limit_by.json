@@ -1,0 +1,57 @@
+{
+  "spec_version": "1",
+  "query": {
+    "from": "order_items",
+    "joins": [
+      {
+        "table": "products",
+        "on": [
+          {
+            "left": "order_items.product_id",
+            "right": "products.id"
+          }
+        ]
+      }
+    ],
+    "group_by": [
+      {
+        "column": "products.category"
+      },
+      {
+        "column": "products.brand"
+      }
+    ],
+    "aggregates": [
+      {
+        "fn": "sum",
+        "column": "order_items.line_total",
+        "as": "revenue"
+      }
+    ],
+    "order_by": [
+      {
+        "column": "revenue",
+        "direction": "desc"
+      }
+    ],
+    "limit": 200
+  },
+  "chart": {
+    "mark": "bar",
+    "stack": true,
+    "encoding": {
+      "x": {
+        "field": "category",
+        "type": "nominal"
+      },
+      "y": {
+        "field": "revenue",
+        "type": "quantitative"
+      },
+      "color": {
+        "field": "brand",
+        "type": "nominal"
+      }
+    }
+  }
+}

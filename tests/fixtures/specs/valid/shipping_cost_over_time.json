@@ -1,0 +1,19 @@
+{
+  "spec_version": "1",
+  "title": "Average shipping cost per month",
+  "query": {
+    "from": "shipments",
+    "filters": [{ "column": "shipped_at", "op": "is_not_null" }],
+    "group_by": [{ "column": "shipped_at", "truncate": "month", "as": "month" }],
+    "aggregates": [{ "fn": "avg", "column": "cost", "as": "avg_cost" }],
+    "order_by": [{ "column": "month", "direction": "asc" }],
+    "limit": 60
+  },
+  "chart": {
+    "mark": "area",
+    "encoding": {
+      "x": { "field": "month", "type": "temporal" },
+      "y": { "field": "avg_cost", "type": "quantitative", "title": "Average cost (EUR)" }
+    }
+  }
+}

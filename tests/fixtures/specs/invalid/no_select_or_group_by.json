@@ -1,0 +1,20 @@
+{
+  "spec_version": "1",
+  "query": {
+    "from": "orders",
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": {
+        "field": "status",
+        "type": "nominal"
+      },
+      "y": {
+        "field": "total",
+        "type": "quantitative"
+      }
+    }
+  }
+}

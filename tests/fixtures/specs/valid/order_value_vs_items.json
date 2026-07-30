@@ -1,0 +1,20 @@
+{
+  "spec_version": "1",
+  "title": "Order value against item count",
+  "query": {
+    "from": "orders",
+    "filters": [{ "column": "status", "op": "in", "value": ["shipped", "delivered"] }],
+    "select": [
+      { "column": "item_count", "as": "items" },
+      { "column": "total", "as": "order_value" }
+    ],
+    "limit": 2000
+  },
+  "chart": {
+    "mark": "point",
+    "encoding": {
+      "x": { "field": "items", "type": "quantitative" },
+      "y": { "field": "order_value", "type": "quantitative", "title": "Order value (EUR)" }
+    }
+  }
+}

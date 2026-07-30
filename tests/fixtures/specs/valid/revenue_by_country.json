@@ -1,0 +1,29 @@
+{
+  "spec_version": "1",
+  "title": "Revenue by country, 2025",
+  "query": {
+    "from": "orders",
+    "joins": [
+      {
+        "table": "customers",
+        "type": "inner",
+        "on": [{ "left": "orders.customer_id", "right": "customers.id" }]
+      }
+    ],
+    "filters": [
+      { "column": "orders.order_date", "op": ">=", "value": "2025-01-01" },
+      { "column": "orders.status", "op": "not_in", "value": ["cancelled", "refunded"] }
+    ],
+    "group_by": [{ "column": "customers.country" }],
+    "aggregates": [{ "fn": "sum", "column": "orders.total", "as": "revenue" }],
+    "order_by": [{ "column": "revenue", "direction": "desc" }],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "country", "type": "nominal" },
+      "y": { "field": "revenue", "type": "quantitative", "title": "Revenue (EUR)" }
+    }
+  }
+}

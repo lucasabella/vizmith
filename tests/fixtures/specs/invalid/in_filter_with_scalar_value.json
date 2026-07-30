@@ -1,0 +1,38 @@
+{
+  "spec_version": "1",
+  "query": {
+    "from": "orders",
+    "filters": [
+      {
+        "column": "status",
+        "op": "in",
+        "value": "shipped"
+      }
+    ],
+    "group_by": [
+      {
+        "column": "status"
+      }
+    ],
+    "aggregates": [
+      {
+        "fn": "count",
+        "as": "orders_count"
+      }
+    ],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": {
+        "field": "status",
+        "type": "nominal"
+      },
+      "y": {
+        "field": "orders_count",
+        "type": "quantitative"
+      }
+    }
+  }
+}

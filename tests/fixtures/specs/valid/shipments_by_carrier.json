@@ -1,0 +1,25 @@
+{
+  "spec_version": "1",
+  "title": "Shipments per carrier",
+  "query": {
+    "from": "shipments",
+    "joins": [
+      {
+        "table": "carriers",
+        "type": "left",
+        "on": [{ "left": "shipments.carrier_id", "right": "carriers.id" }]
+      }
+    ],
+    "group_by": [{ "column": "carriers.name", "as": "carrier" }],
+    "aggregates": [{ "fn": "count", "as": "shipment_count" }],
+    "order_by": [{ "column": "shipment_count", "direction": "desc" }],
+    "limit": 20
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "carrier", "type": "nominal" },
+      "y": { "field": "shipment_count", "type": "quantitative" }
+    }
+  }
+}
