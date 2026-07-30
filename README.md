@@ -44,7 +44,16 @@ python -m venv .venv
 .venv/bin/vizmith serve
 ```
 
-That starts the API on port 8000 and opens a browser. For frontend work, run Vite alongside it:
+That starts the API on port 8000 and opens a browser. Running a spec needs a source, which is server configuration rather than something a request carries:
+
+```
+VIZMITH_DATABRICKS_PROFILE   a profile in ~/.databrickscfg
+VIZMITH_DATABRICKS_CATALOG   catalog and schema the specs are written against
+VIZMITH_DATABRICKS_SCHEMA
+VIZMITH_DATABRICKS_WAREHOUSE the SQL warehouse id that runs the query
+```
+
+For frontend work, run Vite alongside it:
 
 ```
 cd web
