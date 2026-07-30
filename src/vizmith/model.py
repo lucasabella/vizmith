@@ -79,8 +79,11 @@ class Model:
         return self._parse(self._post(body))
 
     def constrains_output(self) -> bool:
-        """Whether this endpoint accepts a JSON Schema. A rejected request is an answer,
-        so it returns False; a timeout or an unreachable host is not, so it raises."""
+        """Whether this endpoint honours a JSON Schema. What comes back decides it, not the
+        status: a server that drops a response format it does not know answers 200 with
+        ordinary prose, and calling that a yes is the expensive mistake, since a caller
+        who believes it stops checking. A rejected request is an answer, so it returns
+        False. A timeout or an unreachable host is not, so it raises."""
         body = {
             "model": self._endpoint.model,
             "messages": [{"role": "user", "content": "Answer with ok true."}],
@@ -91,7 +94,7 @@ class Model:
             },
         }
         try:
-            self._post(body)
+            completion = self._parse(self._post(body))
         except ModelError as error:
             # A refusal is an answer. A timeout, an unreachable host or a server that
             # broke is not, and reporting those as "cannot constrain" would send the
@@ -100,7 +103,12 @@ class Model:
             if error.status is not None and error.status < 500:
                 return False
             raise
-        return True
+
+        try:
+            answer = json.loads(completion.text)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(answer, dict) and "ok" in answer
 
     def _post(self, body: dict) -> dict:
         url = self._endpoint.base_url.rstrip("/") + "/chat/completions"

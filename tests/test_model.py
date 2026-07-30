@@ -114,8 +114,18 @@ def test_a_refused_schema_reports_an_endpoint_that_cannot_constrain_output():
     assert model(answering({"error": "unknown parameter"}, status=400)).constrains_output() is False
 
 
-def test_an_accepted_schema_reports_an_endpoint_that_can():
-    assert model(answering(ANSWER)).constrains_output() is True
+def test_an_endpoint_that_answers_in_the_schema_reports_that_it_can():
+    honoured = {"choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}]}
+
+    assert model(answering(honoured)).constrains_output() is True
+
+
+def test_an_endpoint_that_ignores_the_schema_is_not_taken_at_its_status():
+    """A server that drops a response format it does not recognise still answers 200. The
+    answer is what says whether the schema was honoured, and prose says it was not."""
+    ignored = {"choices": [{"message": {"content": "Sure, ok is true!"}, "finish_reason": "stop"}]}
+
+    assert model(answering(ignored)).constrains_output() is False
 
 
 def test_a_probe_that_never_got_an_answer_raises_rather_than_reporting_no():

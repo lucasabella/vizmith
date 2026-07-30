@@ -15,7 +15,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # DuckDB is the test harness, not part of the product: it writes the fixture Parquet
-# and builds the local database the deterministic tests run against.
+# and builds the local database the deterministic tests run against. httpx is not here
+# because the model adapter ships with it.
 dev = [
     "pytest>=8.3",
     "ruff>=0.8",
