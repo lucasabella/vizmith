@@ -121,6 +121,21 @@ button:focus-visible {
   color: var(--chrome-ink-2);
 }
 
+/* A status colour never carries the meaning on its own, so the badge says the word too.
+   The tints are mixed from the status token rather than picked, because the strip is dark
+   and the flat token is unreadable on it. */
+.strip__badge--good {
+  color: color-mix(in srgb, var(--good) 45%, #fff);
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  border-color: color-mix(in srgb, var(--good) 55%, transparent);
+}
+
+.strip__badge--bad {
+  color: color-mix(in srgb, var(--bad) 45%, #fff);
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 60%, transparent);
+}
+
 /* body */
 .body {
   flex: 1;
@@ -243,6 +258,55 @@ button:focus-visible {
   max-width: 46ch;
 }
 
+/* A refusal is read, not glanced at, so it sits on the same card as a chart would and
+   keeps the machine's words in mono above the sentence that translates them. */
+.refusal {
+  height: 100%;
+  overflow: auto;
+  padding: 18px 20px;
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.refusal__head {
+  margin: 0 0 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.refusal__head + .refusal__head {
+  margin-top: 16px;
+}
+
+.refusal__lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.refusal__lines li {
+  padding-left: 11px;
+  border-left: 2px solid var(--bad);
+  margin-bottom: 5px;
+}
+
+.refusal__plain {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+
 .pages {
   height: var(--h-pages);
   flex: none;
@@ -327,6 +391,12 @@ button:focus-visible {
   border-radius: var(--radius-control);
 }
 
+.panel__json--on {
+  color: #fff;
+  background: var(--chrome);
+  border-color: var(--chrome);
+}
+
 .panel__collapse {
   width: 20px;
   height: 20px;
@@ -386,6 +456,62 @@ button:focus-visible {
   border-radius: var(--radius-control);
   font-size: 10.5px;
   color: var(--ink-3);
+}
+
+/* the spec, which shares the panel with the wells rather than owning one */
+.spec {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.spec__text {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  outline: none;
+  padding: 10px 11px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink);
+  tab-size: 2;
+}
+
+.spec__foot {
+  flex: none;
+  padding: 9px 11px;
+  background: var(--surf-2);
+  border-top: 1px solid var(--rule);
+}
+
+.btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #fff;
+  background: var(--chrome);
+  border-radius: var(--radius-card);
+}
+
+.btn:disabled {
+  color: var(--ink-3);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  cursor: default;
+}
+
+.spec__note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.spec__note code {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink);
 }
 
 /* fields tree */

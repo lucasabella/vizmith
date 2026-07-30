@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_spec_validation import EXPECTED_ERROR
 
-from vizmith.api import app, source
+from vizmith.api import CONFIGURATION, app, source
 from vizmith.query import build
 from vizmith.spec import output_columns
 
@@ -14,13 +14,6 @@ VALID = sorted((FIXTURES / "valid").glob("*.json"))
 INVALID = sorted((FIXTURES / "invalid").glob("*.json"))
 
 REVENUE_BY_COUNTRY = FIXTURES / "valid" / "revenue_by_country.json"
-
-CONFIGURATION = [
-    "VIZMITH_DATABRICKS_PROFILE",
-    "VIZMITH_DATABRICKS_CATALOG",
-    "VIZMITH_DATABRICKS_SCHEMA",
-    "VIZMITH_DATABRICKS_WAREHOUSE",
-]
 
 
 def load(path: Path) -> dict:
@@ -44,6 +37,14 @@ def test_health_reports_ok_without_a_configured_source(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    assert response.json()["source"] is False
+
+
+def test_health_reports_a_source_once_it_is_configured(monkeypatch):
+    for name in CONFIGURATION:
+        monkeypatch.setenv(name, "configured")
+
+    assert TestClient(app).get("/api/health").json()["source"] is True
 
 
 @pytest.mark.parametrize("path", VALID, ids=lambda p: p.name)

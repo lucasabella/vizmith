@@ -24,6 +24,13 @@ from vizmith.spec import validate_spec
 
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 
+CONFIGURATION = (
+    "VIZMITH_DATABRICKS_PROFILE",
+    "VIZMITH_DATABRICKS_CATALOG",
+    "VIZMITH_DATABRICKS_SCHEMA",
+    "VIZMITH_DATABRICKS_WAREHOUSE",
+)
+
 app = FastAPI(title="Vizmith")
 
 
@@ -31,12 +38,8 @@ app = FastAPI(title="Vizmith")
 def source() -> Catalog:
     """The configured source, built once and on first use rather than at import, so that
     health answers on a server that has none and a test can put its own in its place."""
-    return DatabricksCatalog(
-        profile=os.environ["VIZMITH_DATABRICKS_PROFILE"],
-        catalog=os.environ["VIZMITH_DATABRICKS_CATALOG"],
-        schema=os.environ["VIZMITH_DATABRICKS_SCHEMA"],
-        warehouse=os.environ["VIZMITH_DATABRICKS_WAREHOUSE"],
-    )
+    profile, catalog, schema, warehouse = (os.environ[name] for name in CONFIGURATION)
+    return DatabricksCatalog(profile=profile, catalog=catalog, schema=schema, warehouse=warehouse)
 
 
 class SpecRequest(BaseModel):
@@ -47,8 +50,15 @@ class SpecRequest(BaseModel):
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "version": __version__}
+def health() -> dict[str, str | bool]:
+    """Answerable without a source, because it is what a deployment check runs. It says
+    whether one is configured so that the interface can name the missing piece rather than
+    letting it arrive as a failed query."""
+    return {
+        "status": "ok",
+        "version": __version__,
+        "source": all(os.environ.get(name) for name in CONFIGURATION),
+    }
 
 
 # Neither endpoint below declares a response model. One would re-serialise the rows on
