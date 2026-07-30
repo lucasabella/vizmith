@@ -1,0 +1,280 @@
+[
+  {
+    "full_name": "vizmith.shop.carriers",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "name",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 1
+      }
+    ]
+  },
+  {
+    "full_name": "vizmith.shop.customers",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "country",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 1
+      },
+      {
+        "name": "signup_date",
+        "type_name": "DATE",
+        "type_text": "date",
+        "nullable": false,
+        "position": 2
+      }
+    ]
+  },
+  {
+    "full_name": "vizmith.shop.order_items",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "order_id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 1
+      },
+      {
+        "name": "product_id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 2
+      },
+      {
+        "name": "quantity",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 3
+      },
+      {
+        "name": "line_total",
+        "type_name": "DECIMAL",
+        "type_text": "decimal(10,2)",
+        "nullable": false,
+        "position": 4
+      }
+    ]
+  },
+  {
+    "full_name": "vizmith.shop.orders",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "customer_id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 1
+      },
+      {
+        "name": "order_date",
+        "type_name": "DATE",
+        "type_text": "date",
+        "nullable": true,
+        "position": 2
+      },
+      {
+        "name": "status",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 3
+      },
+      {
+        "name": "total",
+        "type_name": "DECIMAL",
+        "type_text": "decimal(10,2)",
+        "nullable": false,
+        "position": 4
+      },
+      {
+        "name": "item_count",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 5
+      }
+    ]
+  },
+  {
+    "full_name": "vizmith.shop.products",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "category",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 1
+      },
+      {
+        "name": "brand",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 2
+      },
+      {
+        "name": "price",
+        "type_name": "DECIMAL",
+        "type_text": "decimal(10,2)",
+        "nullable": false,
+        "position": 3
+      }
+    ]
+  },
+  {
+    "full_name": "vizmith.shop.returns",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "order_id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 1
+      },
+      {
+        "name": "reason",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 2
+      },
+      {
+        "name": "returned_at",
+        "type_name": "TIMESTAMP_NTZ",
+        "type_text": "timestamp_ntz",
+        "nullable": false,
+        "position": 3
+      }
+    ]
+  },
+  {
+    "full_name": "vizmith.shop.shipment_scans",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "shipment_id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 1
+      },
+      {
+        "name": "scanned_at",
+        "type_name": "TIMESTAMP_NTZ",
+        "type_text": "timestamp_ntz",
+        "nullable": false,
+        "position": 2
+      },
+      {
+        "name": "location_code",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 3
+      },
+      {
+        "name": "status",
+        "type_name": "STRING",
+        "type_text": "string",
+        "nullable": false,
+        "position": 4
+      }
+    ]
+  },
+  {
+    "full_name": "vizmith.shop.shipments",
+    "columns": [
+      {
+        "name": "id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 0
+      },
+      {
+        "name": "order_id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 1
+      },
+      {
+        "name": "carrier_id",
+        "type_name": "INT",
+        "type_text": "int",
+        "nullable": false,
+        "position": 2
+      },
+      {
+        "name": "shipped_at",
+        "type_name": "TIMESTAMP_NTZ",
+        "type_text": "timestamp_ntz",
+        "nullable": true,
+        "position": 3
+      },
+      {
+        "name": "cost",
+        "type_name": "DECIMAL",
+        "type_text": "decimal(10,2)",
+        "nullable": false,
+        "position": 4
+      }
+    ]
+  }
+]

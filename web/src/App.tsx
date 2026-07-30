@@ -71,8 +71,8 @@ export default function App() {
               <div>
                 <p className="empty__title">No source connected</p>
                 <p className="empty__body">
-                  Point Vizmith at a DuckDB file. It reads the schema and profiles every column, then you
-                  can ask a question.
+                  Point Vizmith at a Databricks workspace. It reads the schema and profiles every column,
+                  then you can ask a question.
                 </p>
               </div>
             </div>
@@ -144,7 +144,8 @@ export default function App() {
             <div className="panel__foot">
               <span className="panel__foot-h">Profile only</span>
               <p className="panel__foot-b">
-                Types, counts and value ranges go to the model. Rows go from DuckDB straight to the chart.
+                Types, counts and value ranges go to the model. Rows go from the source straight to the
+                chart.
               </p>
             </div>
           </section>
