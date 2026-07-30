@@ -3,9 +3,15 @@ import threading
 import webbrowser
 
 import uvicorn
+from dotenv import load_dotenv
 
 
 def main() -> None:
+    # The command is what reads configuration off disk, not the application. Importing
+    # vizmith should never pull in whatever .env happens to sit in the working directory,
+    # and a real environment variable still wins over the file.
+    load_dotenv()
+
     parser = argparse.ArgumentParser(prog="vizmith")
     commands = parser.add_subparsers(dest="command", required=True)
 

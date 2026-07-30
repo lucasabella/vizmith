@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "databricks-sdk>=0.123",
     "jsonschema>=4.23",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
