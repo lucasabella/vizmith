@@ -207,6 +207,11 @@ def shipment_scans(rng, shipment_rows):
     return rows
 
 
+# The only columns the generator ever leaves empty. Everything else is NOT NULL, which
+# a table has to declare rather than infer: a table created from a query reports every
+# column as nullable, and the catalog would then report that as fact.
+NULLABLE = {("orders", "order_date"), ("shipments", "shipped_at")}
+
 COLUMNS = {
     "customers": [("id", "INTEGER"), ("country", "VARCHAR"), ("signup_date", "DATE")],
     "products": [

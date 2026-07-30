@@ -32,7 +32,7 @@ Vizmith targets the OpenAI-compatible `base_url` convention, so one adapter cove
 
 ## Stack
 
-Python (FastAPI) backend, React frontend, ECharts for rendering, DuckDB and Databricks as the first two connectors.
+Python (FastAPI) backend, React frontend, ECharts for rendering, Databricks Unity Catalog as the connector. DuckDB is the test harness, not a source you point Vizmith at.
 
 Vizmith runs on your machine and serves a browser. The frontend talks to the backend over HTTP and nothing else, which keeps a desktop build possible later without touching application code.
 
