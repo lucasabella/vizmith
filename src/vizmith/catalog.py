@@ -4,6 +4,7 @@ Nothing above this module knows that the source is Databricks. A caller gets
 qualified names, a closed set of types and nullability, and nothing else.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -54,11 +55,14 @@ class Dialect:
     writes one query and the source names the pieces. Templates rather than function
     names, because the shape differs too: a set of distinct values is `collect_set(c)`
     here and `array_agg(DISTINCT c)` there. `approx_distinct` is None for a source that
-    offers no approximate count, and a caller then pays for an exact one."""
+    offers no approximate count, and a caller then pays for an exact one. `parameter` is
+    how a bound value is referred to in a statement, named rather than positional because
+    Unity Catalog's statement execution takes named markers only."""
 
     quote: str
     approx_distinct: str | None
     distinct_values: str
+    parameter: str
 
     def quoted(self, identifier: str) -> str:
         return f"{self.quote}{identifier.replace(self.quote, self.quote * 2)}{self.quote}"
@@ -76,10 +80,9 @@ class Catalog(Protocol):
     def describe(self, name: str) -> Table:
         """A table by qualified name. Fewer segments than the source uses are filled in."""
 
-    def run(self, sql: str) -> list[tuple]:
-        """Rows for a statement built above this layer. The Databricks warehouse round
-        trip belongs to the query builder, so the fixture catalog in the tests is the
-        only implementation today."""
+    def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
+        """Rows for a statement built above this layer, with every value bound by name
+        rather than written into the statement."""
 
 
 class DatabricksCatalog:
@@ -87,12 +90,14 @@ class DatabricksCatalog:
         quote="`",
         approx_distinct="approx_count_distinct({column})",
         distinct_values="collect_set({column})",
+        parameter=":{name}",
     )
 
-    def __init__(self, profile: str, catalog: str, schema: str):
+    def __init__(self, profile: str, catalog: str, schema: str, warehouse: str):
         self._profile = profile
         self._catalog = catalog
         self._schema = schema
+        self._warehouse = warehouse
         self._client = None
 
     def tables(self) -> list[str]:
@@ -101,6 +106,39 @@ class DatabricksCatalog:
 
     def describe(self, name: str) -> Table:
         return _table(self._workspace().tables.get(self.qualify(name)))
+
+    def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
+        from databricks.sdk.service.sql import StatementParameterListItem, StatementState
+
+        execution = self._workspace().statement_execution
+        response = execution.execute_statement(
+            statement=sql,
+            warehouse_id=self._warehouse,
+            wait_timeout="50s",
+            parameters=[
+                StatementParameterListItem(name=name, value=_parameter(value), type=_parameter_type(value))
+                for name, value in (parameters or {}).items()
+            ],
+        )
+        # A statement that outlives the wait comes back pending rather than finished, and a
+        # warehouse that has to start does that every time. Waiting is not the same thing
+        # as a timeout, which is its own issue, so nothing here gives up.
+        while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+            time.sleep(1)
+            response = execution.get_statement(response.statement_id)
+
+        # An unsuccessful statement still carries a result of None, and returning no rows
+        # for it would read as an empty answer rather than as a failure.
+        if response.status.state != StatementState.SUCCEEDED:
+            raise RuntimeError(f"statement {response.status.state}: {response.status.error}")
+        # Rows past the first chunk are fetched separately, so returning that chunk would
+        # answer with a page and call it the result. A spec's row cap keeps a chart query
+        # well inside one chunk, and a profile is a single row.
+        if response.manifest.truncated or response.manifest.total_chunk_count > 1:
+            raise RuntimeError("statement returned more rows than one chunk holds")
+
+        types = [column.type_name.value for column in response.manifest.schema.columns]
+        return [tuple(_value(v, t) for v, t in zip(row, types)) for row in response.result.data_array or []]
 
     def qualify(self, name: str) -> str:
         segments = name.split(".")
@@ -112,6 +150,43 @@ class DatabricksCatalog:
 
             self._client = WorkspaceClient(profile=self._profile)
         return self._client
+
+
+def _parameter(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _parameter_type(value) -> str:
+    """A statement takes its values as text plus a declared type, so a number compared
+    against a numeric column has to say so or it arrives as a string. A whole number is
+    declared as small as it fits, because a row limit is one of these and LIMIT rejects
+    anything wider than an INT. A comparison widens the other way by itself."""
+    if isinstance(value, bool):
+        return "BOOLEAN"
+    if isinstance(value, int):
+        return "INT" if -(2**31) <= value < 2**31 else "BIGINT"
+    if isinstance(value, float):
+        return "DOUBLE"
+    return "STRING"
+
+
+def _value(text: str | None, type_name: str):
+    """Rows come back as text with the types in the manifest, so the source's own type is
+    what turns a total back into a number before it reaches a chart."""
+    if text is None:
+        return None
+    kind = TYPES.get(type_name, UNSUPPORTED)
+    if kind == INTEGER:
+        return int(text)
+    if kind == DECIMAL:
+        return float(text)
+    if kind == BOOLEAN:
+        return text == "true"
+    return text
 
 
 def _table(info) -> Table:
