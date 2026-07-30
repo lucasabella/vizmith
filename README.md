@@ -44,7 +44,9 @@ python -m venv .venv
 .venv/bin/vizmith serve
 ```
 
-That starts the API on port 8000 and opens a browser. For frontend work, run Vite alongside it:
+That starts the API on port 8000 and opens a browser. Running a spec needs a source, which is server configuration rather than something a request carries. Copy `.env.example` to `.env` and fill in the four values; `vizmith serve` reads it, and a real environment variable wins over it.
+
+For frontend work, run Vite alongside it:
 
 ```
 cd web
@@ -60,6 +62,8 @@ Tests and lint:
 .venv/bin/pytest
 .venv/bin/ruff check .
 ```
+
+The suite runs offline against DuckDB. With a profile and a warehouse in `.env` it also compiles and runs every fixture spec against the workspace, through the query builder and through the HTTP API. Without one those tests skip.
 
 ## Licence
 

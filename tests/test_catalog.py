@@ -1,8 +1,5 @@
-import json
-import os
-from pathlib import Path
-
 import pytest
+from conftest import CATALOG, PROFILE, RECORDED, SCHEMA, WAREHOUSE, needs_warehouse
 from databricks.sdk.service.catalog import TableInfo
 
 from vizmith.catalog import (
@@ -17,17 +14,9 @@ from vizmith.catalog import (
     _value,
 )
 
-# What Unity Catalog answered about the fixture tables, so the mapping is testable
-# without a workspace. Only the live test below can tell whether it is still true, and
-# only a person with a workspace can refresh it.
-RECORDING = Path(__file__).parent / "fixtures" / "catalog" / "tables.json"
-RECORDED = json.loads(RECORDING.read_text())
-
-# Set to run the two tests that need a workspace. Everything else runs offline.
-PROFILE = os.environ.get("VIZMITH_DATABRICKS_PROFILE")
-WAREHOUSE = os.environ.get("VIZMITH_DATABRICKS_WAREHOUSE")
-CATALOG, SCHEMA = RECORDED[0]["full_name"].split(".")[:2]
-
+# The recording is what makes the mapping testable without a workspace. Only the live
+# test below can tell whether it is still true, and only a person with a workspace can
+# refresh it. It lives in conftest because the live tests elsewhere read it too.
 FIXTURE_TABLES = [
     "carriers",
     "customers",
@@ -122,7 +111,7 @@ def test_a_shorter_name_is_filled_in():
     assert catalog.qualify(f"{CATALOG}.{SCHEMA}.orders") == f"{CATALOG}.{SCHEMA}.orders"
 
 
-@pytest.mark.skipif(PROFILE is None, reason="set VIZMITH_DATABRICKS_PROFILE to use a workspace")
+@pytest.mark.skipif(not PROFILE, reason="set VIZMITH_DATABRICKS_PROFILE to use a workspace")
 def test_the_recording_still_describes_the_workspace():
     catalog = DatabricksCatalog(profile=PROFILE, catalog=CATALOG, schema=SCHEMA, warehouse=WAREHOUSE)
     assert catalog.tables() == [entry["full_name"] for entry in RECORDED]
@@ -130,10 +119,7 @@ def test_the_recording_still_describes_the_workspace():
         assert catalog.describe(name) == recorded(name)
 
 
-@pytest.mark.skipif(
-    PROFILE is None or WAREHOUSE is None,
-    reason="set VIZMITH_DATABRICKS_PROFILE and VIZMITH_DATABRICKS_WAREHOUSE to use a warehouse",
-)
+@needs_warehouse
 def test_a_bound_value_survives_the_warehouse_round_trip():
     """The statement API takes values as text plus a type and answers in text, so this is
     the only test that can say the binding and the types on both sides line up."""
