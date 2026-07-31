@@ -3,11 +3,14 @@ from types import SimpleNamespace
 import pytest
 from conftest import CATALOG, PROFILE, RECORDED, SCHEMA, WAREHOUSE, needs_warehouse
 from databricks.sdk.service.catalog import TableInfo
+from databricks.sdk.service.sql import StatementState
 
+from vizmith import catalog as catalog_module
 from vizmith.catalog import (
     TIMESTAMP,
     TYPES,
     UNSUPPORTED,
+    WAIT_LIMIT,
     Column,
     DatabricksCatalog,
     Table,
@@ -148,6 +151,123 @@ def test_a_shorter_name_is_filled_in():
     assert catalog.qualify("orders") == f"{CATALOG}.{SCHEMA}.orders"
     assert catalog.qualify(f"{SCHEMA}.orders") == f"{CATALOG}.{SCHEMA}.orders"
     assert catalog.qualify(f"{CATALOG}.{SCHEMA}.orders") == f"{CATALOG}.{SCHEMA}.orders"
+
+
+class Clock:
+    """Time as the polling loop reads it. A sleep advances it instead of taking it, so a
+    test can sit out the whole cap without waiting for it."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+class FakeExecution:
+    """The statement execution API, answering with one state per call and repeating the
+    last one, which is how a statement that never finishes is expressed. A cancellation is
+    recorded rather than performed. A warehouse cannot be made to hang on demand, so this
+    is the only way to test the wait at all."""
+
+    def __init__(self, *states, cancel_raises=False):
+        self._states = list(states)
+        self._cancel_raises = cancel_raises
+        self.cancelled = []
+        self.polls = 0
+
+    def execute_statement(self, **arguments):
+        self.statement = arguments.get("statement")
+        return self._response()
+
+    def get_statement(self, statement_id):
+        self.polls += 1
+        return self._response()
+
+    def cancel_execution(self, statement_id):
+        if self._cancel_raises:
+            raise RuntimeError("the source would not take the cancellation")
+        self.cancelled.append(statement_id)
+
+    def _response(self):
+        state = self._states.pop(0) if len(self._states) > 1 else self._states[0]
+        return SimpleNamespace(
+            statement_id="statement-1",
+            status=SimpleNamespace(state=state, error="[NO_ERROR] none"),
+            manifest=SimpleNamespace(
+                truncated=False,
+                total_chunk_count=1,
+                schema=SimpleNamespace(columns=[manifest_column("LONG", "BIGINT")]),
+            ),
+            result=SimpleNamespace(data_array=[["7"]]),
+        )
+
+
+def waiting(monkeypatch, *states, cancel_raises=False):
+    """A catalog whose statements answer with the given states, over a clock that costs
+    nothing to advance. No workspace is built and no warehouse is reached."""
+    monkeypatch.setattr(catalog_module, "time", Clock())
+    execution = FakeExecution(*states, cancel_raises=cancel_raises)
+    catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
+    catalog._client = SimpleNamespace(statement_execution=execution)
+    return catalog, execution
+
+
+def states(pending, final):
+    return [StatementState.PENDING] * pending + [final]
+
+
+def test_a_statement_that_never_finishes_is_given_up_on(monkeypatch):
+    """The loop had no cap, so a statement that never finished never returned: a request
+    holding a worker, a control that says Running with no end, and a warehouse billing for
+    an answer nobody will read."""
+    catalog, execution = waiting(monkeypatch, StatementState.PENDING)
+
+    with pytest.raises(RuntimeError) as refusal:
+        catalog.run("SELECT 1")
+
+    assert f"{WAIT_LIMIT} seconds" in str(refusal.value)
+    assert execution.polls < WAIT_LIMIT + 2, "the cap is on the wait, not on the number of polls"
+
+
+def test_giving_up_cancels_the_statement_at_the_source(monkeypatch):
+    """A query left running after its caller has gone is money spent on a result that has
+    nowhere to go."""
+    catalog, execution = waiting(monkeypatch, StatementState.PENDING)
+
+    with pytest.raises(RuntimeError):
+        catalog.run("SELECT 1")
+
+    assert execution.cancelled == ["statement-1"]
+
+
+def test_a_source_that_will_not_take_the_cancellation_still_says_it_gave_up(monkeypatch):
+    """Cancelling is what happens after the wait has already failed. Raising from it would
+    replace the message about waiting with one about cancelling."""
+    catalog, _ = waiting(monkeypatch, StatementState.PENDING, cancel_raises=True)
+
+    with pytest.raises(RuntimeError, match="not finished"):
+        catalog.run("SELECT 1")
+
+
+def test_a_statement_that_finishes_inside_the_cap_is_unaffected(monkeypatch):
+    """A warehouse that has to start comes back pending for minutes every time, so a wait
+    that ends in an answer is the case this must not break."""
+    catalog, execution = waiting(monkeypatch, *states(WAIT_LIMIT - 2, StatementState.SUCCEEDED))
+
+    assert catalog.run("SELECT 1") == [(7,)]
+    assert execution.cancelled == []
+
+
+def test_a_statement_that_fails_inside_the_cap_still_reports_what_the_source_said(monkeypatch):
+    """Giving up is a second reason to raise, not a replacement for the first one."""
+    catalog, _ = waiting(monkeypatch, *states(2, StatementState.FAILED))
+
+    with pytest.raises(RuntimeError, match="NO_ERROR"):
+        catalog.run("SELECT 1")
 
 
 @pytest.mark.skipif(not PROFILE, reason="set VIZMITH_DATABRICKS_PROFILE to use a workspace")
