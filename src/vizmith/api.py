@@ -1,5 +1,10 @@
 """The HTTP surface: a spec goes in, its errors or its rows come back.
 
+What a client can also ask for is metadata: the tables in the configured schema and the
+profile of one of them, which is the figures the model was given and never a row out of a
+table. The profiler's sample threshold is the boundary that keeps that true, and nothing
+here widens it.
+
 A request carries a spec and nothing else. The data source is server configuration, so a
 client cannot name a database. The artefact a client holds is the spec, which is the point
 of the whole design. A source's own error message is passed on even where it quotes the
@@ -113,6 +118,49 @@ def health() -> dict[str, str | bool]:
         "source": all(os.environ.get(name) for name in CONFIGURATION),
         "model": all(os.environ.get(name) for name in MODEL_CONFIGURATION),
     }
+
+
+@app.get("/api/tables")
+def tables(catalog: Annotated[Catalog, Depends(source)]):
+    """The qualified name of every table in the configured schema.
+
+    The names come out of the profiles rather than out of a second listing, so a name here
+    is one the endpoint below can answer for. The first request profiles the schema, which
+    is the wait the first question pays and then never pays again, since the two read the
+    same cache."""
+    try:
+        return {"tables": [profile.table for profile in profiles(catalog)]}
+    except RuntimeError as failure:
+        return refused("source", failure)
+
+
+@app.get("/api/tables/{name}")
+def table(name: str, catalog: Annotated[Catalog, Depends(source)]):
+    """One table's profile: the figures the prompt path was given for that table.
+
+    Read from the same profiles the model sees rather than profiled a second time here. A
+    second path could produce figures that disagree with the prompt's, and a panel whose
+    claim is that this is what the model saw is worse than no panel when it is wrong.
+
+    `as_dict` is the serialisation, because it already turns every figure into text, so a
+    date, a decimal and a string survive the same JSON round trip. A column above the
+    profiler's sample threshold carries no sample values, here as everywhere: this answers
+    with a profile and never with a row.
+
+    A name the schema does not hold is refused at 404 naming it, rather than raising. The
+    panel takes its names from the list above, so a miss means the schema changed under a
+    server that profiled it once and has no way to notice."""
+    try:
+        known = profiles(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    for profile in known:
+        if profile.table == name:
+            return profile.as_dict()
+    return JSONResponse(
+        status_code=404,
+        content={"errors": [f"no table named {name} in the configured schema"]},
+    )
 
 
 # Neither endpoint below declares a response model. One would re-serialise the rows on
