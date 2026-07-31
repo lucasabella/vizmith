@@ -1,8 +1,8 @@
 import json
 
-from conftest import DUCKDB, FixtureCatalog
+from conftest import DUCKDB, FixtureCatalog, needs_warehouse
 
-from vizmith.catalog import Dialect
+from vizmith.catalog import TIMESTAMP, Dialect
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
 
 # A source that offers no approximate count, so the exact branch is covered without a
@@ -109,3 +109,19 @@ def test_a_distinct_count_is_approximate_where_the_source_offers_the_function(fi
     assert column(approximate, "shipment_id").distinct_count_exact is False
     assert column(exact, "shipment_id").distinct_count_exact is True
     assert column(approximate, "shipment_id").distinct_count != column(exact, "shipment_id").distinct_count
+
+
+@needs_warehouse
+def test_a_profile_from_the_workspace_carries_a_timestamp_and_its_samples(live_catalog):
+    """The two ways the manifest describes a type both had to be read wrong for this to
+    pass before: a timestamp column raised, and a low cardinality column came back as the
+    characters of an array. DuckDB shows neither, so only this can say they are fixed."""
+    profile = profile_table(live_catalog, "shipment_scans")
+
+    scanned = column(profile, "scanned_at")
+    assert scanned.type == TIMESTAMP
+    assert scanned.minimum < scanned.maximum
+
+    status = column(profile, "status")
+    assert 1 < len(status.samples) <= SAMPLE_THRESHOLD
+    assert all(value.isalpha() or "_" in value for value in status.samples), status.samples

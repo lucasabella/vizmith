@@ -4,6 +4,7 @@ Nothing above this module knows that the source is Databricks. A caller gets
 qualified names, a closed set of types and nullability, and nothing else.
 """
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -137,7 +138,7 @@ class DatabricksCatalog:
         if response.manifest.truncated or response.manifest.total_chunk_count > 1:
             raise RuntimeError("statement returned more rows than one chunk holds")
 
-        types = [column.type_name.value for column in response.manifest.schema.columns]
+        types = [_type(column) for column in response.manifest.schema.columns]
         return [tuple(_value(v, t) for v, t in zip(row, types)) for row in response.result.data_array or []]
 
     def qualify(self, name: str) -> str:
@@ -174,11 +175,27 @@ def _parameter_type(value) -> str:
     return "STRING"
 
 
+def _type(column) -> str:
+    """The manifest names a column's type twice and not always in both places: for a
+    TIMESTAMP_NTZ the SDK's enum is absent while the text says what it is. The text is
+    the fallback rather than the primary, because it carries a decimal's precision and
+    scale and the enum does not."""
+    return column.type_name.value if column.type_name else column.type_text
+
+
 def _value(text: str | None, type_name: str):
     """Rows come back as text with the types in the manifest, so the source's own type is
-    what turns a total back into a number before it reaches a chart."""
+    what turns a total back into a number before it reaches a chart.
+
+    An array arrives as the JSON text of one. It is handled here rather than in `TYPES`
+    because that set says which column types can be charted, and an array still cannot be.
+    Only the profiler's sample query returns one, and it needs the values rather than a
+    string that happens to contain them: counting the characters of that string is how a
+    four value column ends up looking like a thirty character one."""
     if text is None:
         return None
+    if type_name == "ARRAY":
+        return json.loads(text)
     kind = TYPES.get(type_name, UNSUPPORTED)
     if kind == INTEGER:
         return int(text)
