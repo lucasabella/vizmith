@@ -1,0 +1,58 @@
+# The offline suite, run where a reviewer can see it. Everything here is what a person
+# already runs by hand; nothing is added to the tests to make them pass on a runner.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# No secret is used and none is granted. The warehouse tests skip by construction when
+# VIZMITH_DATABRICKS_PROFILE and VIZMITH_DATABRICKS_WAREHOUSE are absent, and a runner
+# has neither, so the offline half runs and the live half stays out. Adding credentials
+# here would buy the live half at the price of a workspace reachable from a public
+# repository's CI and a warehouse bill on every push.
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Both versions are named rather than left to the runner's default. The fixture
+      # reproducibility test compares committed Parquet against a fresh write, and that
+      # is tied to the DuckDB version that wrote it, per ROADMAP.md. An interpreter that
+      # floats underneath changes which duckdb wheel gets installed and fails that test
+      # for a reason that has nothing to do with the change under review.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install the package with its dev extra
+        run: pip install -e '.[dev]'
+
+      - name: ruff check .
+        run: ruff check .
+
+      - name: pytest
+        run: pytest
+
+      # ci rather than install, because the lockfile is committed and a review should see
+      # the dependency versions the author had.
+      - name: Install the frontend
+        working-directory: web
+        run: npm ci
+
+      - name: npm test
+        working-directory: web
+        run: npm test
+
+      - name: npm run build
+        working-directory: web
+        run: npm run build
