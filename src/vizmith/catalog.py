@@ -6,6 +6,7 @@ qualified names, a closed set of types and nullability, and nothing else.
 
 import json
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -35,6 +36,12 @@ TYPES = {
     "TIMESTAMP": TIMESTAMP,
     "TIMESTAMP_NTZ": TIMESTAMP,
 }
+
+
+# How long a statement is waited on before it is given up on and cancelled, in seconds. A
+# warehouse that has to start answers pending for minutes, so this is generous rather than
+# protective; what it rules out is a wait with no end. See ROADMAP.md for the trade.
+WAIT_LIMIT = 300
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,7 @@ class DatabricksCatalog:
         from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
         execution = self._workspace().statement_execution
+        started = time.monotonic()
         response = execution.execute_statement(
             statement=sql,
             warehouse_id=self._warehouse,
@@ -126,9 +134,16 @@ class DatabricksCatalog:
             ],
         )
         # A statement that outlives the wait comes back pending rather than finished, and a
-        # warehouse that has to start does that every time. Waiting is not the same thing
-        # as a timeout, which is its own issue, so nothing here gives up.
+        # warehouse that has to start does that every time, so the cap is minutes rather
+        # than seconds. Past it the statement is cancelled and this gives up, because a
+        # query whose caller has gone is billed for as long as it keeps running. The clock
+        # starts before the call rather than at the loop: the call blocks for wait_timeout
+        # first, and that is part of what the person waited.
         while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+            waited = time.monotonic() - started
+            if waited >= WAIT_LIMIT:
+                _cancel(execution, response.statement_id)
+                raise RuntimeError(f"statement not finished after {waited:.0f} seconds, cancelled")
             time.sleep(1)
             response = execution.get_statement(response.statement_id)
 
@@ -155,6 +170,17 @@ class DatabricksCatalog:
 
             self._client = WorkspaceClient(profile=self._profile)
         return self._client
+
+
+def _cancel(execution, statement_id: str) -> None:
+    """Stop a statement nobody is left to read the answer of.
+
+    Best effort, because the caller is already being told that the statement did not
+    finish and a source that will not take the cancellation cannot change that. Raising
+    here would replace a message about waiting with one about cancelling, which sends the
+    person to the wrong thing."""
+    with suppress(Exception):
+        execution.cancel_execution(statement_id)
 
 
 def _parameter(value) -> str | None:

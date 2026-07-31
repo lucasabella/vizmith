@@ -11,6 +11,7 @@ from test_spec_validation import EXPECTED_ERROR
 
 from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, app, constrains, model, source
 from vizmith.ask import ATTEMPTS, SCHEMA
+from vizmith.catalog import WAIT_LIMIT
 from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.query import build
 from vizmith.spec import output_columns
@@ -141,10 +142,12 @@ class UnreachableModel(ScriptedModel):
 
 
 # What DatabricksCatalog raises: a statement the warehouse did not finish, quoting the
-# source's own error, and a result too large for the one chunk a response carries.
+# source's own error, a result too large for the one chunk a response carries, and a
+# statement it waited out and cancelled.
 REFUSALS = (
     "statement StatementState.FAILED: [TABLE_OR_VIEW_NOT_FOUND] the table cannot be found",
     "statement returned more rows than one chunk holds",
+    f"statement not finished after {WAIT_LIMIT} seconds, cancelled",
 )
 
 
