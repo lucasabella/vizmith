@@ -10,10 +10,12 @@ export default function Chart({ spec, rows }: { spec: Spec; rows: Row[] }) {
     if (host.current === null || option === null) return;
     const chart = echarts.init(host.current);
     chart.setOption(option);
-    const resize = () => chart.resize();
-    window.addEventListener("resize", resize);
+    // The window is not what changes size. Collapsing a panel widens the canvas without
+    // the window moving, and that is the gesture that exists to make room for a chart.
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(host.current);
     return () => {
-      window.removeEventListener("resize", resize);
+      observer.disconnect();
       chart.dispose();
     };
   }, [option]);

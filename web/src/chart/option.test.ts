@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import Chart from "./Chart";
-import { buildOption, NO_VALUE, type Channel, type Row, type Spec } from "./option";
+import { buildOption, markText, NO_VALUE, type Channel, type Mark, type Row, type Spec } from "./option";
 
 const FIXTURES = fileURLToPath(new URL("../../../tests/fixtures/specs/valid", import.meta.url));
 
@@ -37,7 +37,22 @@ const rowsFor = (spec: Spec, count = 4): Row[] => {
 const seriesOf = (option: ReturnType<typeof buildOption>) =>
   (option?.series ?? []) as Record<string, unknown>[];
 
+/** What ECharts would show on hover, taken from the option rather than from the formatter
+ * on its own, so a formatter that is never wired in fails here. */
+const hover = (option: ReturnType<typeof buildOption>, mark: Mark) =>
+  (option?.tooltip as { formatter: (mark: Mark) => string }).formatter(mark);
+
+const axisOf = (option: ReturnType<typeof buildOption>, which: "xAxis" | "yAxis") =>
+  option?.[which] as {
+    data?: string[];
+    axisLabel: Record<string, unknown>;
+    splitLine: { lineStyle: { color: string } };
+    nameTextStyle: { color: string };
+  };
+
 const spec = (chart: Spec["chart"], title = "Test"): Spec => ({ title, chart });
+
+const named = (channel: Channel): string => channel.title ?? channel.field;
 
 const nominal = (field: string): Channel => ({ field, type: "nominal" });
 const quantitative = (field: string): Channel => ({ field, type: "quantitative" });
@@ -58,6 +73,32 @@ describe("valid fixtures", () => {
 
       expect(series.length).toBeGreaterThan(0);
       expect(series[0].type).toBe(SERIES_TYPE[fixture.chart.mark]);
+    });
+
+    it(`${name} labels every category and reads back on hover`, () => {
+      const rows = rowsFor(fixture, 9);
+      const option = buildOption(fixture, rows);
+      const { x, y } = fixture.chart.encoding;
+      const categories = option !== null && "xAxis" in option ? axisOf(option, "xAxis").data : undefined;
+
+      if (categories !== undefined) {
+        const axis = axisOf(option, "xAxis");
+        expect(categories).toEqual(rows.map((row) => String(row[x.field])));
+        expect(axis.axisLabel).toMatchObject({ interval: 0, hideOverlap: false, overflow: "truncate" });
+        expect(axis.axisLabel.rotate).toBeGreaterThan(0);
+      }
+
+      // A category axis names the category, so a mark carries the measure alone. Every
+      // other axis carries the pair.
+      const first = rows[0];
+      const measured = categories !== undefined || !(option !== null && "xAxis" in option);
+      const text = hover(option, {
+        name: String(first[x.field]),
+        value: measured ? first[y.field] : [first[x.field], first[y.field]],
+      });
+
+      expect(text).toContain(`${named(x)}: ${first[x.field]}`);
+      expect(text).toContain(`${named(y)}: ${first[y.field]}`);
     });
   }
 
@@ -133,6 +174,158 @@ describe("colour channel", () => {
   });
 });
 
+describe("tooltip", () => {
+  const bars = (rows: Row[], color?: Channel) =>
+    buildOption(
+      spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue"), color } }),
+      rows,
+    );
+
+  it("names the category and the exact value, and nothing else", () => {
+    const option = bars([{ country: "Country one", revenue: 20481 }]);
+
+    expect(hover(option, { name: "Country one", value: 20481 })).toBe(
+      "country: Country one\nrevenue: 20481",
+    );
+  });
+
+  it("names the series when a colour channel made one", () => {
+    const option = bars([{ country: "A", category: "one", revenue: 1 }], nominal("category"));
+
+    expect(hover(option, { name: "A", seriesName: "one", value: 1 })).toBe(
+      "country: A\ncategory: one\nrevenue: 1",
+    );
+  });
+
+  it("names a null series the way the legend and the axis do", () => {
+    const option = bars([{ country: "A", category: null, revenue: 1 }], nominal("category"));
+
+    expect(hover(option, { name: "A", seriesName: NO_VALUE, value: 1 })).toContain(
+      `category: ${NO_VALUE}`,
+    );
+  });
+
+  it("reads a pair off an axis that carries one", () => {
+    const option = buildOption(
+      spec({
+        mark: "line",
+        encoding: { x: { field: "month", type: "temporal" }, y: quantitative("order_count") },
+      }),
+      [{ month: "2026-01-01", order_count: 5 }],
+    );
+
+    expect(hover(option, { name: "", value: ["2026-01-01", 5] })).toBe(
+      "month: 2026-01-01\norder_count: 5",
+    );
+  });
+
+  it("reaches an arc too", () => {
+    const option = buildOption(
+      spec({ mark: "arc", encoding: { x: nominal("reason"), y: quantitative("returns_count") } }),
+      [{ reason: "damaged", returns_count: 7 }],
+    );
+
+    expect(hover(option, { name: "damaged", value: 7 })).toBe("reason: damaged\nreturns_count: 7");
+  });
+
+  it("is drawn as text on the canvas, so a row value is never markup", () => {
+    const option = bars([{ country: "<img src=x>", revenue: 1 }]);
+
+    expect(option?.tooltip).toMatchObject({ trigger: "item", renderMode: "richText" });
+    expect(hover(option, { name: "<img src=x>", value: 1 })).toBe("country: <img src=x>\nrevenue: 1");
+  });
+
+  it("wears the application surface and no series colour", () => {
+    const option = bars([{ country: "A", revenue: 1 }]);
+
+    expect(option?.tooltip).toMatchObject({
+      backgroundColor: "#ffffff",
+      borderColor: "#cfd7df",
+      textStyle: { color: "#14202b" },
+    });
+  });
+
+  it("says the same thing whether it is called through the option or directly", () => {
+    const chart = spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } });
+    const mark: Mark = { name: "A", value: 1 };
+
+    expect(hover(buildOption(chart, [{ country: "A", revenue: 1 }]), mark)).toBe(markText(chart, mark));
+  });
+});
+
+describe("chrome", () => {
+  const option = buildOption(
+    spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } }),
+    [{ country: "A", revenue: 1 }],
+  );
+
+  it.each(["xAxis", "yAxis"] as const)("dresses %s in the tokens", (which) => {
+    const axis = axisOf(option, which);
+
+    expect(axis.axisLabel).toMatchObject({ color: "#5c6b7a", fontSize: 11 });
+    expect(axis.axisLabel.fontFamily).toContain("ui-monospace");
+    expect(axis.nameTextStyle.color).toBe("#8c99a6");
+    expect(axis.splitLine.lineStyle.color).toBe("#e1e6ec");
+  });
+
+  const countries = (names: string[]) =>
+    axisOf(
+      buildOption(
+        spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } }),
+        names.map((country) => ({ country, revenue: 1 })),
+      ),
+      "xAxis",
+    ).axisLabel;
+
+  it("keeps a category label upright while there is room for it", () => {
+    expect(countries(["A", "B", "C"])).toMatchObject({ interval: 0, rotate: 0 });
+  });
+
+  it("leans a few long labels over, not only many short ones", () => {
+    expect(countries(["Country one", "A distribution centre in Rotterdam"]).rotate).toBeGreaterThan(0);
+  });
+});
+
+describe("mark geometry", () => {
+  const barsWith = (stack?: boolean) =>
+    seriesOf(
+      buildOption(
+        spec({
+          mark: "bar",
+          stack,
+          encoding: { x: nominal("country"), y: quantitative("revenue"), color: nominal("category") },
+        }),
+        [{ country: "A", category: "one", revenue: 1 }],
+      ),
+    );
+
+  it("caps a bar and rounds its data end", () => {
+    expect(barsWith()[0]).toMatchObject({
+      barMaxWidth: 24,
+      itemStyle: { borderRadius: [4, 4, 0, 0] },
+    });
+  });
+
+  it("leaves a stacked segment square", () => {
+    expect(barsWith(true)[0].itemStyle).toBeUndefined();
+  });
+
+  it("draws a line at two pixels with a ringed marker", () => {
+    const series = seriesOf(
+      buildOption(
+        spec({ mark: "line", encoding: { x: nominal("month"), y: quantitative("orders") } }),
+        [{ month: "January", orders: 1 }],
+      ),
+    );
+
+    expect(series[0]).toMatchObject({
+      lineStyle: { width: 2 },
+      symbolSize: 8,
+      itemStyle: { borderColor: "#ffffff", borderWidth: 2 },
+    });
+  });
+});
+
 it("labels a null on a category axis", () => {
   const option = buildOption(
     spec({ mark: "bar", encoding: { x: nominal("carrier"), y: quantitative("shipment_count") } }),
@@ -195,7 +388,7 @@ it("titles an axis by its channel title, falling back to the field", () => {
 
   expect(option?.xAxis).toMatchObject({ name: "Country" });
   expect(option?.yAxis).toMatchObject({ name: "revenue" });
-  expect(option?.title).toEqual({ text: "Test" });
+  expect(option?.title).toMatchObject({ text: "Test" });
 });
 
 it("returns null for an empty result set", () => {
@@ -214,8 +407,17 @@ it("does not depend on the order of the keys in a row", () => {
   const reverse = (rows: Row[]) =>
     rows.map((row) => Object.fromEntries(Object.entries(row).reverse()) as Row);
 
+  /** The formatter closes over the spec, so two builds give two functions that behave the
+   * same and compare unequal. Its output stands in for it. */
+  const comparable = (option: ReturnType<typeof buildOption>) => ({
+    ...option,
+    tooltip: hover(option, { name: "one", value: 1 }),
+  });
+
   for (const [name, fixture] of fixtures) {
     const rows = rowsFor(fixture);
-    expect(buildOption(fixture, reverse(rows)), name).toEqual(buildOption(fixture, rows));
+    expect(comparable(buildOption(fixture, reverse(rows))), name).toEqual(
+      comparable(buildOption(fixture, rows)),
+    );
   }
 });
