@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from vizmith import __version__, query
-from vizmith.ask import ask
+from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import Catalog, DatabricksCatalog
 from vizmith.model import Endpoint, Model
 from vizmith.profiler import profile_table
@@ -59,11 +59,13 @@ def model() -> Model:
 
 @lru_cache(maxsize=1)
 def constrains(writer: Model) -> bool:
-    """Whether this endpoint honours a JSON Schema, asked once and kept for the life of
-    the process. The probe is a billed request, so asking per question would pay for the
-    same answer every time. A probe that never got an answer raises rather than reporting
-    no, and nothing is remembered, so the next question asks again."""
-    return writer.constrains_output()
+    """Whether this endpoint honours the schema a question will be asked with, asked once
+    and kept for the life of the process. The probe carries that schema rather than a
+    simpler one, because an endpoint can take a simple schema and refuse this one. The
+    probe is a billed request, so asking per question would pay for the same answer every
+    time. A probe that never got an answer raises rather than reporting no, and nothing is
+    remembered, so the next question asks again."""
+    return writer.constrains_output(SCHEMA)
 
 
 @lru_cache(maxsize=1)

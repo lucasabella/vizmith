@@ -14,6 +14,9 @@ ANSWER = {
     "usage": {"prompt_tokens": 3, "completion_tokens": 1},
 }
 
+# Any schema does here. The adapter never reads one, it forwards the caller's.
+SIMPLE = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
+
 
 def model(handler) -> Model:
     """The adapter over a transport that answers without a network."""
@@ -111,13 +114,13 @@ def test_an_answer_without_a_completion_is_a_model_error():
 def test_a_refused_schema_reports_an_endpoint_that_cannot_constrain_output():
     """Ollama's OpenAI-compatible route takes no json_schema response format. Asking is
     the only way to find that out, so a refusal is the answer rather than a failure."""
-    assert model(answering({"error": "unknown parameter"}, status=400)).constrains_output() is False
+    assert model(answering({"error": "unknown parameter"}, status=400)).constrains_output(SIMPLE) is False
 
 
 def test_an_endpoint_that_answers_in_the_schema_reports_that_it_can():
     honoured = {"choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}]}
 
-    assert model(answering(honoured)).constrains_output() is True
+    assert model(answering(honoured)).constrains_output(SIMPLE) is True
 
 
 def test_an_endpoint_that_ignores_the_schema_is_not_taken_at_its_status():
@@ -125,17 +128,17 @@ def test_an_endpoint_that_ignores_the_schema_is_not_taken_at_its_status():
     answer is what says whether the schema was honoured, and prose says it was not."""
     ignored = {"choices": [{"message": {"content": "Sure, ok is true!"}, "finish_reason": "stop"}]}
 
-    assert model(answering(ignored)).constrains_output() is False
+    assert model(answering(ignored)).constrains_output(SIMPLE) is False
 
 
 def test_a_probe_that_never_got_an_answer_raises_rather_than_reporting_no():
     """A timeout says nothing about the endpoint's capabilities, and answering False would
     send the caller down the unconstrained path for the wrong reason."""
     with pytest.raises(ModelError):
-        model(raising(httpx.ConnectError("refused"))).constrains_output()
+        model(raising(httpx.ConnectError("refused"))).constrains_output(SIMPLE)
 
     with pytest.raises(ModelError):
-        model(answering({"error": "overloaded"}, status=503)).constrains_output()
+        model(answering({"error": "overloaded"}, status=503)).constrains_output(SIMPLE)
 
 
 def test_nothing_reaches_a_service_without_configuration():
@@ -149,7 +152,20 @@ def test_the_probe_asks_about_the_schema_and_nothing_else():
     here exactly like "this endpoint cannot constrain output". Current OpenAI models
     refuse `max_tokens` by name, and that is how a working endpoint reported False."""
     sent = []
-    model(answering({"choices": [{"message": {"content": '{"ok": true}'}}]}, capture=sent)).constrains_output()
+    answered = answering({"choices": [{"message": {"content": '{"ok": true}'}}]}, capture=sent)
+    model(answered).constrains_output(SIMPLE)
 
     body = json.loads(sent[0].content)
     assert set(body) == {"model", "messages", "response_format"}
+
+
+def test_the_probe_carries_the_schema_it_was_given():
+    """An endpoint takes a schema or refuses one, and OpenAI does both depending on which
+    schema it is. A probe with a simpler schema than the caller's answers about a request
+    that will never be sent."""
+    sent = []
+    answered = answering({"choices": [{"message": {"content": "{}"}}]}, capture=sent)
+    model(answered).constrains_output(SIMPLE)
+
+    body = json.loads(sent[0].content)
+    assert body["response_format"]["json_schema"]["schema"] == SIMPLE

@@ -7,7 +7,11 @@ to the caller.
 Schema constrained output is reported rather than assumed. An OpenAI-compatible base URL
 says nothing about it: OpenAI, vLLM and LM Studio take a `json_schema` response format and
 Ollama's OpenAI-compatible route does not, so an endpoint has to be asked rather than
-trusted. `constrains_output` asks, and costs one small completion to do it.
+trusted. `constrains_output` asks, with the schema the caller is about to send, and costs
+one completion to do it. It asks with that schema rather than one of its own because
+"takes a JSON Schema" is not a capability an endpoint has: OpenAI's structured output is a
+subset of the language, and a schema outside the subset is refused by an endpoint that
+accepts a simpler one. A probe with a schema nobody sends answers a question nobody asked.
 
 The key is configuration and stays out of everything a person or a log can read. It is
 sent in a header and never written into a message, and any text an endpoint hands back is
@@ -20,15 +24,9 @@ from dataclasses import dataclass
 
 import httpx
 
-# The smallest question with a schema attached, used to find out whether the endpoint can
-# constrain output at all. Deliberately trivial: what comes back does not matter, only
-# whether asking for it was accepted.
-PROBE = {
-    "type": "object",
-    "properties": {"ok": {"type": "boolean"}},
-    "required": ["ok"],
-    "additionalProperties": False,
-}
+# The probe's question. Short, because what is being tested is the schema attached to it
+# and not the model's reading.
+PROBE_PROMPT = "Answer with the smallest object the schema allows."
 
 
 @dataclass(frozen=True)
@@ -78,22 +76,22 @@ class Model:
             }
         return self._parse(self._post(body))
 
-    def constrains_output(self) -> bool:
-        """Whether this endpoint honours a JSON Schema. What comes back decides it, not the
+    def constrains_output(self, schema: dict) -> bool:
+        """Whether this endpoint honours this schema. What comes back decides it, not the
         status: a server that drops a response format it does not know answers 200 with
         ordinary prose, and calling that a yes is the expensive mistake, since a caller
         who believes it stops checking. A rejected request is an answer, so it returns
         False. A timeout or an unreachable host is not, so it raises."""
         body = {
             "model": self._endpoint.model,
-            "messages": [{"role": "user", "content": "Answer with ok true."}],
+            "messages": [{"role": "user", "content": PROBE_PROMPT}],
             # The schema and nothing else. A token cap would make this cheaper and is not
             # worth it: current OpenAI models refuse `max_tokens` and name a different
             # parameter, and that refusal is a 400 that reads exactly like "no schema
-            # support" from here. The schema already bounds the answer to one boolean.
+            # support" from here.
             "response_format": {
                 "type": "json_schema",
-                "json_schema": {"name": "probe", "schema": PROBE, "strict": True},
+                "json_schema": {"name": "probe", "schema": schema, "strict": True},
             },
         }
         try:
@@ -107,11 +105,13 @@ class Model:
                 return False
             raise
 
+        # An object is the evidence. The schema is the caller's, so there is no key of our
+        # own to look for, and an endpoint that dropped the response format answers the
+        # question in prose rather than in JSON.
         try:
-            answer = json.loads(completion.text)
+            return isinstance(json.loads(completion.text), dict)
         except json.JSONDecodeError:
             return False
-        return isinstance(answer, dict) and "ok" in answer
 
     def _post(self, body: dict) -> dict:
         url = self._endpoint.base_url.rstrip("/") + "/chat/completions"

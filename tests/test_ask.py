@@ -28,7 +28,7 @@ class ScriptedModel:
         text = self.answers.pop(0) if self.answers else "{}"
         return Completion(text=text, model="scripted", finish_reason="stop", usage={})
 
-    def constrains_output(self) -> bool:
+    def constrains_output(self, schema: dict) -> bool:
         """There is no endpoint here to honour a schema. Callers that probe before they
         ask, which the API does, get the answer that costs them nothing."""
         return False

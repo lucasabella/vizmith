@@ -30,23 +30,24 @@ Nothing generated is executed as code.
 
 Vizmith targets the OpenAI-compatible `base_url` convention, so one adapter covers hosted providers, Azure OpenAI, Ollama, vLLM and LM Studio. You supply the key and the endpoint. Vizmith ships with no model access of its own.
 
-A compatible base URL does not mean a compatible feature set. Vizmith asks the model for a chart spec constrained to a JSON Schema, and support for that differs. Checked against each vendor's documentation in July 2026, not against a running instance except where stated:
+A compatible base URL does not mean a compatible feature set. Vizmith asks the model for a chart spec constrained to a JSON Schema, and support for that differs. It is also not one capability: an endpoint accepts a schema or refuses it, and OpenAI does both depending on which schema it is, because its structured output covers a subset of JSON Schema. Vizmith's spec schema is outside that subset, so it is refused there and the question is asked in prose with the schema in the prompt instead. Checked against each vendor's documentation in July 2026, not against a running instance except where stated:
 
 | Endpoint | JSON Schema response format | Notes |
 |---|---|---|
-| OpenAI | Yes | `response_format` with `strict: true`. Confirmed against a live endpoint, `gpt-5.6-luna`, on 31 July 2026. |
-| Azure OpenAI | Yes | Only through the `/openai/v1/` base URL, which takes a plain bearer key. `model` is the deployment name, not the model name. |
+| OpenAI | Not for this schema | `response_format` with `strict: true` is accepted, and covers a subset of JSON Schema that Vizmith's spec schema sits outside of: a live endpoint, `gpt-5.6-luna`, answered `400 'if' is not permitted` on 31 July 2026. Questions there are asked in prose. |
+| Azure OpenAI | Not for this schema | Only through the `/openai/v1/` base URL, which takes a plain bearer key. `model` is the deployment name, not the model name. Same structured output implementation as OpenAI, so the same subset applies. Not measured. |
 | vLLM | Yes | 0.8.5 and later. The older `guided_json` parameter is deprecated in favour of `response_format`. |
 | LM Studio | Yes | `json_schema` only, no `json_object` mode. |
 | Ollama | No | Its OpenAI-compatible route takes a `format` parameter instead, so the schema is refused here. |
 
-None of these were verified against a live endpoint in this repository, because the test suite makes no model calls. The adapter therefore asks rather than assumes: `Model.constrains_output()` sends one small request and reports what the endpoint did with it. The server asks it once, on the first question, so nothing here is configuration and an endpoint that changes needs a restart to be noticed. Smoke check a real endpoint before trusting the table:
+None of these were verified against a live endpoint in this repository, because the test suite makes no model calls. The adapter therefore asks rather than assumes: `Model.constrains_output(schema)` sends one request carrying the schema the caller is about to use and reports what the endpoint did with it. It takes the schema rather than owning one, because an answer about a simpler schema than the one being sent is an answer to a different question. The server asks it once, on the first question, so nothing here is configuration and an endpoint that changes needs a restart to be noticed. Smoke check a real endpoint before trusting the table:
 
 ```
 .venv/bin/python -c "
 from vizmith.model import Endpoint, Model
+from vizmith.ask import SCHEMA
 m = Model(Endpoint(base_url='https://api.example.com/v1', model='a-model', api_key='YOUR-KEY'))
-print('schema constrained:', m.constrains_output())
+print('schema constrained:', m.constrains_output(SCHEMA))
 print(m.complete('Answer with the word ready.').text)
 "
 ```

@@ -11,7 +11,7 @@ from test_spec_validation import EXPECTED_ERROR
 
 from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, app, constrains, model, source
 from vizmith.ask import ATTEMPTS, SCHEMA
-from vizmith.model import PROBE, Model, ModelError
+from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.query import build
 from vizmith.spec import output_columns
 
@@ -115,10 +115,11 @@ def _completion(content: str) -> dict:
 
 
 def _is_probe(request: httpx.Request) -> bool:
-    """The probe is whichever request carries the probe's own schema, so what answers one
-    depends on the request rather than on where it fell in the sequence."""
+    """The probe is whichever request carries the probe's prompt, so what answers one
+    depends on the request rather than on where it fell in the sequence. Its schema no
+    longer tells it apart from a question, which is the whole point of the probe."""
     body = json.loads(request.content)
-    return body.get("response_format", {}).get("json_schema", {}).get("schema") == PROBE
+    return body["messages"][0]["content"] == PROBE_PROMPT
 
 
 def test_a_question_comes_back_as_the_spec_it_wrote_and_the_rows_it_returned(asking):
@@ -162,13 +163,15 @@ def test_an_endpoint_that_honours_a_schema_is_sent_the_spec_schema(posting):
     client.post("/api/ask", json={"question": "revenue by country"})
 
     probe, question = (json.loads(request.content) for request in sent)
-    assert probe["response_format"]["json_schema"]["schema"] == PROBE
+    assert probe["response_format"]["json_schema"]["schema"] == SCHEMA
     assert question["response_format"]["json_schema"]["schema"] == SCHEMA
 
 
 def test_an_endpoint_that_refuses_a_schema_is_asked_without_one_and_still_retries(posting):
-    """Ollama's route answers the probe with a refusal. The retry loop is the fallback
-    there, so it has to still run rather than the question failing with the probe."""
+    """Ollama's route answers the probe with a refusal, and so does OpenAI, whose
+    structured output is a subset of JSON Schema that this one sits outside of. The retry
+    loop is the fallback in both cases, so it has to still run rather than the question
+    failing with the probe."""
     refused = json.dumps(load(FIXTURES / "invalid" / "missing_limit.json"))
     client, sent = posting(*[refused] * ATTEMPTS, probe=(400,))
 
@@ -189,7 +192,7 @@ def test_the_endpoint_is_probed_once_however_many_questions_follow(posting):
     client.post("/api/ask", json={"question": "revenue by country"})
 
     schemas = [json.loads(request.content)["response_format"]["json_schema"]["schema"] for request in sent]
-    assert schemas == [PROBE, SCHEMA, SCHEMA]
+    assert schemas == [SCHEMA, SCHEMA, SCHEMA]
 
 
 def test_a_probe_that_never_got_an_answer_is_not_remembered_as_a_no(posting):
