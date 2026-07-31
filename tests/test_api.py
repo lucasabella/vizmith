@@ -1,13 +1,17 @@
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 from conftest import needs_warehouse
 from fastapi.testclient import TestClient
 from test_ask import ScriptedModel
+from test_model import ENDPOINT
 from test_spec_validation import EXPECTED_ERROR
 
-from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, app, model, source
+from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, app, constrains, model, source
+from vizmith.ask import ATTEMPTS, SCHEMA
+from vizmith.model import PROBE, Model, ModelError
 from vizmith.query import build
 from vizmith.spec import output_columns
 
@@ -73,6 +77,48 @@ def asking(catalog):
 
     yield client
     app.dependency_overrides.clear()
+    constrains.cache_clear()
+
+
+@pytest.fixture
+def posting(catalog):
+    """The API over the real adapter and a transport that answers without a network, so a
+    test reads the request that reached the endpoint rather than the call that reached the
+    adapter. `probe` is the status each probe is answered with, the last one repeating."""
+    sent: list[httpx.Request] = []
+
+    def client(*answers: str, probe: tuple[int, ...] = (200,)):
+        replies = list(answers)
+        statuses = list(probe)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            if _is_probe(request):
+                status = statuses.pop(0) if len(statuses) > 1 else statuses[0]
+                if status == 200:
+                    return httpx.Response(200, json=_completion('{"ok": true}'))
+                return httpx.Response(status, json={"error": "not answering that"})
+            return httpx.Response(200, json=_completion(replies.pop(0) if replies else "{}"))
+
+        writer = Model(ENDPOINT, httpx.Client(transport=httpx.MockTransport(handler)))
+        app.dependency_overrides[source] = lambda: catalog
+        app.dependency_overrides[model] = lambda: writer
+        return TestClient(app), sent
+
+    yield client
+    app.dependency_overrides.clear()
+    constrains.cache_clear()
+
+
+def _completion(content: str) -> dict:
+    return {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
+
+
+def _is_probe(request: httpx.Request) -> bool:
+    """The probe is whichever request carries the probe's own schema, so what answers one
+    depends on the request rather than on where it fell in the sequence."""
+    body = json.loads(request.content)
+    return body.get("response_format", {}).get("json_schema", {}).get("schema") == PROBE
 
 
 def test_a_question_comes_back_as_the_spec_it_wrote_and_the_rows_it_returned(asking):
@@ -106,6 +152,58 @@ def test_no_answer_carries_the_model_key(asking, monkeypatch):
     assert failed.status_code == 400
     assert "the-key-that-stays-here" not in answered.text
     assert "the-key-that-stays-here" not in failed.text
+
+
+def test_an_endpoint_that_honours_a_schema_is_sent_the_spec_schema(posting):
+    """The probe says the endpoint can be constrained, so the question that follows it
+    carries the schema instead of describing it and hoping."""
+    client, sent = posting(json.dumps(load(REVENUE_BY_COUNTRY)))
+
+    client.post("/api/ask", json={"question": "revenue by country"})
+
+    probe, question = (json.loads(request.content) for request in sent)
+    assert probe["response_format"]["json_schema"]["schema"] == PROBE
+    assert question["response_format"]["json_schema"]["schema"] == SCHEMA
+
+
+def test_an_endpoint_that_refuses_a_schema_is_asked_without_one_and_still_retries(posting):
+    """Ollama's route answers the probe with a refusal. The retry loop is the fallback
+    there, so it has to still run rather than the question failing with the probe."""
+    refused = json.dumps(load(FIXTURES / "invalid" / "missing_limit.json"))
+    client, sent = posting(*[refused] * ATTEMPTS, probe=(400,))
+
+    response = client.post("/api/ask", json={"question": "anything"})
+
+    assert response.status_code == 400
+    assert len(sent) == 1 + ATTEMPTS
+    assert all("response_format" not in json.loads(request.content) for request in sent[1:])
+
+
+def test_the_endpoint_is_probed_once_however_many_questions_follow(posting):
+    """The probe is a billed request. Paying for the same answer per question is what the
+    cache exists to prevent."""
+    spec = json.dumps(load(REVENUE_BY_COUNTRY))
+    client, sent = posting(spec, spec)
+
+    client.post("/api/ask", json={"question": "revenue by country"})
+    client.post("/api/ask", json={"question": "revenue by country"})
+
+    schemas = [json.loads(request.content)["response_format"]["json_schema"]["schema"] for request in sent]
+    assert schemas == [PROBE, SCHEMA, SCHEMA]
+
+
+def test_a_probe_that_never_got_an_answer_is_not_remembered_as_a_no(posting):
+    """A 503 says nothing about the endpoint. Remembering it would send every question for
+    the rest of the process down the unconstrained path for a reason that has nothing to
+    do with what the endpoint can do."""
+    client, sent = posting(json.dumps(load(REVENUE_BY_COUNTRY)), probe=(503, 200))
+
+    with pytest.raises(ModelError):
+        client.post("/api/ask", json={"question": "revenue by country"})
+    answered = client.post("/api/ask", json={"question": "revenue by country"})
+
+    assert answered.status_code == 200
+    assert [_is_probe(request) for request in sent] == [True, True, False]
 
 
 @pytest.mark.parametrize("path", VALID, ids=lambda p: p.name)
