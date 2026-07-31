@@ -65,7 +65,7 @@ python -m venv .venv
 .venv/bin/vizmith serve
 ```
 
-That starts the API on port 8000 and opens a browser. Running a spec needs a source, which is server configuration rather than something a request carries. Copy `.env.example` to `.env` and fill in the four values; `vizmith serve` reads it, and a real environment variable wins over it.
+That starts the API on port 8000 and opens a browser. Running a spec needs a source, which is server configuration rather than something a request carries. Copy `.env.example` to `.env` and fill it in; `vizmith serve` reads it, and a real environment variable wins over it. The four `VIZMITH_DATABRICKS_` values are the source. The three `VIZMITH_MODEL_` values are the endpoint that writes a spec, and without them the question field stays disabled while a spec pasted by hand still runs.
 
 For frontend work, run Vite alongside it:
 

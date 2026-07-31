@@ -4,9 +4,10 @@ from pathlib import Path
 import pytest
 from conftest import needs_warehouse
 from fastapi.testclient import TestClient
+from test_ask import ScriptedModel
 from test_spec_validation import EXPECTED_ERROR
 
-from vizmith.api import CONFIGURATION, app, source
+from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, app, model, source
 from vizmith.query import build
 from vizmith.spec import output_columns
 
@@ -46,6 +47,65 @@ def test_health_reports_a_source_once_it_is_configured(monkeypatch):
         monkeypatch.setenv(name, "configured")
 
     assert TestClient(app).get("/api/health").json()["source"] is True
+
+
+def test_health_reports_whether_a_model_is_configured(monkeypatch):
+    for name in MODEL_CONFIGURATION:
+        monkeypatch.delenv(name, raising=False)
+    assert TestClient(app).get("/api/health").json()["model"] is False
+
+    for name in MODEL_CONFIGURATION:
+        monkeypatch.setenv(name, "configured")
+    assert TestClient(app).get("/api/health").json()["model"] is True
+
+
+@pytest.fixture
+def asking(catalog):
+    """The API with a scripted model behind it, so a question is answered without a call."""
+
+    def client(*answers):
+        # One model across requests, so a second question meets a model that has already
+        # said what it had to say rather than a fresh one repeating itself.
+        scripted = ScriptedModel(*answers)
+        app.dependency_overrides[source] = lambda: catalog
+        app.dependency_overrides[model] = lambda: scripted
+        return TestClient(app)
+
+    yield client
+    app.dependency_overrides.clear()
+
+
+def test_a_question_comes_back_as_the_spec_it_wrote_and_the_rows_it_returned(asking):
+    spec = load(REVENUE_BY_COUNTRY)
+
+    body = asking(json.dumps(spec)).post("/api/ask", json={"question": "revenue by country"}).json()
+
+    assert body["spec"] == spec
+    assert [list(row) for row in body["rows"]] == [output_columns(spec["query"])] * len(body["rows"])
+
+
+def test_a_model_that_never_writes_a_valid_spec_answers_with_the_validator(asking):
+    """The server did its job. The model did not, and the difference has to be readable."""
+    refused = json.dumps(load(FIXTURES / "invalid" / "missing_limit.json"))
+
+    response = asking(refused, refused, refused).post("/api/ask", json={"question": "anything"})
+
+    assert response.status_code == 400
+    assert any("'limit' is a required property" in error for error in response.json()["errors"])
+
+
+def test_no_answer_carries_the_model_key(asking, monkeypatch):
+    """The key is server configuration. A question is not a way to read one back."""
+    monkeypatch.setenv("VIZMITH_MODEL_KEY", "the-key-that-stays-here")
+
+    client = asking(json.dumps(load(REVENUE_BY_COUNTRY)))
+    answered = client.post("/api/ask", json={"question": "revenue by country"})
+    # The scripted model has nothing left to say, so this one fails on its own.
+    failed = client.post("/api/ask", json={"question": "anything"})
+
+    assert failed.status_code == 400
+    assert "the-key-that-stays-here" not in answered.text
+    assert "the-key-that-stays-here" not in failed.text
 
 
 @pytest.mark.parametrize("path", VALID, ids=lambda p: p.name)
