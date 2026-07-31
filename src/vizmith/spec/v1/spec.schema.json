@@ -206,7 +206,7 @@
 
     "encoding": {
       "type": "object",
-      "required": ["x", "y"],
+      "required": ["y"],
       "additionalProperties": false,
       "properties": {
         "x": { "$ref": "#/$defs/channel" },

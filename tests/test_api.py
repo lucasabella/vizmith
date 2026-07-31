@@ -110,6 +110,71 @@ def posting(catalog):
     constrains.cache_clear()
 
 
+class RefusingCatalog:
+    """A source that answers every statement with a failure. It is the fixture catalog for
+    everything else, so a spec still compiles against real names and the failure is the
+    only thing being tested. No warehouse is reached."""
+
+    def __init__(self, catalog, message: str):
+        self.dialect = catalog.dialect
+        self._catalog = catalog
+        self._message = message
+
+    def tables(self):
+        return self._catalog.tables()
+
+    def describe(self, name):
+        return self._catalog.describe(name)
+
+    def run(self, sql, parameters=None):
+        raise RuntimeError(self._message)
+
+
+class UnreachableModel(ScriptedModel):
+    """An endpoint that cannot be reached: a wrong base URL, a refused connection or a
+    timeout, which the adapter reports as one type. The prompt is kept before the failure,
+    so a test can count what an endpoint that answers nothing was asked."""
+
+    def complete(self, prompt: str, schema: dict | None = None):
+        self.prompts.append(prompt)
+        raise ModelError("connection refused")
+
+
+# What DatabricksCatalog raises: a statement the warehouse did not finish, quoting the
+# source's own error, and a result too large for the one chunk a response carries.
+REFUSALS = (
+    "statement StatementState.FAILED: [TABLE_OR_VIEW_NOT_FOUND] the table cannot be found",
+    "statement returned more rows than one chunk holds",
+)
+
+
+@pytest.fixture
+def refusing(catalog):
+    """The API over a source that refuses every statement, and a model that answers without
+    a call, so a source failure is the only thing that can happen."""
+
+    def client(message: str):
+        app.dependency_overrides[source] = lambda: RefusingCatalog(catalog, message)
+        app.dependency_overrides[model] = lambda: ScriptedModel()
+        return TestClient(app)
+
+    yield client
+    app.dependency_overrides.clear()
+    constrains.cache_clear()
+
+
+@pytest.fixture
+def unreachable(catalog):
+    """The API and the model behind it, so a test reads how often an endpoint that answers
+    nothing was asked."""
+    writer = UnreachableModel()
+    app.dependency_overrides[source] = lambda: catalog
+    app.dependency_overrides[model] = lambda: writer
+    yield TestClient(app), writer
+    app.dependency_overrides.clear()
+    constrains.cache_clear()
+
+
 def _completion(content: str) -> dict:
     return {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
 
@@ -201,10 +266,11 @@ def test_a_probe_that_never_got_an_answer_is_not_remembered_as_a_no(posting):
     do with what the endpoint can do."""
     client, sent = posting(json.dumps(load(REVENUE_BY_COUNTRY)), probe=(503, 200))
 
-    with pytest.raises(ModelError):
-        client.post("/api/ask", json={"question": "revenue by country"})
+    failed = client.post("/api/ask", json={"question": "revenue by country"})
     answered = client.post("/api/ask", json={"question": "revenue by country"})
 
+    assert failed.status_code == 502
+    assert failed.json()["spoke"] == "model"
     assert answered.status_code == 200
     assert [_is_probe(request) for request in sent] == [True, True, False]
 
@@ -238,6 +304,58 @@ def test_an_invalid_fixture_is_refused_with_its_own_validator_error(path, client
     errors = response.json()["errors"]
     assert any(expected in error for error in errors), f"expected {expected!r}, got {errors!r}"
     assert catalog.statements == [], "an invalid spec reached the database"
+
+
+@pytest.mark.parametrize("message", REFUSALS)
+def test_a_statement_the_source_refused_comes_back_with_the_sources_message(message, refusing):
+    """A 500 with no words told the person to check the source and handed them nothing to
+    check it with. The message is what the source said, passed on rather than paraphrased,
+    in the shape the validator's refusal already uses."""
+    response = refusing(message).post("/api/execute", json={"spec": load(REVENUE_BY_COUNTRY)})
+
+    assert response.status_code == 502
+    assert response.json() == {"errors": [message], "spoke": "source"}
+
+
+def test_a_limit_by_that_cannot_be_re_aggregated_comes_back_with_the_builders_message(client, catalog):
+    """Whether a measure can be re-aggregated is a property of the aggregate behind it,
+    which the validator has not resolved and the builder has. So it is the one spec rule
+    that runs after validation, and what refused is the spec rather than the source."""
+    spec = load(FIXTURES / "valid" / "revenue_by_category_stacked.json")
+    spec["query"]["aggregates"][0]["fn"] = "avg"
+
+    response = client.post("/api/execute", json={"spec": spec})
+
+    assert response.status_code == 400, "nothing behind the server was reached"
+    assert response.json()["spoke"] == "spec"
+    assert "cannot be re-aggregated" in response.json()["errors"][0]
+    assert catalog.statements == [], "a spec the builder refused reached the database"
+
+
+def test_a_model_that_cannot_be_reached_comes_back_with_the_adapters_message(unreachable):
+    """The same refusal a failed statement gets, because a question that reached no model
+    is as much a failure behind the server as one the source refused. The retry loop is
+    what a rejected answer gets, so an endpoint that answered nothing is asked once rather
+    than three times."""
+    client, writer = unreachable
+
+    response = client.post("/api/ask", json={"question": "revenue by country"})
+
+    assert response.status_code == 502
+    assert response.json() == {"errors": ["connection refused"], "spoke": "model"}
+    assert len(writer.prompts) == 1
+
+
+def test_a_source_that_fails_while_profiling_names_the_source_rather_than_the_model(refusing):
+    """Profiling reads the source before the model is asked anything, so it is the first
+    thing a question can fail on. Calling that a model failure would send the person to
+    the endpoint over something the warehouse said."""
+    client = refusing(REFUSALS[0])
+
+    response = client.post("/api/ask", json={"question": "anything"})
+
+    assert response.status_code == 502
+    assert response.json() == {"errors": [REFUSALS[0]], "spoke": "source"}
 
 
 def test_a_spec_that_is_not_an_object_gets_a_validator_error(client):

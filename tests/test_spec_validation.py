@@ -44,6 +44,17 @@ EXPECTED_ERROR = {
         "query.limit_by: 'column' and 'by' must differ, ranking needs a measure"
     ),
     "multi_series_without_limit_by.json": "query: a multi series chart needs 'limit_by'",
+    "measure_against_itself.json": (
+        "chart.encoding: 'revenue' is bound to both 'x' and 'y', which plots a measure "
+        "against itself"
+    ),
+    "figure_with_group_by.json": (
+        "chart.encoding: a chart without 'x' draws one figure, so its query cannot have "
+        "'select' or 'group_by'"
+    ),
+    "figure_with_colour.json": (
+        "chart.encoding: 'color' needs an 'x', because one figure has nothing to colour"
+    ),
     "ambiguous_table_qualifier.json": (
         "query.group_by: 'orders.status' is ambiguous, 'orders' names "
         "'vizmith.archive.orders' and 'vizmith.shop.orders', so qualify it with more segments"

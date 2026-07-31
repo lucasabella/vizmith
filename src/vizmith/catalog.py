@@ -83,7 +83,11 @@ class Catalog(Protocol):
 
     def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
         """Rows for a statement built above this layer, with every value bound by name
-        rather than written into the statement."""
+        rather than written into the statement.
+
+        Callable from several threads at once, because profiling a schema runs several
+        tables in parallel and a warehouse round trip is nearly all waiting. A source whose
+        client is not safe to share serialises here rather than making the caller ask."""
 
 
 class DatabricksCatalog:

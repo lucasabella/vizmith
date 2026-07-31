@@ -4,6 +4,11 @@ import type { Row, Spec } from "./chart/option";
 
 const WELLS = ["Axis", "Legend", "Values", "Top N", "Filters"];
 
+/** Which part refused, as the server named it. It is the only thing that can: a question
+ * passes through the source, the model and the source again, and from here they are one
+ * request. */
+type Spoke = "source" | "model" | "spec";
+
 /**
  * What the canvas is showing. A refusal carries the machine's own words and a sentence
  * that says what they mean, because one without the other is either unreadable or
@@ -12,10 +17,28 @@ const WELLS = ["Axis", "Legend", "Values", "Top N", "Filters"];
 type Outcome =
   | { kind: "nothing" }
   | { kind: "chart"; spec: Spec; rows: Row[] }
-  | { kind: "refused"; heading: string; lines: string[]; plain: string };
+  | { kind: "refused"; heading: string; lines: string[]; plain: string; spoke?: Spoke };
 
 const REJECTED =
   "The spec did not pass validation, so nothing ran against the source. Correct what is named above and run it again.";
+
+const SAID: Record<Spoke, { heading: string; plain: string }> = {
+  source: {
+    heading: "What the source said",
+    plain:
+      "The spec passed validation and the source refused the statement it compiled to. Change the query or check the source.",
+  },
+  model: {
+    heading: "What the model said",
+    plain:
+      "The model endpoint never answered, so no spec was written. Check the endpoint and the key, then ask again.",
+  },
+  spec: {
+    heading: "What the spec check said",
+    plain:
+      "The spec passed validation, and this rule runs after it because it needs the compiled query, so nothing ran against the source. Correct what is named above and run it again.",
+  },
+};
 
 export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
@@ -60,6 +83,8 @@ export default function App() {
       if (response.ok) {
         setOutcome({ kind: "chart", spec: body.spec, rows: body.rows });
         if (question !== null) setText(JSON.stringify(body.spec, null, 2));
+      } else if (body.spoke) {
+        setOutcome({ kind: "refused", spoke: body.spoke, lines: body.errors, ...SAID[body.spoke as Spoke] });
       } else if (body.errors) {
         setOutcome({ kind: "refused", heading: "What the validator said", lines: body.errors, plain: REJECTED });
       } else {
@@ -67,7 +92,7 @@ export default function App() {
           kind: "refused",
           heading: "What the server said",
           lines: [`${response.status} ${response.statusText}`],
-          plain: "The spec passed validation and the query did not run. The source is what to check.",
+          plain: "The server answered without saying what failed, so there is nothing here to act on but the status.",
         });
       }
     } catch (error) {
@@ -281,12 +306,17 @@ export default function App() {
   );
 }
 
+/** The badge reports the spec and nothing else. A source that refused a statement did not
+ * make the spec invalid, and a model that never answered wrote none to judge. */
 function Badge({ outcome }: { outcome: Outcome }) {
-  if (outcome.kind === "nothing") return <span className="strip__badge">no spec yet</span>;
-  const rejected = outcome.kind === "refused";
+  const spoke = outcome.kind === "refused" ? outcome.spoke : undefined;
+  if (outcome.kind === "nothing" || spoke === "model") {
+    return <span className="strip__badge">no spec yet</span>;
+  }
+  const valid = outcome.kind === "chart" || spoke === "source";
   return (
-    <span className={`strip__badge strip__badge--${rejected ? "bad" : "good"}`}>
-      {rejected ? "spec rejected" : "spec valid"}
+    <span className={`strip__badge strip__badge--${valid ? "good" : "bad"}`}>
+      {valid ? "spec valid" : "spec rejected"}
     </span>
   );
 }
@@ -354,7 +384,7 @@ function Working({ asking }: { asking: boolean }) {
         <p className="working__title">{asking ? "Answering the question" : "Running the spec"}</p>
         <p className="working__body">
           {asking
-            ? "A first question reads the schema and profiles every column before the model is asked anything, which is the slow part. The profiles are kept for as long as the server runs, so the next question skips it."
+            ? "A first question reads the schema and profiles every column before the model is asked anything, and a warehouse that was idle has to start before any of it runs. The profiles are kept for as long as the server runs, so the next question skips them."
             : "The source is running the query. The rows come back to the chart and go nowhere near the model."}
         </p>
       </div>

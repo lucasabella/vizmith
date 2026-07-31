@@ -1,0 +1,16 @@
+{
+  "spec_version": "1",
+  "title": "Total revenue",
+  "query": {
+    "from": "orders",
+    "aggregates": [{ "fn": "sum", "column": "orders.total", "as": "revenue" }],
+    "limit": 1
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "revenue", "type": "quantitative" },
+      "y": { "field": "revenue", "type": "quantitative" }
+    }
+  }
+}
