@@ -34,7 +34,7 @@ A compatible base URL does not mean a compatible feature set. Vizmith asks the m
 
 | Endpoint | JSON Schema response format | Notes |
 |---|---|---|
-| OpenAI | Yes | `response_format` with `strict: true`. |
+| OpenAI | Yes | `response_format` with `strict: true`. Confirmed against a live endpoint, `gpt-5.6-luna`, on 31 July 2026. |
 | Azure OpenAI | Yes | Only through the `/openai/v1/` base URL, which takes a plain bearer key. `model` is the deployment name, not the model name. |
 | vLLM | Yes | 0.8.5 and later. The older `guided_json` parameter is deprecated in favour of `response_format`. |
 | LM Studio | Yes | `json_schema` only, no `json_object` mode. |

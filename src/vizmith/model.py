@@ -87,7 +87,10 @@ class Model:
         body = {
             "model": self._endpoint.model,
             "messages": [{"role": "user", "content": "Answer with ok true."}],
-            "max_tokens": 16,
+            # The schema and nothing else. A token cap would make this cheaper and is not
+            # worth it: current OpenAI models refuse `max_tokens` and name a different
+            # parameter, and that refusal is a 400 that reads exactly like "no schema
+            # support" from here. The schema already bounds the answer to one boolean.
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {"name": "probe", "schema": PROBE, "strict": True},
