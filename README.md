@@ -40,7 +40,7 @@ A compatible base URL does not mean a compatible feature set. Vizmith asks the m
 | LM Studio | Yes | `json_schema` only, no `json_object` mode. |
 | Ollama | No | Its OpenAI-compatible route takes a `format` parameter instead, so the schema is refused here. |
 
-None of these were verified against a live endpoint in this repository, because the test suite makes no model calls. The adapter therefore asks rather than assumes: `Model.constrains_output()` sends one small request and reports what the endpoint did with it. Smoke check a real endpoint before trusting the table:
+None of these were verified against a live endpoint in this repository, because the test suite makes no model calls. The adapter therefore asks rather than assumes: `Model.constrains_output()` sends one small request and reports what the endpoint did with it. The server asks it once, on the first question, so nothing here is configuration and an endpoint that changes needs a restart to be noticed. Smoke check a real endpoint before trusting the table:
 
 ```
 .venv/bin/python -c "

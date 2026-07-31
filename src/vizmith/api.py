@@ -58,6 +58,15 @@ def model() -> Model:
 
 
 @lru_cache(maxsize=1)
+def constrains(writer: Model) -> bool:
+    """Whether this endpoint honours a JSON Schema, asked once and kept for the life of
+    the process. The probe is a billed request, so asking per question would pay for the
+    same answer every time. A probe that never got an answer raises rather than reporting
+    no, and nothing is remembered, so the next question asks again."""
+    return writer.constrains_output()
+
+
+@lru_cache(maxsize=1)
 def profiles(catalog: Catalog) -> tuple:
     """Every table in the configured schema, profiled once and kept for the life of the
     process. Profiling a table is two warehouse queries, so doing it per question would
@@ -119,7 +128,7 @@ def question(
     """A question, answered as the spec it produced and the rows that spec returned. The
     model sees the profiles and the question. The rows it caused to be fetched go to the
     caller, never back to it."""
-    answer = ask(request.question, profiles(catalog), writer)
+    answer = ask(request.question, profiles(catalog), writer, constrained=constrains(writer))
     if answer.spec is None:
         return JSONResponse(status_code=400, content={"errors": answer.errors})
     return {"spec": answer.spec, "rows": query.execute(answer.spec, catalog)}

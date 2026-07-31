@@ -34,9 +34,15 @@ Answer with the specification as JSON and nothing else. No explanation, no code 
 Use only the tables and columns listed below. A column that is not listed does not exist.
 Refer to a column as table.column when the query names more than one table.
 
+A query either selects rows or aggregates them, never both. An aggregated query uses
+group_by and aggregates, and its group_by items are already output columns, so repeating
+them in select produces each of them twice. Use select only for a query that aggregates
+nothing.
+
 Every query needs a row limit. A chart that binds a colour channel also needs limit_by,
-which keeps the top N values of one dimension whole instead of cutting rows off partway
-through a series."""
+whose column is that colour dimension and whose by is an aggregate's alias, so the two are
+never the same. It keeps the top N values of one dimension whole instead of cutting rows
+off partway through a series."""
 
 
 @dataclass(frozen=True)

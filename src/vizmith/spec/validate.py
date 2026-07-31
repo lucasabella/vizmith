@@ -74,7 +74,11 @@ def _semantic_errors(spec: dict) -> list[str]:
     aggregates = query.get("aggregates", [])
 
     if select and (group_by or aggregates):
-        errors.append("query: 'select' cannot be combined with 'group_by' or 'aggregates'")
+        errors.append(
+            "query: 'select' cannot be combined with 'group_by' or 'aggregates'. An "
+            "aggregated query puts its dimensions in 'group_by', which are already output "
+            "columns, and nothing in 'select'"
+        )
     if not select and not group_by and not aggregates:
         errors.append("query: needs 'select', or 'group_by' and 'aggregates'")
     if group_by and not aggregates:
