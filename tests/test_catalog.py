@@ -1,8 +1,11 @@
+from types import SimpleNamespace
+
 import pytest
 from conftest import CATALOG, PROFILE, RECORDED, SCHEMA, WAREHOUSE, needs_warehouse
 from databricks.sdk.service.catalog import TableInfo
 
 from vizmith.catalog import (
+    TIMESTAMP,
     TYPES,
     UNSUPPORTED,
     Column,
@@ -11,6 +14,7 @@ from vizmith.catalog import (
     _parameter,
     _parameter_type,
     _table,
+    _type,
     _value,
 )
 
@@ -102,6 +106,41 @@ def test_a_value_comes_back_as_the_type_the_manifest_reported():
     assert _value("true", "BOOLEAN") is True
     assert _value("2024-01-01", "DATE") == "2024-01-01"
     assert _value(None, "STRING") is None
+
+
+def manifest_column(type_name, type_text):
+    """A column as the statement manifest describes one, with the two ways it names a
+    type. The SDK fills in one, the other or both."""
+    enum = SimpleNamespace(value=type_name) if type_name else None
+    return SimpleNamespace(type_name=enum, type_text=type_text)
+
+
+def test_a_column_the_sdk_leaves_untyped_is_read_from_the_manifest_text():
+    """A TIMESTAMP_NTZ arrives with no enum, and reading the enum anyway crashed every
+    statement that returned one, which is every profile of a table with a timestamp."""
+    column = manifest_column(None, "TIMESTAMP_NTZ")
+
+    assert _type(column) == "TIMESTAMP_NTZ"
+    assert TYPES[_type(column)] == TIMESTAMP
+
+
+def test_a_column_the_sdk_does_type_is_read_from_the_enum():
+    """The text carries a decimal's precision and scale, which the closed set has no entry
+    for, so the enum stays the primary."""
+    assert _type(manifest_column("DECIMAL", "DECIMAL(10,2)")) == "DECIMAL"
+
+
+def test_an_array_arrives_as_its_values_rather_than_as_their_text():
+    """collect_set answers with an array and the statement API sends the JSON of one, so
+    without this the sample threshold counts characters and the samples are punctuation."""
+    assert _value('["normal","high","low","urgent"]', "ARRAY") == ["normal", "high", "low", "urgent"]
+    assert _value("[]", "ARRAY") == []
+
+
+def test_an_array_column_is_still_not_chartable():
+    """Reading an array out of a result set says nothing about charting one, and the
+    closed set is what decides that."""
+    assert TYPES.get("ARRAY", UNSUPPORTED) == UNSUPPORTED
 
 
 def test_a_shorter_name_is_filled_in():
