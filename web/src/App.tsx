@@ -83,7 +83,7 @@ export default function App() {
     if (!source) return;
     let live = true;
     getTables()
-      .then((body) => Promise.all(body.tables.map((table) => getProfile(table.name))))
+      .then((body) => Promise.all(body.tables.map(getProfile)))
       .then((profiles) => live && setTables(profiles))
       .catch((error: Error) => live && setSchemaFailure(error.message));
     return () => {

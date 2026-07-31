@@ -75,6 +75,120 @@ def test_health_reports_whether_a_model_is_configured(monkeypatch):
     assert TestClient(app).get("/api/health").json()["model"] is True
 
 
+ORDERS = "vizmith.shop.orders"
+
+# A table with a column the profiler leaves without samples, so the threshold can be
+# asserted on a real profile rather than on a table that happens to sit below it.
+SCANS = "vizmith.shop.shipment_scans"
+
+
+def test_a_get_lists_every_table_in_the_configured_schema(client, catalog):
+    response = client.get("/api/tables")
+
+    assert response.status_code == 200
+    assert response.json()["tables"] == catalog.tables()
+
+
+def test_a_get_returns_the_profile_the_prompt_path_was_given(catalog):
+    """The panel's claim is that these are the figures the model saw, so the test is that
+    the endpoint's answer is in the prompt, not that it looks like a plausible profile."""
+    scripted = ScriptedModel(json.dumps(load(REVENUE_BY_COUNTRY)))
+    app.dependency_overrides[source] = lambda: catalog
+    app.dependency_overrides[model] = lambda: scripted
+    try:
+        client = TestClient(app)
+        client.post("/api/ask", json={"question": "revenue by country"})
+        response = client.get(f"/api/tables/{ORDERS}")
+    finally:
+        app.dependency_overrides.clear()
+        constrains.cache_clear()
+
+    profile = TableProfile.from_dict(response.json())
+    assert response.status_code == 200
+    assert profile == profile_table(catalog, ORDERS)
+
+    asked = scripted.prompts[0]
+    assert f"{profile.table}, {profile.row_count} rows" in asked
+    status = next(column for column in profile.columns if column.name == "status")
+    assert f"{status.distinct_count} distinct" in asked
+    assert "values: " + ", ".join(status.samples) in asked
+
+
+def test_a_column_above_the_sample_threshold_comes_back_with_no_samples(client, fixture_db):
+    """The threshold is the security boundary and this API does not widen it: none of the
+    500 location codes reaches the response, not a trimmed list of them."""
+    response = client.get(f"/api/tables/{SCANS}")
+
+    columns = {column["name"]: column for column in response.json()["columns"]}
+    assert columns["location_code"]["distinct_count"] > SAMPLE_THRESHOLD
+    assert columns["location_code"]["samples"] == []
+    values = fixture_db.execute(f"SELECT DISTINCT location_code FROM {SCANS}").fetchall()
+    assert len(values) > SAMPLE_THRESHOLD
+    assert [value for (value,) in values if value in response.text] == []
+
+
+def test_no_table_endpoint_answers_with_a_row(client, catalog):
+    """A profile of every column of every table, and nothing in any of them that a row
+    could arrive through."""
+    for name in catalog.tables():
+        body = client.get(f"/api/tables/{name}").json()
+        assert set(body) == {"table", "row_count", "columns"}
+        for column in body["columns"]:
+            assert set(column) == {
+                "name",
+                "type",
+                "null_rate",
+                "distinct_count",
+                "distinct_count_exact",
+                "minimum",
+                "maximum",
+                "samples",
+            }
+
+
+def test_a_second_request_for_a_table_does_not_profile_it_again(client, catalog):
+    """Profiling a table is two warehouse queries. A panel that reads a profile per table
+    would pay for the schema again on every render."""
+    client.get(f"/api/tables/{ORDERS}")
+    profiled = list(catalog.statements)
+
+    client.get(f"/api/tables/{ORDERS}")
+    client.get(f"/api/tables/{SCANS}")
+    client.get("/api/tables")
+
+    assert profiled
+    assert catalog.statements == profiled
+
+
+def test_a_question_after_a_profile_request_profiles_nothing_again(asking, catalog):
+    """Both read the same profiles, so the wait is paid once however it is reached."""
+    client = asking(json.dumps(load(REVENUE_BY_COUNTRY)))
+    client.get("/api/tables")
+    profiled = list(catalog.statements)
+
+    response = client.post("/api/ask", json={"question": "revenue by country"})
+
+    assert response.status_code == 200
+    assert catalog.statements[: len(profiled)] == profiled
+    assert len(catalog.statements) == len(profiled) + 1, "the question ran its own query and no more"
+
+
+def test_a_table_name_the_schema_does_not_hold_is_refused_naming_it(client):
+    """The panel takes its names from the list, so a miss means the schema moved under a
+    server that profiled it once. That reads as a missing table, not as a crash."""
+    response = client.get("/api/tables/vizmith.shop.nowhere")
+
+    assert response.status_code == 404
+    assert "vizmith.shop.nowhere" in response.json()["errors"][0]
+
+
+def test_a_source_that_refuses_while_profiling_is_named_as_the_source(refusing):
+    response = refusing(REFUSALS[0]).get("/api/tables")
+
+    assert response.status_code == 502
+    assert response.json() == {"errors": [REFUSALS[0]], "spoke": "source"}
+
+
 @pytest.fixture
 def asking(catalog):
     """The API with a scripted model behind it, so a question is answered without a call."""
@@ -443,85 +557,6 @@ CARRIER_ID = {
     "right_table": CARRIERS,
     "right_column": "id",
 }
-
-
-def test_the_tables_endpoint_names_every_table_with_its_row_count(browsing, catalog):
-    body = browsing.get("/api/tables").json()
-
-    assert [table["name"] for table in body["tables"]] == catalog.tables()
-    assert all(table["row_count"] > 0 for table in body["tables"])
-
-
-def test_a_table_comes_back_with_the_profile_the_prompt_path_reads(browsing, catalog):
-    """One profile, not a second opinion about one. The panel showing these says they are
-    what the model was given, so they have to be the same figures."""
-    body = browsing.get(f"/api/tables/{CUSTOMERS}").json()
-
-    assert TableProfile.from_dict(body) == profile_table(catalog, CUSTOMERS)
-    assert {column["name"] for column in body["columns"]} == {"id", "country", "signup_date"}
-
-
-def test_a_column_above_the_sample_threshold_comes_back_with_no_samples(browsing):
-    """The threshold is the security boundary and this endpoint does not widen it. Every
-    customer id is raw data, and 2000 of them is what a sample list must never become."""
-    columns = {c["name"]: c for c in browsing.get(f"/api/tables/{CUSTOMERS}").json()["columns"]}
-
-    assert columns["id"]["distinct_count"] > SAMPLE_THRESHOLD
-    assert columns["id"]["samples"] == []
-    assert columns["country"]["samples"], "a low cardinality column still carries its vocabulary"
-
-
-def test_a_second_request_for_a_table_does_not_profile_it_again(browsing, catalog):
-    browsing.get(f"/api/tables/{CUSTOMERS}")
-    statements = len(catalog.statements)
-
-    browsing.get(f"/api/tables/{CUSTOMERS}")
-    browsing.get("/api/tables")
-
-    assert len(catalog.statements) == statements
-
-
-def test_a_source_that_refuses_while_profiling_says_so_rather_than_500(refusing):
-    """The panel reads these before anything else does, so a warehouse that is down has
-    to arrive as the warehouse's own words rather than as a server error."""
-    response = refusing(REFUSALS[0]).get("/api/tables")
-
-    assert response.status_code == 502
-    assert response.json() == {"errors": [REFUSALS[0]], "spoke": "source"}
-
-
-def test_a_table_the_schema_does_not_hold_is_refused_by_name(browsing):
-    response = browsing.get("/api/tables/vizmith.shop.invoices")
-
-    assert response.status_code == 404
-    assert "vizmith.shop.invoices" in response.json()["errors"][0]
-
-
-def test_a_profile_endpoint_carries_nothing_but_the_profile(browsing, catalog):
-    """Rule one, checked by shape rather than by looking for a value. A profile holds
-    counts, a range and the vocabulary of a low cardinality column, and asserting that a
-    row's id is absent would fail on a minimum that happens to equal it. What makes this
-    hold is that there is no field a row could arrive in: the response has the profile's
-    keys and no others, and every sample list is inside the threshold."""
-    fields = {
-        "name",
-        "type",
-        "null_rate",
-        "distinct_count",
-        "distinct_count_exact",
-        "minimum",
-        "maximum",
-        "samples",
-    }
-
-    for name in catalog.tables():
-        body = browsing.get(f"/api/tables/{name}").json()
-        assert set(body) == {"table", "row_count", "columns"}
-        for column in body["columns"]:
-            assert set(column) == fields
-            assert len(column["samples"]) <= SAMPLE_THRESHOLD
-            if column["distinct_count"] > SAMPLE_THRESHOLD:
-                assert column["samples"] == []
 
 
 def test_relationships_report_what_is_declared_and_what_is_suggested(browsing):

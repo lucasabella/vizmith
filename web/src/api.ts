@@ -21,8 +21,6 @@ export type ColumnProfile = {
 
 export type TableProfile = { table: string; row_count: number; columns: ColumnProfile[] };
 
-export type TableSummary = { name: string; row_count: number };
-
 export type Relationship = {
   left_table: string;
   left_column: string;
@@ -50,7 +48,9 @@ async function json<T>(url: string, options?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export const getTables = (): Promise<{ tables: TableSummary[] }> => json("/api/tables");
+/** The qualified name of every table. A row count is not here: it is one of the figures a
+ * profile holds, and the panel reads the profiles anyway. */
+export const getTables = (): Promise<{ tables: string[] }> => json("/api/tables");
 
 export const getProfile = (name: string): Promise<TableProfile> =>
   json(`/api/tables/${encodeURIComponent(name)}`);
