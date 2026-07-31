@@ -13,7 +13,9 @@ export type Spec = {
   chart: {
     mark: "bar" | "line" | "area" | "point" | "arc";
     stack?: boolean;
-    encoding: { x: Channel; y: Channel; color?: Channel };
+    // No x is a question with no dimension. The validator has already established that the
+    // query returns one row, and `Chart` draws the measure as a figure rather than a plot.
+    encoding: { x?: Channel; y: Channel; color?: Channel };
   };
 };
 
@@ -59,7 +61,9 @@ const LABEL = { fontFamily: MONO, fontSize: 11, color: INK_2 };
 const ROTATE_ABOVE = 8;
 const ROTATE_LONGER_THAN = 12;
 
-const label = (value: Value): string => (value === null ? NO_VALUE : String(value));
+/** How a row value is written wherever one is shown, so an axis, a tooltip and a figure
+ * cannot disagree about what came out of the warehouse. Never rounded. */
+export const label = (value: Value): string => (value === null ? NO_VALUE : String(value));
 
 const distinct = (values: string[]): string[] => [...new Set(values)];
 
@@ -77,6 +81,9 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
 
   const { mark, stack, encoding } = spec.chart;
   const { x, y, color } = encoding;
+  // A question with no dimension has one measure and no axes, so there is no option to
+  // build. `Chart` draws that as a figure.
+  if (x === undefined) return null;
   const title = spec.title
     ? {
         text: spec.title,
@@ -159,7 +166,7 @@ export function markText(spec: Spec, mark: Mark): string {
   const line = (channel: Channel, value: Value) => `${axisName(channel)}: ${label(value)}`;
 
   return [
-    line(x, pair ? pair[0] : mark.name),
+    ...(x ? [line(x, pair ? pair[0] : mark.name)] : []),
     ...(color && mark.seriesName ? [line(color, mark.seriesName)] : []),
     line(y, pair ? pair[1] : (mark.value as Value)),
   ].join("\n");

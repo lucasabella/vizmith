@@ -39,6 +39,10 @@ group_by and aggregates, and its group_by items are already output columns, so r
 them in select produces each of them twice. Use select only for a query that aggregates
 nothing.
 
+A question with no dimension is answered by one figure, not by a chart. Its query groups by
+nothing and its chart binds y to the measure and omits x. Binding the same column to x and y
+plots a measure against itself and is rejected.
+
 Every query needs a row limit. A chart that binds a colour channel also needs limit_by,
 whose column is that colour dimension and whose by is an aggregate's alias, so the two are
 never the same. It keeps the top N values of one dimension whole instead of cutting rows

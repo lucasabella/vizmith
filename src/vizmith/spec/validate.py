@@ -109,6 +109,23 @@ def _semantic_errors(spec: dict) -> list[str]:
         if field not in known:
             errors.append(f"chart.encoding.{channel}: '{field}' is not an output column of the query")
 
+    # An absent 'x' is the answer to a question with no dimension, and it draws the measure as
+    # one figure. That only holds where the query returns one row, which is a query that
+    # aggregates and groups by nothing, and one figure has nothing to colour.
+    if "x" not in encoding:
+        if select or group_by:
+            errors.append(
+                "chart.encoding: a chart without 'x' draws one figure, so its query cannot have "
+                "'select' or 'group_by', which produce a row each"
+            )
+        if "color" in encoding:
+            errors.append("chart.encoding: 'color' needs an 'x', because one figure has nothing to colour")
+    elif encoding["x"]["field"] == encoding["y"]["field"]:
+        errors.append(
+            f"chart.encoding: '{encoding['x']['field']}' is bound to both 'x' and 'y', which plots a "
+            "measure against itself. A query with no dimension omits 'x' and draws one figure"
+        )
+
     # A row limit on a multi series chart cuts series members at an arbitrary point, which renders
     # a chart that looks right and is not. limit_by makes the outer dimension explicit instead.
     if "color" in encoding and len(group_by) > 1 and not limit_by:

@@ -1,0 +1,23 @@
+{
+  "spec_version": "1",
+  "title": "Revenue by country",
+  "query": {
+    "from": "orders",
+    "joins": [
+      {
+        "table": "customers",
+        "type": "inner",
+        "on": [{ "left": "orders.customer_id", "right": "customers.id" }]
+      }
+    ],
+    "group_by": [{ "column": "customers.country" }],
+    "aggregates": [{ "fn": "sum", "column": "orders.total", "as": "revenue" }],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "y": { "field": "revenue", "type": "quantitative" }
+    }
+  }
+}

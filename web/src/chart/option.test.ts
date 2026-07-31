@@ -29,7 +29,7 @@ const rowsFor = (spec: Spec, count = 4): Row[] => {
   return Array.from({ length: count }, (_, i) => ({
     unused_column: "ignored",
     ...(color ? { [color.field]: sample(color, i % 2) } : {}),
-    [x.field]: sample(x, i),
+    ...(x ? { [x.field]: sample(x, i) } : {}),
     [y.field]: sample(y, i),
   }));
 };
@@ -67,6 +67,17 @@ describe("valid fixtures", () => {
   };
 
   for (const [name, fixture] of fixtures) {
+    const { x } = fixture.chart.encoding;
+
+    // A fixture with no x answers a question with no dimension, so there is no plot to
+    // build and the two tests below have no axis to read.
+    if (x === undefined) {
+      it(`${name} builds no option, because it is one figure`, () => {
+        expect(buildOption(fixture, rowsFor(fixture, 1))).toBeNull();
+      });
+      continue;
+    }
+
     it(`${name} renders as its mark`, () => {
       const option = buildOption(fixture, rowsFor(fixture));
       const series = seriesOf(option);
@@ -78,7 +89,7 @@ describe("valid fixtures", () => {
     it(`${name} labels every category and reads back on hover`, () => {
       const rows = rowsFor(fixture, 9);
       const option = buildOption(fixture, rows);
-      const { x, y } = fixture.chart.encoding;
+      const { y } = fixture.chart.encoding;
       const categories = option !== null && "xAxis" in option ? axisOf(option, "xAxis").data : undefined;
 
       if (categories !== undefined) {
@@ -396,6 +407,29 @@ it("returns null for an empty result set", () => {
   expect(buildOption(fixture, [])).toBeNull();
 });
 
+describe("a question with no dimension", () => {
+  const figure = (title?: string): Spec => ({
+    title,
+    chart: { mark: "bar", encoding: { y: { field: "revenue", type: "quantitative", title: "Revenue" } } },
+  });
+
+  const drawn = (spec: Spec, rows: Row[]) =>
+    renderToStaticMarkup(createElement(Chart, { spec, rows }));
+
+  it("draws the measure as it arrived, unrounded", () => {
+    expect(drawn(figure("Total revenue"), [{ revenue: 86132852.71 }])).toContain("86132852.71");
+  });
+
+  it("names the figure by the spec title, falling back to the measure", () => {
+    expect(drawn(figure("Total revenue"), [{ revenue: 1 }])).toContain("Total revenue");
+    expect(drawn(figure(), [{ revenue: 1 }])).toContain("Revenue");
+  });
+
+  it("still says there is nothing to draw when the query returned no rows", () => {
+    expect(drawn(figure("Total revenue"), [])).toContain("No rows to draw");
+  });
+});
+
 it("draws an empty state instead of a chart when there are no rows", () => {
   const [, fixture] = fixtures[0];
   const markup = renderToStaticMarkup(createElement(Chart, { spec: fixture, rows: [] }));
@@ -415,6 +449,8 @@ it("does not depend on the order of the keys in a row", () => {
   });
 
   for (const [name, fixture] of fixtures) {
+    // A figure builds no option, so there is nothing here for a key order to change.
+    if (fixture.chart.encoding.x === undefined) continue;
     const rows = rowsFor(fixture);
     expect(comparable(buildOption(fixture, reverse(rows))), name).toEqual(
       comparable(buildOption(fixture, rows)),

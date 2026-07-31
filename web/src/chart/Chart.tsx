@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as echarts from "echarts";
-import { buildOption, type Row, type Spec } from "./option";
+import { buildOption, label, type Row, type Spec } from "./option";
 
 export default function Chart({ spec, rows }: { spec: Spec; rows: Row[] }) {
   const host = useRef<HTMLDivElement>(null);
@@ -19,6 +19,21 @@ export default function Chart({ spec, rows }: { spec: Spec; rows: Row[] }) {
       chart.dispose();
     };
   }, [option]);
+
+  // A question with no dimension. The validator has already established that the query
+  // returns one row, so the measure is read off it and drawn as a figure. There is no
+  // option to build for that, which is why this is read off the encoding.
+  const { x, y } = spec.chart.encoding;
+  if (x === undefined && rows.length > 0) {
+    return (
+      <div className="figure">
+        <div>
+          <p className="figure__name">{spec.title ?? y.title ?? y.field}</p>
+          <p className="figure__value">{label(rows[0][y.field])}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (option === null) {
     return (

@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from pathlib import Path
 
 import duckdb
@@ -65,6 +66,10 @@ class FixtureCatalog:
     def __init__(self, connection, dialect=DUCKDB):
         self.dialect = dialect
         self._connection = connection
+        # A DuckDB connection is one cursor, so two threads sharing it read each other's
+        # rows. Profiling a schema calls run in parallel, so the double serialises rather
+        # than being the only catalog that cannot be shared.
+        self._lock = threading.Lock()
         self.statements = []
 
     def tables(self):
@@ -81,8 +86,9 @@ class FixtureCatalog:
         )
 
     def run(self, sql, parameters=None):
-        self.statements.append(sql)
-        return self._connection.execute(sql, parameters or {}).fetchall()
+        with self._lock:
+            self.statements.append(sql)
+            return self._connection.execute(sql, parameters or {}).fetchall()
 
 
 def load_fixture_db():

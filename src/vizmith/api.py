@@ -1,14 +1,17 @@
 """The HTTP surface: a spec goes in, its errors or its rows come back.
 
 A request carries a spec and nothing else. The data source is server configuration, so a
-client cannot name a database, and no response carries SQL, so a client cannot learn one
-either. The artefact a client holds is the spec, which is the point of the whole design.
+client cannot name a database. The artefact a client holds is the spec, which is the point
+of the whole design. A source's own error message is passed on even where it quotes the
+statement that failed, because the person reading it asked for that query and withholding
+the only clue protects nothing.
 
 Validator messages are returned word for word. They are written to be fed back to a model
 on retry, so rewording them here would break that loop before it is written.
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -21,7 +24,7 @@ from pydantic import BaseModel
 from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import Catalog, DatabricksCatalog
-from vizmith.model import Endpoint, Model
+from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import profile_table
 from vizmith.spec import validate_spec
 
@@ -68,13 +71,24 @@ def constrains(writer: Model) -> bool:
     return writer.constrains_output(SCHEMA)
 
 
+# Profiling one table is two statements that mostly wait, so the schema is profiled several
+# at a time. Wide enough that the waiting overlaps, narrow enough that the warehouse is not
+# handed more concurrent statements than a small one will run, which only moves the queue.
+PROFILE_WORKERS = 8
+
+
 @lru_cache(maxsize=1)
 def profiles(catalog: Catalog) -> tuple:
     """Every table in the configured schema, profiled once and kept for the life of the
     process. Profiling a table is two warehouse queries, so doing it per question would
     make asking one the slowest thing here, every time. A schema that changes under a
-    running server is not noticed until it restarts."""
-    return tuple(profile_table(catalog, name) for name in catalog.tables())
+    running server is not noticed until it restarts.
+
+    `tables` runs first and on this thread, which is also what builds the source's client
+    before anything shares it."""
+    names = catalog.tables()
+    with ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as pool:
+        return tuple(pool.map(lambda name: profile_table(catalog, name), names))
 
 
 class SpecRequest(BaseModel):
@@ -111,6 +125,33 @@ def validate(request: SpecRequest):
     return {"errors": validate_spec(request.spec)}
 
 
+def refused(spoke: str, failure: Exception, status: int = 502) -> JSONResponse:
+    """A failure after validation, in the shape the validator's refusal already uses, so the
+    interface keeps one way to show a refusal rather than growing a second. 502 by default,
+    rather than 500 or 400: the request was well formed and the spec was valid, and what
+    failed sits behind the server. `spoke` names which part failed, because a question
+    passes through the source, the model and the source again, and a caller cannot tell
+    from a message which of them produced it."""
+    return JSONResponse(status_code=status, content={"errors": [str(failure)], "spoke": spoke})
+
+
+def execute_spec(spec: dict, catalog: Catalog):
+    """The rows, or what refused to produce them.
+
+    `RuntimeError` is the source: a statement it did not finish, or a result too large for
+    one chunk. `ValueError` is the spec, and it answers 400 rather than 502 because nothing
+    behind the server was reached and the spec is what has to change. Both callers validate
+    before they get here, so the only rule left to fail is the builder's re-aggregation
+    check, which needs the compiled query and cannot run inside the validator."""
+    try:
+        rows = query.execute(spec, catalog)
+    except ValueError as failure:
+        return refused("spec", failure, status=400)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    return {"spec": spec, "rows": rows}
+
+
 @app.post("/api/execute")
 def execute(request: SpecRequest, catalog: Annotated[Catalog, Depends(source)]):
     """The rows a valid spec produces, with the spec that produced them. An invalid spec is
@@ -118,7 +159,7 @@ def execute(request: SpecRequest, catalog: Annotated[Catalog, Depends(source)]):
     errors = validate_spec(request.spec)
     if errors:
         return JSONResponse(status_code=400, content={"errors": errors})
-    return {"spec": request.spec, "rows": query.execute(request.spec, catalog)}
+    return execute_spec(request.spec, catalog)
 
 
 @app.post("/api/ask")
@@ -129,11 +170,21 @@ def question(
 ):
     """A question, answered as the spec it produced and the rows that spec returned. The
     model sees the profiles and the question. The rows it caused to be fetched go to the
-    caller, never back to it."""
-    answer = ask(request.question, profiles(catalog), writer, constrained=constrains(writer))
+    caller, never back to it.
+
+    Profiling reaches the source before the model is asked anything, so the first thing a
+    question can fail on is the source rather than the model."""
+    try:
+        tables = profiles(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    try:
+        answer = ask(request.question, tables, writer, constrained=constrains(writer))
+    except ModelError as failure:
+        return refused("model", failure)
     if answer.spec is None:
         return JSONResponse(status_code=400, content={"errors": answer.errors})
-    return {"spec": answer.spec, "rows": query.execute(answer.spec, catalog)}
+    return execute_spec(answer.spec, catalog)
 
 
 if WEB_DIST.is_dir():

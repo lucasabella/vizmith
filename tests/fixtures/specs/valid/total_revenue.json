@@ -1,0 +1,19 @@
+{
+  "spec_version": "1",
+  "title": "Total revenue, 2025",
+  "query": {
+    "from": "orders",
+    "filters": [
+      { "column": "orders.order_date", "op": ">=", "value": "2025-01-01" },
+      { "column": "orders.status", "op": "not_in", "value": ["cancelled", "refunded"] }
+    ],
+    "aggregates": [{ "fn": "sum", "column": "orders.total", "as": "revenue" }],
+    "limit": 1
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "y": { "field": "revenue", "type": "quantitative", "title": "Revenue (EUR)" }
+    }
+  }
+}
