@@ -225,14 +225,182 @@ button:focus-visible {
   overflow: auto;
 }
 
-.chart {
+/* The visual card: the chart, and the table of what it was drawn from. The card owns the
+   surface now, so the chart inside it wears none of its own. */
+.visual {
+  position: relative;
   height: 100%;
   min-height: 260px;
-  padding: 13px 16px 10px;
+  display: flex;
+  flex-direction: column;
   background: var(--surf);
   border: 1px solid var(--rule-2);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
+}
+
+.visual__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 8px 0;
+}
+
+.visual__tabs {
+  display: flex;
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.visual__tab {
+  padding: 2px 9px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+.visual__tab + .visual__tab {
+  border-left: 1px solid var(--rule-2);
+}
+
+.visual__tab--on {
+  color: #fff;
+  background: var(--chrome);
+}
+
+.visual__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.visual__body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.chart {
+  height: 100%;
+  min-height: 240px;
+  padding: 4px 16px 10px;
+}
+
+/* The table view, which is what makes a series colour under 3:1 legal. It shows the
+   result set in the builder's column order and shapes nothing: the query already sorted,
+   filtered and capped it. */
+.table {
+  overflow: auto;
+  padding: 6px 10px 10px;
+}
+
+.table__grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.table__grid th,
+.table__grid td {
+  padding: 4px 10px 4px 0;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--rule);
+}
+
+.table__grid th {
+  position: sticky;
+  top: 0;
+  background: var(--surf);
+  font-size: 9.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.table__grid td {
+  color: var(--ink);
+}
+
+.table__th--figure,
+.table__td--figure {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-right: 0;
+  padding-left: 10px;
+}
+
+/* Where a click on a mark asks what the narrowed question should be grouped by. It is a
+   menu rather than a guess, which is the decision this feature had to make. */
+.drill {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 250px;
+  max-height: 60%;
+  overflow: auto;
+  padding: 9px 10px;
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+  box-shadow: 0 4px 14px rgba(20, 32, 43, 0.16);
+}
+
+.drill__head {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.drill__note {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.drill__list {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+  max-height: 190px;
+  overflow: auto;
+}
+
+.drill__pick {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 5px;
+  border-radius: var(--radius-control);
+  font-size: 11px;
+}
+
+.drill__pick:hover {
+  background: var(--surf-2);
+}
+
+.drill__column {
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.drill__table {
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+
+.drill__close {
+  font-size: 10.5px;
+  color: var(--ink-2);
+  text-decoration: underline;
 }
 
 /* A question with no dimension: one measure, no axes. The card wears the chart's chrome so
@@ -430,6 +598,20 @@ button:focus-visible {
   border-right: 0;
 }
 
+/* The way back from a drill. A drill that cannot be undone is a trap, so the chart that
+   was replaced is one control away rather than gone. */
+.pages__back {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.pages__back:hover {
+  color: var(--ink);
+}
+
 .pages__meta {
   margin-left: auto;
   display: flex;
@@ -438,6 +620,209 @@ button:focus-visible {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-3);
+}
+
+/* What is missing and what to do about it, said once. Configuration is server side, so
+   this is a file and a restart rather than a screen that sets a source. */
+.setup {
+  margin: 18px auto 0;
+  max-width: 52ch;
+  text-align: left;
+  padding: 11px 13px;
+  background: var(--surf-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+}
+
+.setup__head {
+  margin: 0 0 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.setup__head code {
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+
+.setup__line {
+  margin: 0 0 9px;
+  display: grid;
+  gap: 2px;
+}
+
+.setup__line:last-child {
+  margin-bottom: 0;
+}
+
+.setup__what {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.setup__line code {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.setup__why {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+/* the Data view, behind the rail's second icon */
+.canvas--data {
+  overflow: auto;
+  padding: 20px 22px;
+}
+
+.data {
+  max-width: 76ch;
+}
+
+.data__head {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.data__lead {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+
+.data__section {
+  margin-bottom: 22px;
+}
+
+.data__title {
+  margin: 0 0 3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.data__tally {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.data__note {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.data__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.rels {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+}
+
+.rel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 11px;
+}
+
+.rel + .rel {
+  border-top: 1px solid var(--rule);
+}
+
+.rel__pair {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rel__side {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.rel__table {
+  color: var(--ink-2);
+}
+
+.rel__dot {
+  color: var(--ink-3);
+}
+
+.rel__column {
+  color: var(--ink);
+}
+
+.rel__joins {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* Provenance is a word first. It was encoded in colour alone twice in this project and
+   cut both times, so the tint is only ever a second way of saying what the word says. */
+.rel__kind {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--rule-2);
+  color: var(--ink-2);
+}
+
+.rel__kind--declared {
+  border-color: color-mix(in srgb, var(--good) 40%, var(--rule-2));
+  color: color-mix(in srgb, var(--good) 70%, var(--ink-2));
+}
+
+.rel__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn--small {
+  padding: 4px 10px;
+  font-size: 11.5px;
+}
+
+.btn--quiet {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+}
+
+.btn--quiet:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
 }
 
 /* right panels */
@@ -532,13 +917,41 @@ button:focus-visible {
 }
 
 .well__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11.5px;
   font-weight: 600;
   color: var(--ink);
 }
 
-.well__drop {
+/* The interface's version of the rule in ROADMAP.md: a row cap on a multi series query
+   cuts a series in half and draws the result as if it were the data. The word carries it,
+   the colour only repeats it. */
+.well__tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: var(--radius-control);
+  color: var(--ink-3);
+  border: 1px solid var(--rule-2);
+}
+
+.well__tag--missing {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.well__slot {
   margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.well__drop {
   min-height: 26px;
   display: flex;
   align-items: center;
@@ -548,6 +961,110 @@ button:focus-visible {
   border-radius: var(--radius-control);
   font-size: 10.5px;
   color: var(--ink-3);
+}
+
+.well__drop--over {
+  border-color: var(--chrome);
+  border-style: solid;
+  color: var(--ink-2);
+  background: var(--surf-2);
+}
+
+.well__drop--missing {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* A refused drop, under the well it was refused in, in the resolver's own words. */
+.well__refusal {
+  margin-top: 5px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--bad);
+  background: var(--surf-2);
+}
+
+.well__refusal-line {
+  margin: 0 0 4px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.well__link {
+  font-size: 10.5px;
+  color: var(--ink-2);
+  text-decoration: underline;
+}
+
+.wells__note {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+/* What a well holds. Whatever was inferred, an aggregate or a date unit, is a control
+   rather than a label: a default nobody can see and nobody can change is the quiet kind
+   of wrong this project exists to avoid. */
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 6px;
+  background: var(--surf-2);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+  font-size: 11px;
+}
+
+.chip__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.chip__said {
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.chip__pick {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+  max-width: 96px;
+}
+
+.chip__number {
+  width: 46px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+}
+
+.chip__off {
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.chip__off:hover {
+  color: var(--bad);
 }
 
 /* the spec, which shares the panel with the wells rather than owning one */
@@ -606,9 +1123,10 @@ button:focus-visible {
   color: var(--ink);
 }
 
-/* fields tree */
+/* fields tree. Every figure is mono, because a machine produced it, and a column of
+   figures gets tabular numerals so the digits line up down the panel. */
 .fields {
-  padding: 12px 11px;
+  padding: 8px 6px;
 }
 
 .fields__note {
@@ -616,6 +1134,122 @@ button:focus-visible {
   color: var(--ink-2);
   line-height: 1.5;
   margin: 0;
+  padding: 4px 5px;
+}
+
+.tree__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  text-align: left;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.tree__row:hover {
+  background: var(--surf-2);
+}
+
+.tree__row--table {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.tree__row--column {
+  padding-left: 18px;
+  font-size: 11.5px;
+}
+
+.tree__twist {
+  width: 9px;
+  font-size: 9px;
+  color: var(--ink-3);
+}
+
+.tree__grip {
+  font-size: 9px;
+  color: var(--rule-2);
+  cursor: grab;
+}
+
+.tree__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree__count,
+.tree__type {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.tree__note {
+  margin: 2px 0 2px 18px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* A column's profile, inline. Never a tooltip: this is the element that carries the
+   project's reason to exist, and a tooltip is where a thing goes to be seen by accident. */
+.profile {
+  margin: 2px 0 6px;
+  padding: 6px 8px 7px 18px;
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 3px 8px;
+  background: var(--surf-2);
+  border-left: 2px solid var(--rule-2);
+  font-size: 11px;
+}
+
+.profile__key {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding-top: 1px;
+}
+
+.profile__value {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.profile__value--figure {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.profile__samples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.profile__sample {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 4px;
+  background: var(--surf);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+}
+
+/* An empty list would read as "this column has no values". It has too many, which is a
+   different answer and the more interesting one. */
+.profile__none {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink-3);
 }
 
 .panel__foot {

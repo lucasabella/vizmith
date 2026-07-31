@@ -4,6 +4,7 @@ Nothing above this module knows that the source is Databricks. A caller gets
 qualified names, a closed set of types and nullability, and nothing else.
 """
 
+import dataclasses
 import json
 import time
 from contextlib import suppress
@@ -12,6 +13,8 @@ from typing import Protocol
 
 STRING = "string"
 INTEGER = "integer"
+DECLARED = "declared"
+SUGGESTED = "suggested"
 DECIMAL = "decimal"
 BOOLEAN = "boolean"
 DATE = "date"
@@ -57,6 +60,33 @@ class Table:
     columns: tuple[Column, ...]
 
 
+@dataclass(frozen=True, order=True)
+class Relationship:
+    """One join a source either states or is thought to hold. Declared means the source's
+    own foreign key, which nobody has to approve. Suggested is inferred from names and
+    types and is not usable until a person confirms it, because a wrong join produces a
+    plausible number rather than an error.
+
+    The left side is the table carrying the key and the right side is the one it points
+    at. Ordering is by field, so a list of these sorts the same way twice."""
+
+    left_table: str
+    left_column: str
+    right_table: str
+    right_column: str
+    kind: str = SUGGESTED
+
+    @property
+    def key(self) -> str:
+        """What identifies this relationship wherever an answer about it is stored. The
+        kind is left out: a suggestion that the source later declares is the same join,
+        and a confirmation of it should not be lost to that."""
+        return f"{self.left_table}.{self.left_column}>{self.right_table}.{self.right_column}"
+
+    def as_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
 @dataclass(frozen=True)
 class Dialect:
     """The parts of a source's SQL that differ between sources, so that everything above
@@ -88,6 +118,10 @@ class Catalog(Protocol):
     def describe(self, name: str) -> Table:
         """A table by qualified name. Fewer segments than the source uses are filled in."""
 
+    def relationships(self) -> list[Relationship]:
+        """The relationships the source declares for itself, and only those. What is
+        inferred from names and types is not the source's word and is not reported here."""
+
     def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
         """Rows for a statement built above this layer, with every value bound by name
         rather than written into the statement.
@@ -118,6 +152,17 @@ class DatabricksCatalog:
 
     def describe(self, name: str) -> Table:
         return _table(self._workspace().tables.get(self.qualify(name)))
+
+    def relationships(self) -> list[Relationship]:
+        """The foreign keys Unity Catalog holds for the configured schema. A lakehouse
+        table carries one only where somebody declared it by hand, so this is often
+        empty, and what fills the gap is a suggestion a person confirms."""
+        workspace = self._workspace()
+        found = []
+        for name in self.tables():
+            for constraint in getattr(workspace.tables.get(name), "table_constraints", None) or []:
+                found.extend(_foreign_key(name, constraint))
+        return sorted(found)
 
     def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
         from databricks.sdk.service.sql import StatementParameterListItem, StatementState
@@ -234,6 +279,19 @@ def _value(text: str | None, type_name: str):
     if kind == BOOLEAN:
         return text == "true"
     return text
+
+
+def _foreign_key(table: str, constraint) -> list[Relationship]:
+    """One constraint as one relationship per column pair. A composite key joins on
+    several columns at once, and the pairs are read positionally because that is the
+    order the constraint declares them in."""
+    foreign_key = getattr(constraint, "foreign_key_constraint", None)
+    if foreign_key is None:
+        return []
+    return [
+        Relationship(table, child, foreign_key.parent_table, parent, kind=DECLARED)
+        for child, parent in zip(foreign_key.child_columns, foreign_key.parent_columns)
+    ]
 
 
 def _table(info) -> Table:

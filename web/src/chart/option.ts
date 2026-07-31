@@ -53,6 +53,36 @@ const MONO = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospac
 const LABEL = { fontFamily: MONO, fontSize: 11, color: INK_2 };
 
 /**
+ * The series colours, in the order they are assigned, which is the order and not a
+ * palette to pick from. The first three are the ones the application tokens carry and are
+ * validated against these surfaces; all eight are the data viz skill's categorical order,
+ * whose sequence is the colourblind safety mechanism rather than a preference. Assigning
+ * out of order breaks the adjacent pair gates that order was chosen to clear.
+ *
+ * Never cycled. ECharts cycles its own palette by default, which is what puts one colour
+ * on two entries of one legend: a chart that lies about which series it is.
+ */
+export const SERIES = [
+  "#2a78d6",
+  "#eb6834",
+  "#1baf7a",
+  "#eda100",
+  "#e87ba4",
+  "#008300",
+  "#4a3aa7",
+  "#e34948",
+] as const;
+
+/**
+ * Past the end of the order there is no ninth colour, and this refuses rather than
+ * inventing one. Folding the tail into "Other" would be aggregating in the renderer,
+ * which is the one thing the renderer does not do, and cycling would repaint a series in
+ * a colour another series already wears. So a chart with more series than the order holds
+ * is not drawn, and the message names the cap and the knob that sets it. See ROADMAP.md.
+ */
+export const SERIES_LIMIT = SERIES.length;
+
+/**
  * When a category label leans over. `buildOption` never sees the width it will be drawn
  * in, so this keys on the two things it does know: how many labels there are, and how
  * long the longest one is. Six labels of thirty characters collide as badly as fifteen
@@ -76,6 +106,32 @@ const axisName = (channel: Channel): string => channel.title ?? channel.field;
  * Rows are read by column name only, and never aggregated, sorted, filtered or
  * truncated. All of that already happened in the query.
  */
+/**
+ * How many series a spec plus its result set produces, which is one per distinct value of
+ * the colour channel, or one where there is no colour channel. An arc is one series of
+ * many slices and is counted as the slices, because a slice is what wears a colour there.
+ */
+export function seriesCount(spec: Spec, rows: Row[]): number {
+  const { color } = spec.chart.encoding;
+  const { x } = spec.chart.encoding;
+  if (spec.chart.mark === "arc" && x !== undefined) {
+    return distinct(rows.map((row) => label(row[x.field]))).length;
+  }
+  return color ? distinct(rows.map((row) => label(row[color.field]))).length : 1;
+}
+
+/** What is drawn instead of a chart with more series than there are colours. Returned
+ * rather than thrown, because the caller shows it the way it shows every other refusal. */
+export function overSeriesLimit(spec: Spec, rows: Row[]): string | null {
+  const count = seriesCount(spec, rows);
+  if (count <= SERIES_LIMIT) return null;
+  const knob = spec.chart.encoding.color ? "query.limit_by.limit" : "query.limit";
+  return (
+    `This chart has ${count} series and there are ${SERIES_LIMIT} colours to tell them apart ` +
+    `with. Lower ${knob} to ${SERIES_LIMIT} or fewer and run it again.`
+  );
+}
+
 export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
   if (rows.length === 0) return null;
 
@@ -105,9 +161,14 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
   } as const;
 
   if (mark === "arc") {
+    const slices = rows.map((row) => label(row[x.field]));
     return {
       title,
       tooltip,
+      // A slice is what wears a colour here, so the order is assigned across the slices
+      // rather than across the one series holding them.
+      color: [...SERIES.slice(0, slices.length)],
+      ...legend(slices, Boolean(title)),
       series: [
         {
           type: "pie",
@@ -140,12 +201,49 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
   return {
     title,
     tooltip,
+    // Assigned by position, and only as many as there are series, so the order is walked
+    // rather than cycled. A ninth series never gets here: `overSeriesLimit` refuses the
+    // chart before it is built, because the ninth colour ECharts would reach for is the
+    // first one again.
+    color: [...SERIES.slice(0, groups.length)],
+    ...legend(
+      groups.filter((group): group is string => group !== undefined),
+      Boolean(title),
+    ),
     xAxis: {
       ...axis(x),
       ...(categorical ? { data: categories, axisLabel: categoryLabel(categories) } : {}),
     },
     yAxis: axis(y),
     series: series as SeriesOption[],
+  };
+}
+
+/**
+ * The key, under the header. Two or more entries or none at all: a key with one entry is
+ * a label pretending to be a key, and the title already names that series.
+ *
+ * The entries wear ink, never the colour of the series they name. The colour is in the
+ * marker beside the word, which is what carries the identity; text that takes a series
+ * colour is text that fails a contrast rule to say something the marker already said.
+ */
+function legend(names: string[], titled: boolean) {
+  if (names.length < 2) return {};
+  return {
+    legend: {
+      data: [...names],
+      top: titled ? 30 : 2,
+      left: 0,
+      itemWidth: 9,
+      itemHeight: 9,
+      itemGap: 14,
+      icon: "roundRect",
+      textStyle: { fontFamily: MONO, fontSize: 11, color: INK_2 },
+    },
+    // The plot starts below the key rather than under it. ECharts leaves no room for a
+    // legend on its own and would draw the top of a bar through the words. The gap also
+    // has to clear the value axis's name, which is drawn above the grid.
+    grid: { top: titled ? 82 : 54, left: 8, right: 16, bottom: 8, containLabel: true },
   };
 }
 

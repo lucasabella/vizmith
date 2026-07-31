@@ -23,9 +23,10 @@ from pydantic import BaseModel
 
 from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
-from vizmith.catalog import Catalog, DatabricksCatalog
+from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Relationship
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import profile_table
+from vizmith.relationships import Confirmations, graph, resolve, suggest
 from vizmith.spec import validate_spec
 
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
@@ -91,6 +92,26 @@ def profiles(catalog: Catalog) -> tuple:
         return tuple(pool.map(lambda name: profile_table(catalog, name), names))
 
 
+def answers() -> Confirmations:
+    """What a person has said about the suggested relationships, read from disk on every
+    request rather than cached, because the file is small and a cache would be one more
+    thing that can hold a stale answer. `VIZMITH_STATE_DIR` is where it lives."""
+    directory = Path(os.environ.get("VIZMITH_STATE_DIR") or Path.home() / ".vizmith")
+    return Confirmations(directory / "relationships.json")
+
+
+def relationship_graph(catalog: Catalog) -> list[Relationship]:
+    """Everything known about how the tables relate: what the source declares, plus what
+    the profiles suggest. The suggestions are inferred from the profiles rather than from
+    a second read of the schema, so the columns this reasons about are the ones the panel
+    shows and the model was given."""
+    columns = {
+        table.table: {column.name: column.type for column in table.columns}
+        for table in profiles(catalog)
+    }
+    return graph(catalog.relationships(), suggest(columns))
+
+
 class SpecRequest(BaseModel):
     # Deliberately untyped: the validator answers for every shape a spec can arrive in,
     # including the ones that are not objects at all, and a model that rejected those
@@ -100,6 +121,18 @@ class SpecRequest(BaseModel):
 
 class QuestionRequest(BaseModel):
     question: str
+
+
+class AnswerRequest(BaseModel):
+    """A person's answer about one suggested relationship. It names the relationship by
+    the columns it joins rather than by an index into a list, because the list is derived
+    and would renumber under a re-profile."""
+
+    left_table: str
+    left_column: str
+    right_table: str
+    right_column: str
+    answer: str
 
 
 @app.get("/api/health")
@@ -113,6 +146,160 @@ def health() -> dict[str, str | bool]:
         "source": all(os.environ.get(name) for name in CONFIGURATION),
         "model": all(os.environ.get(name) for name in MODEL_CONFIGURATION),
     }
+
+
+@app.get("/api/tables")
+def tables(catalog: Annotated[Catalog, Depends(source)]):
+    """Every table in the configured schema, with the row count from its profile. Both
+    figures come from the profile the prompt path reads, because the panel showing them
+    claims to be showing what the model was given, and a second code path could produce a
+    figure that disagrees.
+
+    No column and no row: a table's columns are one request further in, where a person
+    asked for them."""
+    try:
+        profiled = profiles(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    return {"tables": [{"name": table.table, "row_count": table.row_count} for table in profiled]}
+
+
+@app.get("/api/tables/{name}")
+def table(name: str, catalog: Annotated[Catalog, Depends(source)]):
+    """One table's profile, as `TableProfile.as_dict` writes it: every figure as text, so
+    a date, a decimal and a string survive the same round trip. The sample threshold is
+    the security boundary and this does not widen it, so a column above it comes back
+    with no samples, exactly as the profile holds it.
+
+    A name the schema does not hold is a 404 naming it rather than a 500. The panel takes
+    its names from the list above, so a miss means the schema changed underneath a server
+    that profiled it once and has no way to notice."""
+    try:
+        profiled = profiles(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    for table in profiled:
+        if table.table == name:
+            return table.as_dict()
+    return JSONResponse(
+        status_code=404,
+        content={"errors": [f"no table named '{name}' in the configured schema"]},
+    )
+
+
+@app.get("/api/relationships")
+def relationships(
+    catalog: Annotated[Catalog, Depends(source)],
+    confirmations: Annotated[Confirmations, Depends(answers)],
+):
+    """What the source declares and what the profiles suggest, each with what a person
+    has said about it. A suggestion they turned down is not in the list, because a
+    rejected suggestion that came back would be the same question asked every time.
+
+    Nothing here is a row. A suggestion is made from column names and types, so naming
+    the two columns is the whole of the evidence for it."""
+    try:
+        known = relationship_graph(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    return {
+        "relationships": [
+            {**relationship.as_dict(), "state": confirmations.state(relationship)}
+            for relationship in confirmations.offered(known)
+        ]
+    }
+
+
+@app.post("/api/relationships")
+def answer(
+    request: AnswerRequest,
+    catalog: Annotated[Catalog, Depends(source)],
+    confirmations: Annotated[Confirmations, Depends(answers)],
+):
+    """Confirm a suggestion, mark it as not a match, or take a confirmation back. The
+    relationship has to be one the graph holds: an answer about a pair nothing suggested
+    would be a person naming a join by hand, which is a different feature and is not this
+    one."""
+    try:
+        known = relationship_graph(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+
+    named = Relationship(
+        request.left_table, request.left_column, request.right_table, request.right_column
+    )
+    match = next((r for r in known if r.key == named.key), None)
+    if match is None:
+        left = f"{named.left_table}.{named.left_column}"
+        right = f"{named.right_table}.{named.right_column}"
+        return JSONResponse(
+            status_code=404,
+            content={"errors": [f"nothing relates '{left}' to '{right}'"]},
+        )
+    if match.kind == DECLARED:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "errors": [
+                    f"'{match.key}' is declared by the source, which is not a person's to approve"
+                ]
+            },
+        )
+    try:
+        confirmations.record(match, request.answer)
+    except ValueError as failure:
+        return JSONResponse(status_code=400, content={"errors": [str(failure)]})
+    return {"relationship": match.as_dict(), "state": confirmations.state(match)}
+
+
+@app.get("/api/join-path")
+def join_path(
+    left: str,
+    right: str,
+    catalog: Annotated[Catalog, Depends(source)],
+    confirmations: Annotated[Confirmations, Depends(answers)],
+):
+    """How to get from one table to another, as the joins a spec would carry.
+
+    Resolution walks confirmed relationships only, so an ambiguity and an absence are
+    both refusals rather than a guess. They answer 400 with the resolver's own words,
+    because that message is what a person who dragged a field reads."""
+    try:
+        known = relationship_graph(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    try:
+        path = resolve(confirmations.usable(known), left, right)
+    except ValueError as failure:
+        return JSONResponse(status_code=400, content={"errors": [str(failure)]})
+    return {"joins": _joins(left, path)}
+
+
+def _joins(left: str, path: list[Relationship]) -> list[dict]:
+    """A resolved path in the spec grammar's own shape. Each step names the table being
+    joined, which is whichever end of the relationship the walk had not reached yet, so
+    the direction of the foreign key does not decide the direction of the walk."""
+    joins = []
+    reached = {left}
+    for relationship in path:
+        table = (
+            relationship.right_table
+            if relationship.left_table in reached
+            else relationship.left_table
+        )
+        joins.append(
+            {
+                "table": table,
+                "on": [
+                    {
+                        "left": f"{relationship.left_table}.{relationship.left_column}",
+                        "right": f"{relationship.right_table}.{relationship.right_column}",
+                    }
+                ],
+            }
+        )
+        reached.add(table)
+    return joins
 
 
 # Neither endpoint below declares a response model. One would re-serialise the rows on

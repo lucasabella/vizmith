@@ -212,6 +212,15 @@ def shipment_scans(rng, shipment_rows):
 # column as nullable, and the catalog would then report that as fact.
 NULLABLE = {("orders", "order_date"), ("shipments", "shipped_at")}
 
+# The relationships the fixture schema declares for itself, as foreign keys on the child
+# table. Deliberately not all of them: a lakehouse carries a declared key only where
+# somebody wrote one by hand, so the fixture has to hold both cases for the suggest and
+# confirm path to be testable at all. The rest are left for inference to offer.
+FOREIGN_KEYS = [
+    ("orders", "customer_id", "customers", "id"),
+    ("order_items", "order_id", "orders", "id"),
+]
+
 COLUMNS = {
     "customers": [("id", "INTEGER"), ("country", "VARCHAR"), ("signup_date", "DATE")],
     "products": [

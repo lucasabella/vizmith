@@ -24,9 +24,19 @@
   --serious: #ec835a;
   --bad: #d03b3b;
 
+  /* The categorical order, and it is an order rather than a palette to choose from. The
+     sequence is what clears the adjacent pair gates for colour vision deficiency, so a
+     series takes the next slot and nothing takes a slot for looking better in it. The
+     renderer holds the same eight in chart/option.ts, because ECharts paints onto a
+     canvas and cannot read a custom property. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
 
   --ui: "Avenir Next", "Segoe UI", Roboto, system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;

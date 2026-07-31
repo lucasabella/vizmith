@@ -9,11 +9,22 @@ from test_ask import ScriptedModel
 from test_model import ENDPOINT
 from test_spec_validation import EXPECTED_ERROR
 
-from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, app, constrains, model, source
+from vizmith.api import (
+    CONFIGURATION,
+    MODEL_CONFIGURATION,
+    answers,
+    app,
+    constrains,
+    model,
+    profiles,
+    source,
+)
 from vizmith.ask import ATTEMPTS, SCHEMA
 from vizmith.catalog import WAIT_LIMIT
 from vizmith.model import PROBE_PROMPT, Model, ModelError
+from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
 from vizmith.query import build
+from vizmith.relationships import CONFIRMED, OPEN, REJECTED, Confirmations
 from vizmith.spec import output_columns
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
@@ -126,6 +137,9 @@ class RefusingCatalog:
 
     def describe(self, name):
         return self._catalog.describe(name)
+
+    def relationships(self):
+        return self._catalog.relationships()
 
     def run(self, sql, parameters=None):
         raise RuntimeError(self._message)
@@ -404,6 +418,205 @@ def test_the_api_answers_with_rows_from_the_warehouse(live_catalog):
     assert [list(row) for row in body["rows"]] == [output_columns(spec["query"])] * len(body["rows"])
     assert all(isinstance(row["revenue"], (int, float)) for row in body["rows"])
     assert "SELECT" not in response.text
+
+
+@pytest.fixture
+def browsing(catalog, tmp_path):
+    """The API over the fixture catalog with a confirmations file of its own, which is
+    what the relationship endpoints write to. Nothing here reaches a home directory."""
+    app.dependency_overrides[source] = lambda: catalog
+    app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
+    profiles.cache_clear()
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+    profiles.cache_clear()
+
+
+ORDERS = "vizmith.shop.orders"
+CUSTOMERS = "vizmith.shop.customers"
+CARRIERS = "vizmith.shop.carriers"
+SHIPMENTS = "vizmith.shop.shipments"
+
+CARRIER_ID = {
+    "left_table": SHIPMENTS,
+    "left_column": "carrier_id",
+    "right_table": CARRIERS,
+    "right_column": "id",
+}
+
+
+def test_the_tables_endpoint_names_every_table_with_its_row_count(browsing, catalog):
+    body = browsing.get("/api/tables").json()
+
+    assert [table["name"] for table in body["tables"]] == catalog.tables()
+    assert all(table["row_count"] > 0 for table in body["tables"])
+
+
+def test_a_table_comes_back_with_the_profile_the_prompt_path_reads(browsing, catalog):
+    """One profile, not a second opinion about one. The panel showing these says they are
+    what the model was given, so they have to be the same figures."""
+    body = browsing.get(f"/api/tables/{CUSTOMERS}").json()
+
+    assert TableProfile.from_dict(body) == profile_table(catalog, CUSTOMERS)
+    assert {column["name"] for column in body["columns"]} == {"id", "country", "signup_date"}
+
+
+def test_a_column_above_the_sample_threshold_comes_back_with_no_samples(browsing):
+    """The threshold is the security boundary and this endpoint does not widen it. Every
+    customer id is raw data, and 2000 of them is what a sample list must never become."""
+    columns = {c["name"]: c for c in browsing.get(f"/api/tables/{CUSTOMERS}").json()["columns"]}
+
+    assert columns["id"]["distinct_count"] > SAMPLE_THRESHOLD
+    assert columns["id"]["samples"] == []
+    assert columns["country"]["samples"], "a low cardinality column still carries its vocabulary"
+
+
+def test_a_second_request_for_a_table_does_not_profile_it_again(browsing, catalog):
+    browsing.get(f"/api/tables/{CUSTOMERS}")
+    statements = len(catalog.statements)
+
+    browsing.get(f"/api/tables/{CUSTOMERS}")
+    browsing.get("/api/tables")
+
+    assert len(catalog.statements) == statements
+
+
+def test_a_source_that_refuses_while_profiling_says_so_rather_than_500(refusing):
+    """The panel reads these before anything else does, so a warehouse that is down has
+    to arrive as the warehouse's own words rather than as a server error."""
+    response = refusing(REFUSALS[0]).get("/api/tables")
+
+    assert response.status_code == 502
+    assert response.json() == {"errors": [REFUSALS[0]], "spoke": "source"}
+
+
+def test_a_table_the_schema_does_not_hold_is_refused_by_name(browsing):
+    response = browsing.get("/api/tables/vizmith.shop.invoices")
+
+    assert response.status_code == 404
+    assert "vizmith.shop.invoices" in response.json()["errors"][0]
+
+
+def test_a_profile_endpoint_carries_nothing_but_the_profile(browsing, catalog):
+    """Rule one, checked by shape rather than by looking for a value. A profile holds
+    counts, a range and the vocabulary of a low cardinality column, and asserting that a
+    row's id is absent would fail on a minimum that happens to equal it. What makes this
+    hold is that there is no field a row could arrive in: the response has the profile's
+    keys and no others, and every sample list is inside the threshold."""
+    fields = {
+        "name",
+        "type",
+        "null_rate",
+        "distinct_count",
+        "distinct_count_exact",
+        "minimum",
+        "maximum",
+        "samples",
+    }
+
+    for name in catalog.tables():
+        body = browsing.get(f"/api/tables/{name}").json()
+        assert set(body) == {"table", "row_count", "columns"}
+        for column in body["columns"]:
+            assert set(column) == fields
+            assert len(column["samples"]) <= SAMPLE_THRESHOLD
+            if column["distinct_count"] > SAMPLE_THRESHOLD:
+                assert column["samples"] == []
+
+
+def test_relationships_report_what_is_declared_and_what_is_suggested(browsing):
+    body = browsing.get("/api/relationships").json()["relationships"]
+    kinds = {f"{r['left_table']}.{r['left_column']}": (r["kind"], r["state"]) for r in body}
+
+    assert kinds[f"{ORDERS}.customer_id"] == ("declared", CONFIRMED)
+    assert kinds[f"{SHIPMENTS}.carrier_id"] == ("suggested", OPEN)
+
+
+def test_confirming_a_suggestion_makes_it_resolve(browsing):
+    """The confirmation is the whole gate. Before it there is no path, after it there is
+    one, and nothing in between guesses."""
+    refused = browsing.get("/api/join-path", params={"left": SHIPMENTS, "right": CARRIERS})
+
+    browsing.post("/api/relationships", json={**CARRIER_ID, "answer": CONFIRMED})
+    resolved = browsing.get("/api/join-path", params={"left": SHIPMENTS, "right": CARRIERS})
+
+    assert refused.status_code == 400
+    assert "no confirmed relationship" in refused.json()["errors"][0]
+    assert resolved.json()["joins"] == [
+        {
+            "table": CARRIERS,
+            "on": [{"left": f"{SHIPMENTS}.carrier_id", "right": f"{CARRIERS}.id"}],
+        }
+    ]
+
+
+def test_an_answer_survives_a_reload(browsing):
+    browsing.post("/api/relationships", json={**CARRIER_ID, "answer": CONFIRMED})
+
+    listed = browsing.get("/api/relationships").json()["relationships"]
+    carriers = next(r for r in listed if r["left_column"] == "carrier_id")
+
+    assert carriers["state"] == CONFIRMED
+
+
+def test_a_rejected_suggestion_is_not_listed_again(browsing):
+    browsing.post("/api/relationships", json={**CARRIER_ID, "answer": REJECTED})
+
+    listed = browsing.get("/api/relationships").json()["relationships"]
+
+    assert all(r["left_column"] != "carrier_id" for r in listed)
+
+
+def test_a_confirmation_can_be_taken_back(browsing):
+    browsing.post("/api/relationships", json={**CARRIER_ID, "answer": CONFIRMED})
+    browsing.post("/api/relationships", json={**CARRIER_ID, "answer": OPEN})
+
+    resolved = browsing.get("/api/join-path", params={"left": SHIPMENTS, "right": CARRIERS})
+
+    assert resolved.status_code == 400
+
+
+def test_a_declared_relationship_is_not_a_persons_to_approve(browsing):
+    response = browsing.post(
+        "/api/relationships",
+        json={
+            "left_table": ORDERS,
+            "left_column": "customer_id",
+            "right_table": CUSTOMERS,
+            "right_column": "id",
+            "answer": REJECTED,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "declared by the source" in response.json()["errors"][0]
+
+
+def test_an_answer_about_a_pair_nothing_suggested_is_refused(browsing):
+    response = browsing.post(
+        "/api/relationships",
+        json={
+            "left_table": ORDERS,
+            "left_column": "status",
+            "right_table": CUSTOMERS,
+            "right_column": "country",
+            "answer": CONFIRMED,
+        },
+    )
+
+    assert response.status_code == 404
+    assert "nothing relates" in response.json()["errors"][0]
+
+
+def test_a_join_path_crosses_an_intermediate_table(browsing):
+    """customers to order_items through orders, both hops declared, so this resolves with
+    nothing confirmed by hand. Each step names the table being joined rather than the one
+    the foreign key points at."""
+    body = browsing.get(
+        "/api/join-path", params={"left": CUSTOMERS, "right": "vizmith.shop.order_items"}
+    ).json()
+
+    assert [join["table"] for join in body["joins"]] == [ORDERS, "vizmith.shop.order_items"]
 
 
 def test_a_request_cannot_name_a_source_or_carry_sql(client, catalog):

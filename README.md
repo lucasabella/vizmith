@@ -4,7 +4,7 @@ Ask a question in plain language, get a chart back.
 
 Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees your raw rows.
 
-**Status: early development. The shell runs and the backend answers. Nothing behind it works yet.**
+**Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, and the Data view is where a suggested relationship is confirmed. Asking a question in words needs a model endpoint. Dashboards and the eval harness do not exist.
 
 ## Why metadata and not the data
 
@@ -21,10 +21,14 @@ The model does not write SQL. It returns a query IR: a JSON description of table
 The spec is versioned JSON, validated against a schema, diffable in git. Every feature produces the same output type:
 
 - Type a question, get a spec.
+- Drag a column into a well, get a spec.
+- Click a mark, get the same spec narrowed to what you clicked.
 - Adjust the spec by hand if you want more control.
 - Save a set of specs as a dashboard.
 
-Nothing generated is executed as code.
+Nothing generated is executed as code. A spec the interface writes goes through the same validator a model's answer does, because the validator is the only judge of what is legal.
+
+A chart built by dragging needs to know how two tables relate, and that comes from the catalog rather than from a prompt. Foreign keys the source declares are facts; everything else is suggested from column names and types and is not used for a join until somebody confirms it in the Data view. A wrong join produces a plausible number rather than an error, which is the failure the whole design exists to prevent, so a column with no confirmed path between its table and the query's is refused with both table names rather than joined on a guess.
 
 ## Bring your own model
 

@@ -4,7 +4,19 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import Chart from "./Chart";
-import { buildOption, markText, NO_VALUE, type Channel, type Mark, type Row, type Spec } from "./option";
+import {
+  buildOption,
+  markText,
+  overSeriesLimit,
+  seriesCount,
+  NO_VALUE,
+  SERIES,
+  SERIES_LIMIT,
+  type Channel,
+  type Mark,
+  type Row,
+  type Spec,
+} from "./option";
 
 const FIXTURES = fileURLToPath(new URL("../../../tests/fixtures/specs/valid", import.meta.url));
 
@@ -182,6 +194,125 @@ describe("colour channel", () => {
     ]);
 
     expect(series[0].data).toEqual([1, null]);
+  });
+});
+
+describe("series colours", () => {
+  const categories = (count: number): Row[] =>
+    Array.from({ length: count }, (_, i) => ({ country: "A", category: `c${i}`, revenue: i + 1 }));
+
+  const built = (rows: Row[]) =>
+    buildOption(
+      spec({
+        mark: "bar",
+        encoding: { x: nominal("country"), y: quantitative("revenue"), color: nominal("category") },
+      }),
+      rows,
+    );
+
+  it("assigns the documented order, in that order", () => {
+    expect(built(categories(4))?.color).toEqual([...SERIES.slice(0, 4)]);
+  });
+
+  it("takes only as many colours as there are series, so nothing is cycled", () => {
+    for (let count = 1; count <= SERIES_LIMIT; count += 1) {
+      const assigned = built(categories(count))?.color as string[];
+      expect(assigned).toHaveLength(count);
+      expect(new Set(assigned).size).toBe(count);
+    }
+  });
+
+  it("gives a one series chart the first slot", () => {
+    const option = buildOption(
+      spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } }),
+      [{ country: "A", revenue: 1 }],
+    );
+
+    expect(option?.color).toEqual([SERIES[0]]);
+  });
+
+  it("colours the slices of an arc, since a slice is what wears one there", () => {
+    const option = buildOption(
+      spec({ mark: "arc", encoding: { x: nominal("reason"), y: quantitative("returns_count") } }),
+      [
+        { reason: "damaged", returns_count: 7 },
+        { reason: "wrong size", returns_count: 3 },
+      ],
+    );
+
+    expect(option?.color).toEqual([SERIES[0], SERIES[1]]);
+  });
+
+  for (const [name, fixture] of fixtures) {
+    if (fixture.chart.encoding.x === undefined) continue;
+
+    it(`${name} takes its colours from the order`, () => {
+      const rows = rowsFor(fixture, 4);
+      const option = buildOption(fixture, rows);
+      const count = seriesCount(fixture, rows);
+
+      expect(option?.color).toEqual([...SERIES.slice(0, count)]);
+    });
+  }
+
+  it("refuses a chart with more series than the order holds", () => {
+    const chart = spec({
+      mark: "bar",
+      encoding: { x: nominal("country"), y: quantitative("revenue"), color: nominal("category") },
+    });
+    const rows = categories(SERIES_LIMIT + 1);
+
+    expect(overSeriesLimit(chart, categories(SERIES_LIMIT))).toBeNull();
+    expect(overSeriesLimit(chart, rows)).toContain(`${SERIES_LIMIT + 1} series`);
+    expect(overSeriesLimit(chart, rows)).toContain("query.limit_by.limit");
+  });
+});
+
+describe("the legend", () => {
+  const withSeries = (names: (string | null)[], title?: string) =>
+    buildOption(
+      spec(
+        {
+          mark: "bar",
+          encoding: { x: nominal("country"), y: quantitative("revenue"), color: nominal("category") },
+        },
+        title,
+      ),
+      names.map((category, i) => ({ country: `A${i}`, category, revenue: i + 1 })),
+    );
+
+  it("names every series once there are two of them", () => {
+    expect(withSeries(["one", "two"])?.legend).toMatchObject({ data: ["one", "two"] });
+  });
+
+  it("draws none for a single series, since a key with one entry is a label", () => {
+    expect(withSeries(["one"])?.legend).toBeUndefined();
+    expect(
+      buildOption(
+        spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } }),
+        [{ country: "A", revenue: 1 }],
+      )?.legend,
+    ).toBeUndefined();
+  });
+
+  it("names a null series the way the axis does, not as a blank entry", () => {
+    expect(withSeries(["one", null])?.legend).toMatchObject({ data: ["one", NO_VALUE] });
+  });
+
+  it("wears ink and never a series colour", () => {
+    const legend = withSeries(["one", "two"])?.legend as { textStyle: { color: string } };
+
+    expect(legend.textStyle.color).toBe("#5c6b7a");
+    expect(SERIES).not.toContain(legend.textStyle.color);
+  });
+
+  it("sits under the header rather than over the plot", () => {
+    const titled = withSeries(["one", "two"], "Revenue") as {
+      legend: { top: number };
+      grid: { top: number };
+    };
+
+    expect(titled.grid.top).toBeGreaterThan(titled.legend.top);
   });
 });
 

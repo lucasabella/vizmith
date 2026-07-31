@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
-import Chart from "./chart/Chart";
+import { useEffect, useMemo, useState } from "react";
+import { getProfile, getTables, type TableProfile } from "./api";
+import Visual from "./chart/Visual";
 import type { Row, Spec } from "./chart/option";
-
-const WELLS = ["Axis", "Legend", "Values", "Top N", "Filters"];
+import Fields from "./panels/Fields";
+import Wells from "./panels/Wells";
+import Data from "./views/Data";
+import { drawable, type Draft, type Field } from "./spec/spec";
 
 /** Which part refused, as the server named it. It is the only thing that can: a question
  * passes through the source, the model and the source again, and from here they are one
@@ -45,13 +48,20 @@ export default function App() {
   const [source, setSource] = useState(false);
   const [model, setModel] = useState(false);
   const [question, setQuestion] = useState("");
+  const [view, setView] = useState<"chart" | "data">("chart");
   const [visualisationOpen, setVisualisationOpen] = useState(true);
   const [fieldsOpen, setFieldsOpen] = useState(true);
   const [json, setJson] = useState(false);
   const [text, setText] = useState("");
+  const [tables, setTables] = useState<TableProfile[] | null>(null);
+  const [schemaFailure, setSchemaFailure] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<Field | null>(null);
   // What is in flight. Not an Outcome: running is the absence of one so far.
   const [working, setWorking] = useState<"question" | "spec" | null>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "nothing" });
+  // Where a drill came from. A drill that cannot be undone is a trap, so the spec that was
+  // replaced stays reachable, as the text and the chart it drew.
+  const [before, setBefore] = useState<{ text: string; outcome: Outcome }[]>([]);
   const running = working !== null;
 
   useEffect(() => {
@@ -64,6 +74,50 @@ export default function App() {
       })
       .catch(() => setBackend(null));
   }, []);
+
+  // The schema, once, when there is a source to read it from. Every table's profile
+  // rather than the list alone: the panel shows a column's profile, the wells need its
+  // type to infer anything, and the server profiled all of them on the first request
+  // anyway. The same figures the model is given, from the same endpoint.
+  useEffect(() => {
+    if (!source) return;
+    let live = true;
+    getTables()
+      .then((body) => Promise.all(body.tables.map((table) => getProfile(table.name))))
+      .then((profiles) => live && setTables(profiles))
+      .catch((error: Error) => live && setSchemaFailure(error.message));
+    return () => {
+      live = false;
+    };
+  }, [source]);
+
+  /**
+   * The spec on screen, parsed. The wells and `{ } JSON` are two views of one spec rather
+   * than two specs, so this is the one place it lives and both write to it. Text that is
+   * not JSON parses to nothing and the wells go quiet, which is what a half typed spec
+   * should do to them.
+   */
+  const draft = useMemo<Draft | null>(() => {
+    try {
+      const parsed = JSON.parse(text);
+      return parsed !== null && typeof parsed === "object" ? (parsed as Draft) : null;
+    } catch {
+      return null;
+    }
+  }, [text]);
+
+  /** Every column of every table, which is what a well drags and what a drill offers. */
+  const columns = useMemo<Field[]>(
+    () =>
+      (tables ?? []).flatMap((table) =>
+        table.columns.map((column) => ({
+          table: table.table,
+          column: column.name,
+          type: column.type,
+        })),
+      ),
+    [tables],
+  );
 
   /**
    * The API decides. Nothing here validates, because a second opinion in the browser is
@@ -125,13 +179,39 @@ export default function App() {
     if (question.trim() !== "") send("/api/ask", { question }, question);
   };
 
+  /**
+   * A well was edited. The spec it produced goes to `/api/execute`, which validates before
+   * it reaches the source, so a well that produced something illegal shows the validator's
+   * words and runs no query.
+   *
+   * A spec with no measure is not sent. It is not a spec that failed, it is one that is
+   * not finished, and answering an unfinished spec with a required property error would
+   * put a refusal on screen for every drop but the last.
+   */
+  const edited = (next: Draft) => {
+    setText(JSON.stringify(next, null, 2));
+    if (drawable(next)) send("/api/execute", { spec: next });
+  };
+
+  /** A drill replaces the chart, and keeps the one it replaced. */
+  const drilled = (next: Draft) => {
+    setBefore([...before, { text, outcome }]);
+    setText(JSON.stringify(next, null, 2));
+    send("/api/execute", { spec: next });
+  };
+
+  const back = () => {
+    const previous = before[before.length - 1];
+    if (previous === undefined) return;
+    setBefore(before.slice(0, -1));
+    setText(previous.text);
+    setOutcome(previous.outcome);
+  };
+
   // Both halves have to be there: the model writes the spec and the source answers it.
   const askable = source && model;
-  const waiting = !source
-    ? "Connect a source before asking a question"
-    : "Set VIZMITH_MODEL_BASE_URL, NAME and KEY to ask a question";
 
-  const columns = [
+  const columnsFor = [
     "var(--w-rail)",
     "1fr",
     visualisationOpen ? "var(--w-visualisation)" : "var(--w-shutter)",
@@ -145,6 +225,13 @@ export default function App() {
         <span className="pill">
           <i className={source ? "pill__dot pill__dot--live" : "pill__dot"} />
           {source ? "source configured" : "no source"}
+        </span>
+        {/* The model endpoint is the other half of asking a question, and health already
+            reports it, so the chrome says whether it is there rather than leaving the
+            disabled question field to explain itself. */}
+        <span className="pill">
+          <i className={model ? "pill__dot pill__dot--live" : "pill__dot"} />
+          {model ? "model configured" : "no model endpoint"}
         </span>
         <span className="chrome__spacer" />
         <span className="pill">
@@ -160,44 +247,76 @@ export default function App() {
         <Badge outcome={outcome} />
       </div>
 
-      <div className="body" style={{ gridTemplateColumns: columns }}>
+      <div className="body" style={{ gridTemplateColumns: columnsFor }}>
         <nav className="rail">
-          <button className="rail__btn rail__btn--on" title="Chart" aria-label="Chart">
+          <button
+            className={view === "chart" ? "rail__btn rail__btn--on" : "rail__btn"}
+            title="Chart"
+            aria-label="Chart"
+            aria-pressed={view === "chart"}
+            onClick={() => setView("chart")}
+          >
             <ChartIcon />
           </button>
-          <button className="rail__btn" title="Data" aria-label="Data">
+          <button
+            className={view === "data" ? "rail__btn rail__btn--on" : "rail__btn"}
+            title="Data"
+            aria-label="Data"
+            aria-pressed={view === "data"}
+            onClick={() => setView("data")}
+          >
             <DataIcon />
           </button>
         </nav>
 
-        <main className="canvas">
-          <div className="ask">
-            <div className="ask__field">
-              <span className="ask__caret">&rsaquo;</span>
-              <input
-                className="ask__input"
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && askQuestion()}
-                placeholder={askable ? "Ask a question about your data" : waiting}
-                disabled={!askable || running}
-              />
-              <span className="ask__key">Return</span>
+        {view === "data" ? (
+          <main className="canvas canvas--data">
+            <Data />
+          </main>
+        ) : (
+          <main className="canvas">
+            <div className="ask">
+              <div className="ask__field">
+                <span className="ask__caret">&rsaquo;</span>
+                <input
+                  className="ask__input"
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => event.key === "Enter" && askQuestion()}
+                  placeholder={
+                    askable ? "Ask a question about your data" : "Finish setting Vizmith up to ask a question"
+                  }
+                  disabled={!askable || running}
+                />
+                <span className="ask__key">Return</span>
+              </div>
             </div>
-          </div>
 
-          <div className="plot">
-            <Canvas outcome={outcome} working={working} source={source} askable={askable} />
-          </div>
+            <div className="plot">
+              <Canvas
+                outcome={outcome}
+                working={working}
+                source={source}
+                model={model}
+                columns={columns}
+                onDrill={drilled}
+              />
+            </div>
 
-          <div className="pages">
-            <span className="pages__tab pages__tab--on">Page 1</span>
-            <span className="pages__tab pages__tab--add">+ page</span>
-            <span className="pages__meta">
-              {outcome.kind === "chart" ? `${outcome.rows.length} rows` : "no rows"}
-            </span>
-          </div>
-        </main>
+            <div className="pages">
+              <span className="pages__tab pages__tab--on">Page 1</span>
+              <span className="pages__tab pages__tab--add">+ page</span>
+              {before.length > 0 ? (
+                <button className="pages__back" onClick={back}>
+                  &larr; the chart this came from
+                </button>
+              ) : null}
+              <span className="pages__meta">
+                {outcome.kind === "chart" ? `${outcome.rows.length} rows` : "no rows"}
+              </span>
+            </div>
+          </main>
+        )}
 
         {visualisationOpen ? (
           <section className="panel">
@@ -234,24 +353,15 @@ export default function App() {
                     <button className="btn" onClick={run} disabled={!source || running || text === ""}>
                       {running ? "Running" : "Run spec"}
                     </button>
-                    {source ? null : (
-                      <p className="spec__note">
-                        Running needs a source. Set <code>VIZMITH_DATABRICKS_PROFILE</code>,{" "}
-                        <code>CATALOG</code>, <code>SCHEMA</code> and <code>WAREHOUSE</code>, then restart
-                        the server.
-                      </p>
-                    )}
                   </div>
                 </div>
               ) : (
-                <div className="wells">
-                  {WELLS.map((well) => (
-                    <div key={well}>
-                      <span className="well__name">{well}</span>
-                      <div className="well__drop">Drop a field here</div>
-                    </div>
-                  ))}
-                </div>
+                <Wells
+                  draft={draft}
+                  dragging={dragging}
+                  onChange={edited}
+                  onRelationships={() => setView("data")}
+                />
               )}
             </div>
           </section>
@@ -279,11 +389,11 @@ export default function App() {
               </span>
             </div>
             <div className="panel__body">
-              <div className="fields">
-                <p className="fields__note">
-                  Tables and their column profiles appear here once a source is connected.
-                </p>
-              </div>
+              <Fields
+                tables={source ? tables : []}
+                failure={schemaFailure}
+                onDrag={setDragging}
+              />
             </div>
             <div className="panel__foot">
               <span className="panel__foot-h">Profile only</span>
@@ -325,18 +435,24 @@ function Canvas({
   outcome,
   working,
   source,
-  askable,
+  model,
+  columns,
+  onDrill,
 }: {
   outcome: Outcome;
   working: "question" | "spec" | null;
   source: boolean;
-  askable: boolean;
+  model: boolean;
+  columns: Field[];
+  onDrill: (draft: Draft) => void;
 }) {
   // What is in flight comes first. The chart that is still on screen answered the
   // previous question, which is not the one being waited for.
   if (working !== null) return <Working asking={working === "question"} />;
 
-  if (outcome.kind === "chart") return <Chart spec={outcome.spec} rows={outcome.rows} />;
+  if (outcome.kind === "chart") {
+    return <Visual spec={outcome.spec} rows={outcome.rows} columns={columns} onDrill={onDrill} />;
+  }
 
   if (outcome.kind === "refused") {
     return (
@@ -358,13 +474,46 @@ function Canvas({
       <div>
         <p className="empty__title">{source ? "No spec yet" : "No source connected"}</p>
         <p className="empty__body">
-          {askable
-            ? "Ask a question above, or open { } JSON in the Visualisation panel and paste a spec. The chart appears here."
-            : source
-              ? "Open { } JSON in the Visualisation panel, paste a spec and run it. The chart appears here."
-              : "Point Vizmith at a Databricks workspace. It reads the schema and profiles every column, then you can ask a question."}
+          {source && model
+            ? "Ask a question above, drag a column from Fields into a well, or open { } JSON and paste a spec. The chart appears here."
+            : "Point Vizmith at a Databricks workspace and at a model endpoint. It reads the schema and profiles every column, then you can ask a question."}
         </p>
+        {source && model ? null : <Setup source={source} model={model} />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What is missing and what to do about it, in one place.
+ *
+ * Configuration is server side and stays that way: a request that cannot name a database
+ * is a request that cannot be pointed at one, which is a sentence worth keeping. That
+ * decision costs this, a screen telling a person to edit a file and restart a process, so
+ * it is said once, here, rather than in two panels with different wording. See ROADMAP.md.
+ */
+function Setup({ source, model }: { source: boolean; model: boolean }) {
+  return (
+    <div className="setup">
+      <p className="setup__head">Set these in <code>.env</code>, then restart the server</p>
+      {source ? null : (
+        <p className="setup__line">
+          <span className="setup__what">The source</span>
+          <code>
+            VIZMITH_DATABRICKS_PROFILE, CATALOG, SCHEMA, WAREHOUSE
+          </code>
+          <span className="setup__why">Reads the schema, profiles the columns and runs the query.</span>
+        </p>
+      )}
+      {model ? null : (
+        <p className="setup__line">
+          <span className="setup__what">The model endpoint</span>
+          <code>VIZMITH_MODEL_BASE_URL, NAME, KEY</code>
+          <span className="setup__why">
+            Writes a spec from a question. Without it a spec still runs; only asking is off.
+          </span>
+        </p>
+      )}
     </div>
   );
 }

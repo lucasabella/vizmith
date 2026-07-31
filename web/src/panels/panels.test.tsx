@@ -1,0 +1,217 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import type { ColumnProfile, TableProfile } from "../api";
+import Table from "../chart/Table";
+import Visual from "../chart/Visual";
+import type { Row, Spec } from "../chart/option";
+import { SERIES_LIMIT } from "../chart/option";
+import Fields, { Profile, nullRate } from "./Fields";
+import Wells from "./Wells";
+import { place, type Draft, type Field } from "../spec/spec";
+
+const drawn = (element: React.ReactElement) => renderToStaticMarkup(element);
+
+const column = (over: Partial<ColumnProfile> = {}): ColumnProfile => ({
+  name: "country",
+  type: "string",
+  null_rate: 0,
+  distinct_count: 14,
+  distinct_count_exact: false,
+  minimum: null,
+  maximum: null,
+  samples: ["Belgium", "Germany", "Netherlands"],
+  ...over,
+});
+
+const profile = (columns: ColumnProfile[]): TableProfile => ({
+  table: "vizmith.shop.customers",
+  row_count: 2000,
+  columns,
+});
+
+/** The tree with one table open, which is what the panel renders once a table is
+ * expanded. A static render only reaches the closed state, so the open one is built by
+ * rendering the column node through a profile with a single column. */
+const tree = (columns: ColumnProfile[]) =>
+  drawn(<Fields tables={[profile(columns)]} failure={null} onDrag={() => {}} />);
+
+describe("the fields tree", () => {
+  it("lists a table with its row count", () => {
+    const markup = tree([column()]);
+
+    expect(markup).toContain("customers");
+    expect(markup).toContain("2,000 rows");
+  });
+
+  it("says so when a source is not connected yet", () => {
+    expect(drawn(<Fields tables={[]} failure={null} onDrag={() => {}} />)).toContain(
+      "once a source is connected",
+    );
+  });
+
+  it("shows what the source refused rather than an empty tree", () => {
+    expect(drawn(<Fields tables={null} failure="the warehouse said no" onDrag={() => {}} />)).toContain(
+      "the warehouse said no",
+    );
+  });
+
+  it("shows nothing of a column until the tree is opened", () => {
+    // The profile is one interaction in, which a static render does not reach. What this
+    // holds is that a closed tree is names and counts and no values.
+    expect(tree([column()])).not.toContain("Netherlands");
+  });
+});
+
+describe("a column's profile", () => {
+  const shown = (over: Partial<ColumnProfile>) => drawn(<Profile column={column(over)} />);
+
+  it("marks a distinct count the source estimated, and leaves an exact one alone", () => {
+    expect(shown({ distinct_count_exact: false })).toContain("approx.");
+    expect(shown({ distinct_count_exact: true })).not.toContain("approx.");
+  });
+
+  it("says why a column has no samples rather than showing an empty list", () => {
+    const markup = shown({ samples: [], distinct_count: 2308 });
+
+    expect(markup).toContain("too many distinct values");
+    expect(markup).toContain("2,308");
+  });
+
+  it("lists the vocabulary of a low cardinality column", () => {
+    expect(shown({})).toContain("Netherlands");
+  });
+
+  it("shows a range where the type has one", () => {
+    expect(shown({ type: "date", minimum: "2024-01-01", maximum: "2026-06-30" })).toContain("2024-01-01");
+    expect(shown({})).not.toContain("range");
+  });
+
+  it("never rounds a null rate that is not zero down to none", () => {
+    expect(nullRate(0)).toBe("none");
+    expect(nullRate(0.000001)).toBe("<0.1%");
+    expect(nullRate(0.034)).toBe("3.4%");
+    expect(nullRate(0.5)).toBe("50%");
+    expect(nullRate(1)).toBe("all");
+  });
+});
+
+describe("the table view", () => {
+  const rows: Row[] = [
+    { country: "Netherlands", revenue: 91240.5, orders: 12 },
+    { country: null, revenue: 3, orders: 1 },
+  ];
+
+  it("shows the output columns in the order the builder emitted them", () => {
+    const markup = drawn(<Table rows={rows} />);
+    const order = ["country", "revenue", "orders"].map((name) => markup.indexOf(`>${name}<`));
+
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(order[0]).toBeGreaterThan(-1);
+  });
+
+  it("prints a value as it arrived, and a null the way the axis does", () => {
+    const markup = drawn(<Table rows={rows} />);
+
+    expect(markup).toContain("91240.5");
+    expect(markup).toContain("(no value)");
+  });
+
+  it("gives a column of figures tabular numerals and the right edge", () => {
+    expect(drawn(<Table rows={rows} />)).toContain("table__td--figure");
+  });
+});
+
+const COUNTRY: Field = { table: "vizmith.shop.customers", column: "country", type: "string" };
+const CATEGORY: Field = { table: "vizmith.shop.products", column: "category", type: "string" };
+const TOTAL: Field = { table: "vizmith.shop.orders", column: "total", type: "decimal" };
+const ORDERED: Field = { table: "vizmith.shop.orders", column: "order_date", type: "date" };
+
+const wells = (draft: Draft | null) =>
+  drawn(<Wells draft={draft} dragging={null} onChange={() => {}} onRelationships={() => {}} />);
+
+describe("the wells", () => {
+  const revenue = place(place(null, "Axis", COUNTRY), "Values", TOTAL);
+
+  it("offers a drop zone for every well while they are empty", () => {
+    expect(wells(null).match(/Drop a field here/g)).toHaveLength(5);
+  });
+
+  it("shows what is in a well by the name the result set uses", () => {
+    const markup = wells(revenue);
+
+    expect(markup).toContain("country");
+    expect(markup).toContain("total");
+  });
+
+  it("shows the aggregate it inferred, as something that can be changed", () => {
+    const markup = wells(revenue);
+
+    expect(markup).toContain('<option value="sum" selected');
+    expect(markup).toContain('value="count_distinct"');
+  });
+
+  it("shows the date unit it inferred", () => {
+    const markup = wells(place(null, "Axis", ORDERED));
+
+    expect(markup).toContain('<option value="month" selected');
+    expect(markup).toContain("every value");
+  });
+
+  it("says nothing about Top N until the chart has a legend", () => {
+    expect(wells(revenue)).not.toContain("Required");
+  });
+
+  it("marks Top N as missing, in red, once there is a legend and no ranking", () => {
+    const markup = wells(place(revenue, "Legend", CATEGORY));
+
+    expect(markup).toContain("Missing");
+    expect(markup).toContain("well__drop--missing");
+  });
+
+  it("reads Required once the ranking is there", () => {
+    const ranked = place(place(revenue, "Legend", CATEGORY), "Top N", COUNTRY);
+    const markup = wells(ranked);
+
+    expect(markup).toContain("Required");
+    expect(markup).not.toContain("Missing");
+    expect(markup).toContain("country by total");
+  });
+
+  it("offers a way back out of every well it filled", () => {
+    expect(wells(revenue)).toContain("Remove from Axis");
+    expect(wells(revenue)).toContain("Remove from Values");
+  });
+});
+
+describe("the visual card", () => {
+  const spec: Spec = {
+    title: "Revenue per country",
+    chart: {
+      mark: "bar",
+      encoding: {
+        x: { field: "country", type: "nominal" },
+        y: { field: "revenue", type: "quantitative" },
+        color: { field: "category", type: "nominal" },
+      },
+    },
+  };
+
+  const many = (count: number): Row[] =>
+    Array.from({ length: count }, (_, i) => ({ country: "A", category: `c${i}`, revenue: i }));
+
+  it("carries the Chart and Table control", () => {
+    const markup = drawn(<Visual spec={spec} rows={many(2)} columns={[]} onDrill={() => {}} />);
+
+    expect(markup).toContain(">Chart<");
+    expect(markup).toContain(">Table<");
+  });
+
+  it("refuses to draw more series than there are colours, and says what to lower", () => {
+    const markup = drawn(
+      <Visual spec={spec} rows={many(SERIES_LIMIT + 1)} columns={[]} onDrill={() => {}} />,
+    );
+
+    expect(markup).toContain(`${SERIES_LIMIT + 1} series`);
+    expect(markup).toContain("query.limit_by.limit");
+  });
+});

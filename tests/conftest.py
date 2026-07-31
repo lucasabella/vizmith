@@ -6,17 +6,19 @@ from pathlib import Path
 import duckdb
 import pytest
 from dotenv import load_dotenv
-from generate_data import COLUMNS, DATA_DIR, NULLABLE
+from generate_data import COLUMNS, DATA_DIR, FOREIGN_KEYS, NULLABLE
 
 from vizmith.catalog import (
     DATE,
     DECIMAL,
+    DECLARED,
     INTEGER,
     STRING,
     TIMESTAMP,
     Column,
     DatabricksCatalog,
     Dialect,
+    Relationship,
     Table,
 )
 
@@ -83,6 +85,15 @@ class FixtureCatalog:
                 Column(name=column, type=TYPES[type_], nullable=(table, column) in NULLABLE)
                 for column, type_ in COLUMNS[table]
             ),
+        )
+
+    def relationships(self):
+        """What the fixture schema declares. Two of them, so that a test can tell a
+        declared relationship from a suggested one rather than finding every pair
+        reported the same way."""
+        return sorted(
+            Relationship(f"vizmith.shop.{left}", column, f"vizmith.shop.{right}", key, kind=DECLARED)
+            for left, column, right, key in FOREIGN_KEYS
         )
 
     def run(self, sql, parameters=None):
