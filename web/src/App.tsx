@@ -20,6 +20,8 @@ const REJECTED =
 export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
   const [source, setSource] = useState(false);
+  const [model, setModel] = useState(false);
+  const [question, setQuestion] = useState("");
   const [visualisationOpen, setVisualisationOpen] = useState(true);
   const [fieldsOpen, setFieldsOpen] = useState(true);
   const [json, setJson] = useState(false);
@@ -33,38 +35,28 @@ export default function App() {
       .then((body) => {
         setBackend(body.version);
         setSource(body.source);
+        setModel(body.model);
       })
       .catch(() => setBackend(null));
   }, []);
 
   /**
-   * The spec goes to the API and the API decides. Nothing here validates, because a
-   * second opinion in the browser is one that can disagree with the one that counts.
+   * The API decides. Nothing here validates, because a second opinion in the browser is
+   * one that can disagree with the one that counts. `adopt` puts the spec that came back
+   * into the editor, which a question needs and a spec that was typed does not.
    */
-  const run = async () => {
-    let spec: Spec;
-    try {
-      spec = JSON.parse(text);
-    } catch (error) {
-      setOutcome({
-        kind: "refused",
-        heading: "What the parser said",
-        lines: [(error as Error).message],
-        plain: "The spec is not valid JSON, so it was never sent.",
-      });
-      return;
-    }
-
+  const send = async (endpoint: string, payload: object, adopt = false) => {
     setRunning(true);
     try {
-      const response = await fetch("/api/execute", {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec }),
+        body: JSON.stringify(payload),
       });
       const body = await response.json();
       if (response.ok) {
-        setOutcome({ kind: "chart", spec, rows: body.rows });
+        setOutcome({ kind: "chart", spec: body.spec, rows: body.rows });
+        if (adopt) setText(JSON.stringify(body.spec, null, 2));
       } else if (body.errors) {
         setOutcome({ kind: "refused", heading: "What the validator said", lines: body.errors, plain: REJECTED });
       } else {
@@ -86,6 +78,30 @@ export default function App() {
       setRunning(false);
     }
   };
+
+  const run = () => {
+    try {
+      send("/api/execute", { spec: JSON.parse(text) });
+    } catch (error) {
+      setOutcome({
+        kind: "refused",
+        heading: "What the parser said",
+        lines: [(error as Error).message],
+        plain: "The spec is not valid JSON, so it was never sent.",
+      });
+    }
+  };
+
+  /** The model writes the spec, so the answer replaces whatever is in the editor. */
+  const askQuestion = () => {
+    if (question.trim() !== "") send("/api/ask", { question }, true);
+  };
+
+  // Both halves have to be there: the model writes the spec and the source answers it.
+  const askable = source && model;
+  const waiting = !source
+    ? "Connect a source before asking a question"
+    : "Set VIZMITH_MODEL_BASE_URL, NAME and KEY to ask a question";
 
   const columns = [
     "var(--w-rail)",
@@ -132,19 +148,18 @@ export default function App() {
               <span className="ask__caret">&rsaquo;</span>
               <input
                 className="ask__input"
-                placeholder={
-                  source
-                    ? "A model endpoint is not configured yet"
-                    : "Connect a source before asking a question"
-                }
-                disabled
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && askQuestion()}
+                placeholder={askable ? "Ask a question about your data" : waiting}
+                disabled={!askable || running}
               />
               <span className="ask__key">Return</span>
             </div>
           </div>
 
           <div className="plot">
-            <Canvas outcome={outcome} source={source} />
+            <Canvas outcome={outcome} source={source} askable={askable} />
           </div>
 
           <div className="pages">
@@ -273,7 +288,15 @@ function Badge({ outcome }: { outcome: Outcome }) {
   );
 }
 
-function Canvas({ outcome, source }: { outcome: Outcome; source: boolean }) {
+function Canvas({
+  outcome,
+  source,
+  askable,
+}: {
+  outcome: Outcome;
+  source: boolean;
+  askable: boolean;
+}) {
   if (outcome.kind === "chart") return <Chart spec={outcome.spec} rows={outcome.rows} />;
 
   if (outcome.kind === "refused") {
@@ -296,9 +319,11 @@ function Canvas({ outcome, source }: { outcome: Outcome; source: boolean }) {
       <div>
         <p className="empty__title">{source ? "No spec yet" : "No source connected"}</p>
         <p className="empty__body">
-          {source
-            ? "Open { } JSON in the Visualisation panel, paste a spec and run it. The chart appears here."
-            : "Point Vizmith at a Databricks workspace. It reads the schema and profiles every column, then you can ask a question."}
+          {askable
+            ? "Ask a question above, or open { } JSON in the Visualisation panel and paste a spec. The chart appears here."
+            : source
+              ? "Open { } JSON in the Visualisation panel, paste a spec and run it. The chart appears here."
+              : "Point Vizmith at a Databricks workspace. It reads the schema and profiles every column, then you can ask a question."}
         </p>
       </div>
     </div>
