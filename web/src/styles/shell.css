@@ -259,6 +259,63 @@ button:focus-visible {
   max-width: 46ch;
 }
 
+/* A question in flight. Centred like the empty state, because it says the same kind of
+   thing: nothing to draw yet, and why. The dot pulses rather than sweeping, since a bar
+   that travels reads as progress and the server reports none. */
+.working {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.working__dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: var(--chrome-2);
+  animation: working-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes working-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .working__dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+.working__title {
+  margin: 0 0 6px;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.working__body {
+  margin: 0 auto;
+  max-width: 54ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
 /* A refusal is read, not glanced at, so it sits on the same card as a chart would and
    keeps the machine's words in mono above the sentence that translates them. */
 .refusal {

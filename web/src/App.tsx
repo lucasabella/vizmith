@@ -26,8 +26,10 @@ export default function App() {
   const [fieldsOpen, setFieldsOpen] = useState(true);
   const [json, setJson] = useState(false);
   const [text, setText] = useState("");
-  const [running, setRunning] = useState(false);
+  // What is in flight. Not an Outcome: running is the absence of one so far.
+  const [working, setWorking] = useState<"question" | "spec" | null>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "nothing" });
+  const running = working !== null;
 
   useEffect(() => {
     fetch("/api/health")
@@ -42,11 +44,12 @@ export default function App() {
 
   /**
    * The API decides. Nothing here validates, because a second opinion in the browser is
-   * one that can disagree with the one that counts. `adopt` puts the spec that came back
-   * into the editor, which a question needs and a spec that was typed does not.
+   * one that can disagree with the one that counts. `question` is what was asked, which
+   * says what the canvas waits with and means the spec that comes back replaces whatever
+   * is in the editor. A spec that was typed passes none, and keeps its own text.
    */
-  const send = async (endpoint: string, payload: object, adopt = false) => {
-    setRunning(true);
+  const send = async (endpoint: string, payload: object, question: string | null = null) => {
+    setWorking(question === null ? "spec" : "question");
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -56,7 +59,7 @@ export default function App() {
       const body = await response.json();
       if (response.ok) {
         setOutcome({ kind: "chart", spec: body.spec, rows: body.rows });
-        if (adopt) setText(JSON.stringify(body.spec, null, 2));
+        if (question !== null) setText(JSON.stringify(body.spec, null, 2));
       } else if (body.errors) {
         setOutcome({ kind: "refused", heading: "What the validator said", lines: body.errors, plain: REJECTED });
       } else {
@@ -75,7 +78,7 @@ export default function App() {
         plain: "The request never reached the server.",
       });
     } finally {
-      setRunning(false);
+      setWorking(null);
     }
   };
 
@@ -94,7 +97,7 @@ export default function App() {
 
   /** The model writes the spec, so the answer replaces whatever is in the editor. */
   const askQuestion = () => {
-    if (question.trim() !== "") send("/api/ask", { question }, true);
+    if (question.trim() !== "") send("/api/ask", { question }, question);
   };
 
   // Both halves have to be there: the model writes the spec and the source answers it.
@@ -159,7 +162,7 @@ export default function App() {
           </div>
 
           <div className="plot">
-            <Canvas outcome={outcome} source={source} askable={askable} />
+            <Canvas outcome={outcome} working={working} source={source} askable={askable} />
           </div>
 
           <div className="pages">
@@ -290,13 +293,19 @@ function Badge({ outcome }: { outcome: Outcome }) {
 
 function Canvas({
   outcome,
+  working,
   source,
   askable,
 }: {
   outcome: Outcome;
+  working: "question" | "spec" | null;
   source: boolean;
   askable: boolean;
 }) {
+  // What is in flight comes first. The chart that is still on screen answered the
+  // previous question, which is not the one being waited for.
+  if (working !== null) return <Working asking={working === "question"} />;
+
   if (outcome.kind === "chart") return <Chart spec={outcome.spec} rows={outcome.rows} />;
 
   if (outcome.kind === "refused") {
@@ -324,6 +333,29 @@ function Canvas({
             : source
               ? "Open { } JSON in the Visualisation panel, paste a spec and run it. The chart appears here."
               : "Point Vizmith at a Databricks workspace. It reads the schema and profiles every column, then you can ask a question."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The wait, and what is being waited for. The question itself stays in the field above, so
+ * it is not repeated here. The server reports no progress, so nothing counts anything
+ * down: the dot says work is happening and the words say which work. The profiling
+ * sentence is the one worth reading, because it is both the reason a first question is slow
+ * and the reason the model never sees a row.
+ */
+function Working({ asking }: { asking: boolean }) {
+  return (
+    <div className="working">
+      <div>
+        <i className="working__dot" />
+        <p className="working__title">{asking ? "Answering the question" : "Running the spec"}</p>
+        <p className="working__body">
+          {asking
+            ? "A first question reads the schema and profiles every column before the model is asked anything, which is the slow part. The profiles are kept for as long as the server runs, so the next question skips it."
+            : "The source is running the query. The rows come back to the chart and go nowhere near the model."}
         </p>
       </div>
     </div>
