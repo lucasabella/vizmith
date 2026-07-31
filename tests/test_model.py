@@ -142,3 +142,14 @@ def test_nothing_reaches_a_service_without_configuration():
     """There is no default endpoint, model or key anywhere in the dataclass."""
     with pytest.raises(TypeError):
         Endpoint()  # type: ignore[call-arg]
+
+
+def test_the_probe_asks_about_the_schema_and_nothing_else():
+    """A parameter the endpoint happens to refuse comes back as a 400, which reads from
+    here exactly like "this endpoint cannot constrain output". Current OpenAI models
+    refuse `max_tokens` by name, and that is how a working endpoint reported False."""
+    sent = []
+    model(answering({"choices": [{"message": {"content": '{"ok": true}'}}]}, capture=sent)).constrains_output()
+
+    body = json.loads(sent[0].content)
+    assert set(body) == {"model", "messages", "response_format"}
