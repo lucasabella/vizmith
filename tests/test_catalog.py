@@ -1,4 +1,6 @@
+import datetime as dt
 import time
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +10,7 @@ from databricks.sdk.service.sql import StatementState
 
 from vizmith import catalog as catalog_module
 from vizmith.catalog import (
+    SHAPES,
     TIMESTAMP,
     TYPES,
     UNSUPPORTED,
@@ -20,6 +23,7 @@ from vizmith.catalog import (
     _table,
     _type,
     _value,
+    conform,
 )
 
 # The recording is what makes the mapping testable without a workspace. Only the live
@@ -104,12 +108,62 @@ def test_a_bound_number_is_declared_as_narrowly_as_it_fits():
     assert (_parameter(True), _parameter(None), _parameter(10)) == ("true", None, "10")
 
 
+def naive(year, month, day, hour=0, minute=0):
+    """A datetime with no zone, which is the contract's shape for a timestamp. Combined
+    rather than called directly, because the linter reads a bare `datetime(...)` as a
+    forgotten zone and here the absent zone is the thing being asserted."""
+    return dt.datetime.combine(dt.date(year, month, day), dt.time(hour, minute))
+
+
 def test_a_value_comes_back_as_the_type_the_manifest_reported():
     assert _value("123", "LONG") == 123
     assert _value("18.08", "DECIMAL") == 18.08
     assert _value("true", "BOOLEAN") is True
-    assert _value("2024-01-01", "DATE") == "2024-01-01"
+    assert _value("hello", "STRING") == "hello"
+    assert _value("2024-01-01", "DATE") == dt.date(2024, 1, 1)
+    assert _value("2024-01-01T00:00:00", "TIMESTAMP_NTZ") == naive(2024, 1, 1)
     assert _value(None, "STRING") is None
+
+
+@pytest.mark.parametrize("type_name", ["DATE", "TIMESTAMP", "TIMESTAMP_NTZ"])
+def test_a_temporal_value_is_an_object_rather_than_the_text_the_api_sent(type_name):
+    """The one shape a result set holds for a temporal column, per ROADMAP.md. The
+    statement API answers in text, so without this a chart drawn from a warehouse gets a
+    string where the same chart drawn from anywhere else gets a date."""
+    value = _value("2024-01-01" if type_name == "DATE" else "2024-01-01T09:30:00.000", type_name)
+
+    assert type(value) is SHAPES[TYPES[type_name]]
+
+
+def test_a_timestamp_with_a_zone_arrives_in_utc_without_one():
+    """A TIMESTAMP comes back with a `Z` where a TIMESTAMP_NTZ comes back without one, and
+    the contract has one shape for both. Timezones are not a feature here: the instant is
+    kept and the zone is dropped, so two sources cannot disagree about what a row holds."""
+    assert _value("2024-01-01T00:00:00.000Z", "TIMESTAMP") == naive(2024, 1, 1)
+    assert _value("2024-01-01T02:30:00.000+02:00", "TIMESTAMP") == naive(2024, 1, 1, 0, 30)
+    assert _value("2024-01-01T00:00:00.000Z", "TIMESTAMP").tzinfo is None
+
+
+def test_a_temporal_value_the_source_mangles_is_the_sources_failure():
+    """RuntimeError rather than ValueError, because the API reads the first as the source
+    and the second as the spec, and a spec that asked for a date is not what went wrong.
+    Handing the text back instead would put the shape this exists to remove into a result
+    set, where only whatever reads the value much later would notice."""
+    with pytest.raises(RuntimeError, match="not-a-date"):
+        _value("not-a-date", "DATE")
+
+
+def test_a_value_the_source_already_shaped_is_conformed_rather_than_guessed_at():
+    """`conform` is what a catalog whose client answers in Python objects calls, the test
+    harness among them. A decimal and a zoned timestamp move; everything else is already
+    the contract's shape and is left alone."""
+    assert conform(Decimal("18.08")) == 18.08
+    assert type(conform(Decimal("18.08"))) is float
+    berlin = dt.datetime(2024, 1, 1, 2, 30, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+    assert conform(berlin) == naive(2024, 1, 1, 0, 30)
+    assert conform([Decimal("1.50"), "shipped", None]) == [1.5, "shipped", None]
+    assert conform(dt.date(2024, 1, 1)) == dt.date(2024, 1, 1)
+    assert conform(None) is None
 
 
 def manifest_column(type_name, type_text, name="value"):

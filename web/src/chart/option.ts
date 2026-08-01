@@ -95,6 +95,60 @@ const ROTATE_LONGER_THAN = 12;
  * cannot disagree about what came out of the warehouse. Never rounded. */
 export const label = (value: Value): string => (value === null ? NO_VALUE : String(value));
 
+/** The contract's two forms for a temporal value: a date, or a date and a time, never a
+ * zone. Anything else did not come out of a catalog that keeps the contract. */
+const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?)?$/;
+
+/**
+ * The moment a temporal value stands for, in the millis a time axis plots.
+ *
+ * The result set contract fixes the text this arrives as, and this is where that text is
+ * read rather than handed to ECharts to guess at. Its own parser reads a bare date as UTC
+ * and a date with a time as local, so the two forms one contract allows would land a
+ * timezone apart on the same axis, which is a chart that draws January in December.
+ *
+ * Read as local time, because that is what keeps the wall clock the source sent: a month
+ * that starts on the first is drawn and labelled on the first in every browser. Timezones
+ * are not a feature here, and a value that carries none is not given one.
+ *
+ * Null for text that is not the contract's shape, which draws no mark rather than a mark
+ * at a moment nobody sent.
+ */
+export function instant(value: Value): number | null {
+  if (typeof value !== "string") return null;
+  const parts = ISO.exec(value);
+  if (parts === null) return null;
+  const read = parts.slice(1, 7).map((part) => Number(part ?? 0));
+  const [year, month, day, hour, minute, second] = read;
+  const millis = Number((parts[7] ?? "0").padEnd(3, "0").slice(0, 3));
+  const at = new Date(year, month - 1, day, hour, minute, second, millis);
+  // A year under 100 is 1900-something to the constructor, which would draw it two
+  // millennia from the rest of the axis.
+  at.setFullYear(year);
+  return at.getTime();
+}
+
+/** What a channel's value is drawn at. A temporal value is drawn at the instant it names,
+ * because that is what a time axis plots; every other channel is drawn as itself. */
+const plotted = (channel: Channel, value: Value): Value =>
+  channel.type === "temporal" ? instant(value) : value;
+
+/**
+ * The value the source sent for one channel of a mark, found in the row the mark was
+ * drawn from. Everything a person sees or clicks goes through this, so a tooltip, a drill
+ * filter and the menu offering it all read the result set rather than the axis.
+ *
+ * Only a temporal channel needs it: that is the one whose marks carry an instant this
+ * file computed rather than anything the warehouse sent. It is resolved against the rows
+ * rather than written back out of the instant, because midnight is one moment and two
+ * values, a date and a timestamp, and the one worth showing is the one that arrived.
+ */
+export function sent(rows: Row[], channel: Channel, drawn: Value): Value {
+  if (channel.type !== "temporal") return drawn;
+  const found = rows.find((row) => instant(row[channel.field]) === drawn);
+  return found === undefined ? drawn : found[channel.field];
+}
+
 const distinct = (values: string[]): string[] => [...new Set(values)];
 
 const axisName = (channel: Channel): string => channel.title ?? channel.field;
@@ -157,7 +211,9 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
     borderWidth: 1,
     padding: [6, 8] as [number, number],
     textStyle: { fontFamily: MONO, fontSize: 11.5, color: INK },
-    formatter: (params: unknown) => markText(spec, params as Mark),
+    // The rows go in with the mark, because a temporal axis carries instants and the
+    // value behind one is in the result set rather than in the mark.
+    formatter: (params: unknown) => markText(spec, params as Mark, rows),
   } as const;
 
   if (mark === "arc") {
@@ -174,7 +230,7 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
           type: "pie",
           label: LABEL,
           labelLine: { lineStyle: { color: RULE_2 } },
-          data: rows.map((row) => ({ name: label(row[x.field]), value: row[y.field] })),
+          data: rows.map((row) => ({ name: label(row[x.field]), value: plotted(y, row[y.field]) })),
         },
       ] as SeriesOption[],
     };
@@ -256,18 +312,38 @@ export type Mark = { name: string; seriesName?: string; value: Value | Value[] }
  * the measure. Values are the ones in the result set, printed as they arrived, because a
  * tooltip that rounds is a tooltip that has to be checked somewhere else.
  */
-export function markText(spec: Spec, mark: Mark): string {
+export function markText(spec: Spec, mark: Mark, rows: Row[] = []): string {
   const { x, y, color } = spec.chart.encoding;
   // A time or value axis carries the pair, a category axis carries the measure alone and
   // names the category on the axis.
   const pair = Array.isArray(mark.value) ? mark.value : null;
-  const line = (channel: Channel, value: Value) => `${axisName(channel)}: ${label(value)}`;
+  const line = (channel: Channel, value: Value) =>
+    `${axisName(channel)}: ${label(sent(rows, channel, value))}`;
 
   return [
     ...(x ? [line(x, pair ? pair[0] : mark.name)] : []),
     ...(color && mark.seriesName ? [line(color, mark.seriesName)] : []),
     line(y, pair ? pair[1] : (mark.value as Value)),
   ].join("\n");
+}
+
+/**
+ * What a clicked mark stands for on the axis, in the shape the source sent it: the label
+ * on a category axis, and the value behind the point everywhere else.
+ *
+ * This is the boundary where a chart's own numbers stop. Past it a click is a value out
+ * of the result set, which is what a drill turns into a bound filter, so nothing
+ * downstream has to know that a time axis plots millis.
+ */
+export function clickedValue(
+  spec: Spec,
+  rows: Row[],
+  clicked: { name?: string; value?: unknown },
+): Value {
+  const pair = Array.isArray(clicked.value) ? (clicked.value as Value[]) : null;
+  const drawn = pair ? pair[0] : (clicked.name ?? null);
+  const { x } = spec.chart.encoding;
+  return x === undefined ? drawn : sent(rows, x, drawn);
 }
 
 /** Axis chrome. Hairline gridlines a step off the surface, mono for a field name and for
@@ -335,9 +411,11 @@ function seriesData(
   y: Channel,
   categories: string[] | null,
 ): (Value | Value[])[] {
-  if (categories === null) return rows.map((row) => [row[x.field], row[y.field]]);
+  if (categories === null) {
+    return rows.map((row) => [plotted(x, row[x.field]), plotted(y, row[y.field])]);
+  }
   return categories.map((category) => {
     const match = rows.find((row) => label(row[x.field]) === category);
-    return match ? match[y.field] : null;
+    return match ? plotted(y, match[y.field]) : null;
   });
 }
