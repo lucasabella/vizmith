@@ -64,6 +64,16 @@ class Model:
         self._endpoint = endpoint
         self._client = client or httpx.Client(timeout=endpoint.timeout)
 
+    @property
+    def described(self) -> tuple[str, str]:
+        """Which model at which endpoint, for a record that has to say what produced it.
+
+        A score is not comparable to another one without both. The key is not in it and
+        there is no accessor that returns it, so a caller writing this into a file cannot
+        write the key with it.
+        """
+        return self._endpoint.model, self._endpoint.base_url
+
     def complete(self, prompt: str, schema: dict | None = None) -> Completion:
         body: dict = {
             "model": self._endpoint.model,
