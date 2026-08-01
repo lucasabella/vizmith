@@ -91,6 +91,15 @@ Tests and lint:
 
 The suite runs offline against DuckDB. With a profile and a warehouse in `.env` it also compiles and runs every fixture spec against the workspace, through the query builder and through the HTTP API. Without one those tests skip.
 
+Scoring the model on a fixed question set:
+
+```
+.venv/bin/vizmith eval
+.venv/bin/vizmith eval --only revenue_by_country
+```
+
+Every question is asked of the synthetic fixture dataset, so this needs the source in `.env` pointed at it, and it needs the model endpoint. Each question is scored in four layers — does the answer validate, does it reference the tables and columns the question needs, does it return the expected rows, is the mark defensible for their shape — and a question stops at the first layer it fails. The run is written to `eval-runs/`, so two runs can be diffed; what makes that worth doing is that the record names the model and the endpoint that produced it. Answers are cached against the prompt that produced them, in the state directory beside the profiles, so re-running a set costs nothing until a prompt, a profile or an endpoint changes. `--no-cache` asks anyway.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).

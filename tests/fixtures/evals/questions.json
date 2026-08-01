@@ -1,0 +1,83 @@
+{
+  "_": [
+    "The question set the eval harness scores. Everything in it is asked of the synthetic",
+    "fixture dataset and nothing else, and every reference is a spec that already lives in",
+    "the fixtures, so the expected result set is derived by running one rather than stored",
+    "as a copy of rows that goes stale the moment the generator is run again.",
+    "",
+    "A question states what a correct answer needs to know. That reads as verbose English,",
+    "and it is deliberate: an expected result set is only an expectation where the question",
+    "determines it, so a filter the answer has to apply is named in the question rather than",
+    "left for the model to guess and then marked wrong for guessing. What is being scored is",
+    "the translation into a spec, not telepathy about which orders count as revenue.",
+    "",
+    "Every question's expected result is checked to have no tie at the boundary its limit",
+    "cuts on, since a tie makes two correct answers differ and scores one of them as wrong."
+  ],
+  "questions": [
+    {
+      "name": "revenue_by_country",
+      "question": "Which ten countries produced the most revenue? Count an order's total as revenue, count only orders placed on or after 1 January 2025, and leave out orders that were cancelled or refunded.",
+      "tables": ["orders", "customers"],
+      "columns": ["customers.country", "orders.total", "orders.order_date", "orders.status"],
+      "reference": "../specs/valid/revenue_by_country.json",
+      "notes": "Fourteen countries have revenue, so the row limit is what implements the word ten and any other limit is a different answer. The eleventh is well below the tenth, so the cut is not a tie. A bar and a point both suit a category axis; a line does not."
+    },
+    {
+      "name": "orders_per_month",
+      "question": "How many orders were placed in each month? Leave out orders that carry no order date.",
+      "tables": ["orders"],
+      "columns": ["orders.order_date"],
+      "reference": "../specs/valid/orders_per_month.json",
+      "notes": "Thirty months of data, so any limit at or above thirty gives the same rows. The count may be count(*) or a count of any non null column of orders; both produce the same figure per month."
+    },
+    {
+      "name": "total_revenue",
+      "question": "What was the total revenue, counting an order's total as revenue, over orders placed on or after 1 January 2025 that were not cancelled or refunded?",
+      "tables": ["orders"],
+      "columns": ["orders.total", "orders.order_date", "orders.status"],
+      "reference": "../specs/valid/total_revenue.json",
+      "notes": "One figure, so the answer has no x channel and its mark says nothing. A spec that groups by anything is the wrong answer rather than a differently shaped one."
+    },
+    {
+      "name": "returns_by_reason",
+      "question": "How many returns were made for each return reason?",
+      "tables": ["returns"],
+      "columns": ["returns.reason"],
+      "reference": "../specs/valid/returns_share_by_reason.json",
+      "notes": "Five reasons, so an arc is readable here and a bar is equally defensible. Any limit at or above five gives the same rows."
+    },
+    {
+      "name": "shipments_by_carrier",
+      "question": "How many shipments did each carrier handle? Shipments whose carrier id matches no carrier are their own group rather than dropped.",
+      "tables": ["shipments", "carriers"],
+      "columns": ["carriers.name", "shipments.carrier_id"],
+      "reference": "../specs/valid/shipments_by_carrier.json",
+      "notes": "The sentence about unmatched carriers is what makes the join a left one, and an inner join is scored wrong at the result layer rather than at the reference layer, because it names the same tables and columns."
+    },
+    {
+      "name": "revenue_by_category",
+      "question": "For the ten countries with the most revenue from order line totals, how does that revenue break down by product category?",
+      "tables": ["order_items", "orders", "customers", "products"],
+      "columns": ["order_items.line_total", "customers.country", "products.category"],
+      "reference": "../specs/valid/revenue_by_category_stacked.json",
+      "notes": "Two dimensions and a measure, so the chart binds a colour channel and the validator then requires limit_by. Sixty rows come back, so any row limit at or above sixty gives the same result set."
+    },
+    {
+      "name": "shipping_cost_over_time",
+      "question": "What was the average shipping cost per month? Leave out shipments that have not been shipped yet.",
+      "tables": ["shipments"],
+      "columns": ["shipments.cost", "shipments.shipped_at"],
+      "reference": "../specs/valid/shipping_cost_over_time.json",
+      "notes": "An average, so limit_by cannot rank by it, which is why this question has one dimension. A line and an area both suit a time axis; an arc does not."
+    },
+    {
+      "name": "scans_per_location",
+      "question": "Which ten locations recorded the most shipment scans?",
+      "tables": ["shipment_scans"],
+      "columns": ["shipment_scans.location_code"],
+      "reference": "../specs/valid/scans_per_location.json",
+      "notes": "Five hundred locations, so an arc of the top ten is refused for being unreadable rather than for being wrong about the data. The tenth and eleventh are far enough apart that the cut is not a tie."
+    }
+  ]
+}
