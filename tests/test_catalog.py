@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -111,11 +112,11 @@ def test_a_value_comes_back_as_the_type_the_manifest_reported():
     assert _value(None, "STRING") is None
 
 
-def manifest_column(type_name, type_text):
+def manifest_column(type_name, type_text, name="value"):
     """A column as the statement manifest describes one, with the two ways it names a
     type. The SDK fills in one, the other or both."""
     enum = SimpleNamespace(value=type_name) if type_name else None
-    return SimpleNamespace(type_name=enum, type_text=type_text)
+    return SimpleNamespace(name=name, type_name=enum, type_text=type_text)
 
 
 def test_a_column_the_sdk_leaves_untyped_is_read_from_the_manifest_text():
@@ -216,6 +217,71 @@ def waiting(monkeypatch, *states, cancel_raises=False):
     return catalog, execution
 
 
+class DetailExecution:
+    """A statement execution answering one fixed result set, described by name. What it
+    exists for is `DESCRIBE DETAIL`, whose columns have moved between runtime versions, so
+    reading `lastModified` off a position rather than off the manifest is a bug waiting for
+    an upgrade."""
+
+    def __init__(self, columns, row, state=None):
+        from databricks.sdk.service.sql import StatementState
+
+        self._columns = columns
+        self._row = row
+        self._state = state or StatementState.SUCCEEDED
+        self.statements = []
+
+    def execute_statement(self, **arguments):
+        self.statements.append(arguments.get("statement"))
+        return SimpleNamespace(
+            statement_id="statement-1",
+            status=SimpleNamespace(state=self._state, error="[TABLE_OR_VIEW_NOT_FOUND] no"),
+            manifest=SimpleNamespace(
+                truncated=False,
+                total_chunk_count=1,
+                schema=SimpleNamespace(
+                    columns=[manifest_column("STRING", "STRING", name=name) for name in self._columns]
+                ),
+            ),
+            result=SimpleNamespace(data_array=[self._row] if self._row else []),
+        )
+
+
+DETAIL = ["format", "id", "name", "location", "createdAt", "lastModified", "numFiles"]
+DETAIL_ROW = ["delta", "abc", "orders", "s3://x", "2024-01-01", "2026-07-31T09:12:44Z", "12"]
+
+
+def describing(*arguments, **keywords):
+    execution = DetailExecution(*arguments, **keywords)
+    catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
+    catalog._client = SimpleNamespace(statement_execution=execution)
+    return catalog, execution
+
+
+def test_a_modified_time_is_read_off_the_manifest_rather_than_a_column_position():
+    """DESCRIBE DETAIL has gained columns between runtime versions, so a position that is
+    right today is a silently wrong timestamp after an upgrade."""
+    catalog, execution = describing(DETAIL, DETAIL_ROW)
+    moved, row = ["lastModified"] + DETAIL, ["2026-07-31T09:12:44Z"] + DETAIL_ROW
+    elsewhere, _ = describing(moved, row)
+
+    assert catalog.modified("orders") == "2026-07-31T09:12:44Z"
+    assert elsewhere.modified("orders") == "2026-07-31T09:12:44Z"
+    assert execution.statements == [f"DESCRIBE DETAIL `{CATALOG}`.`{SCHEMA}`.`orders`"]
+
+
+def test_a_source_object_that_cannot_be_described_has_no_modified_time():
+    """A view is the case: DESCRIBE DETAIL refuses one. What that means for a caller is
+    that the object cannot be cached, which is None rather than a failure."""
+    from databricks.sdk.service.sql import StatementState
+
+    refusing, _ = describing(DETAIL, DETAIL_ROW, state=StatementState.FAILED)
+    empty, _ = describing(DETAIL, [])
+
+    assert refusing.modified("a_view") is None
+    assert empty.modified("orders") is None
+
+
 def states(pending, final):
     return [StatementState.PENDING] * pending + [final]
 
@@ -276,6 +342,53 @@ def test_the_recording_still_describes_the_workspace():
     assert catalog.tables() == [entry["full_name"] for entry in RECORDED]
     for name in FIXTURE_TABLES:
         assert catalog.describe(name) == recorded(name)
+
+
+# How long the metastore is given to publish a write before a modified time that has not
+# moved is called one that does not move. Generous, because the answer this test gives is
+# what the profile cache is keyed on and a slow publish is not the same as a wrong key.
+MODIFIED_WAIT = 30
+
+
+@needs_warehouse
+def test_the_modified_time_moves_when_the_data_changes():
+    """The profile cache is keyed on this, so a modified time that only tracks the table's
+    definition would cache a profile of data that is gone and never re-read it.
+
+    Databricks documents that `last_altered`, which is the information schema's name for
+    the `updated_at` this could otherwise have read for free, does not move for an insert,
+    an update or a delete. `DESCRIBE DETAIL` is their own answer to that, and this is what
+    checks it is still true. A workspace is the only place that can.
+
+    The table is created and dropped here, so nothing in the fixture schema is written to.
+    A workspace that will not take a temporary table skips rather than fails: the point is
+    the timestamp, not the permission."""
+    catalog = DatabricksCatalog(profile=PROFILE, catalog=CATALOG, schema=SCHEMA, warehouse=WAREHOUSE)
+    name = "vizmith_modified_probe"
+    quoted = catalog.dialect.qualified(catalog.qualify(name))
+    try:
+        catalog.run(f"CREATE OR REPLACE TABLE {quoted} (n INT)")
+    except RuntimeError as refusal:
+        pytest.skip(f"the workspace would not take a temporary table: {refusal}")
+
+    try:
+        catalog.run(f"INSERT INTO {quoted} VALUES (1)")
+        before = catalog.modified(name)
+        catalog.run(f"INSERT INTO {quoted} VALUES (2)")
+        # Read until it moves rather than once, because the metastore does not necessarily
+        # publish the write the moment it lands. What this must not do is wait forever: a
+        # time that never moves is the answer the test exists to get.
+        deadline = time.monotonic() + MODIFIED_WAIT
+        while (after := catalog.modified(name)) == before and time.monotonic() < deadline:
+            time.sleep(2)
+    finally:
+        catalog.run(f"DROP TABLE IF EXISTS {quoted}")
+
+    assert before is not None, "the source reports no modified time, so nothing can be cached"
+    assert after != before, (
+        f"the modified time did not move in {MODIFIED_WAIT} seconds after a write, so it cannot "
+        f"key the profile cache and ROADMAP.md's entry on it is wrong"
+    )
 
 
 @needs_warehouse

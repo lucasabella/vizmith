@@ -65,7 +65,7 @@ class FixtureCatalog:
     DuckDB, described without a workspace. Records every statement it is asked to execute,
     which is how the profiler's cost rules are tested."""
 
-    def __init__(self, connection, dialect=DUCKDB):
+    def __init__(self, connection, dialect=DUCKDB, modified="1"):
         self.dialect = dialect
         self._connection = connection
         # A DuckDB connection is one cursor, so two threads sharing it read each other's
@@ -73,6 +73,11 @@ class FixtureCatalog:
         # than being the only catalog that cannot be shared.
         self._lock = threading.Lock()
         self.statements = []
+        # What this catalog says about when each table last changed, by short name. A test
+        # writes one to make a table look rewritten. `modified=None` is a source with no
+        # modified time to give at all, which is the case a profile must not be cached in.
+        self._modified = modified
+        self.modified_times = {}
 
     def tables(self):
         return [f"vizmith.shop.{name}" for name in sorted(COLUMNS)]
@@ -95,6 +100,12 @@ class FixtureCatalog:
             Relationship(f"vizmith.shop.{left}", column, f"vizmith.shop.{right}", key, kind=DECLARED)
             for left, column, right, key in FOREIGN_KEYS
         )
+
+    def modified(self, name):
+        """Not recorded as a statement, because on a real source this is a metadata read
+        rather than a pass over the table, and what `statements` exists to count is what a
+        profile costs to build."""
+        return self.modified_times.get(name.rsplit(".", 1)[-1], self._modified)
 
     def run(self, sql, parameters=None):
         with self._lock:
@@ -128,6 +139,17 @@ def other_fixture_db():
     con = load_fixture_db()
     yield con
     con.close()
+
+
+@pytest.fixture(autouse=True)
+def state_dir(tmp_path, monkeypatch):
+    """A state directory per test. The server writes two files there, the profile cache
+    and the relationship answers, and both default to a home directory. Autouse rather
+    than opt in, because a test that forgets it does not fail: it writes to the home
+    directory of whoever ran the suite and reads back what the last run left."""
+    directory = tmp_path / "state"
+    monkeypatch.setenv("VIZMITH_STATE_DIR", str(directory))
+    return directory
 
 
 @pytest.fixture

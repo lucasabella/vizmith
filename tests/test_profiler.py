@@ -1,9 +1,10 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 from conftest import DUCKDB, FixtureCatalog, needs_warehouse
 
 from vizmith.catalog import TIMESTAMP, Dialect
-from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
+from vizmith.profiler import CACHE_VERSION, SAMPLE_THRESHOLD, Profiles, TableProfile, profile_table
 
 # A source that offers no approximate count, so the exact branch is covered without a
 # second database.
@@ -109,6 +110,125 @@ def test_a_distinct_count_is_approximate_where_the_source_offers_the_function(fi
     assert column(approximate, "shipment_id").distinct_count_exact is False
     assert column(exact, "shipment_id").distinct_count_exact is True
     assert column(approximate, "shipment_id").distinct_count != column(exact, "shipment_id").distinct_count
+
+
+def test_a_cached_profile_is_the_one_it_replaced(catalog, tmp_path):
+    kept = Profiles(tmp_path / "profiles.json")
+    first = kept.read(catalog, "orders")
+    statements = list(catalog.statements)
+
+    assert kept.read(catalog, "orders") == first
+    assert catalog.statements == statements, "a cached profile still cost a pass over the table"
+
+
+def test_a_table_whose_modified_time_moved_is_profiled_again(catalog, tmp_path):
+    """The whole point of the key. A table written to since the profile was stored has
+    figures that describe data that is gone, and the model reads them as current."""
+    kept = Profiles(tmp_path / "profiles.json")
+    kept.read(catalog, "orders")
+    statements = list(catalog.statements)
+
+    catalog.modified_times["orders"] = "2"
+    kept.read(catalog, "orders")
+
+    assert len(catalog.statements) > len(statements)
+
+
+def test_a_lower_threshold_does_not_read_samples_collected_under_a_higher_one(catalog, tmp_path):
+    """The threshold is the security boundary, so a stored profile cannot be allowed to
+    answer for a threshold it was not built with. Lowering it has to silence the samples."""
+    kept = Profiles(tmp_path / "profiles.json")
+
+    assert column(kept.read(catalog, "order_items", threshold=4), "quantity").samples == (
+        "1",
+        "2",
+        "3",
+        "4",
+    )
+    assert column(kept.read(catalog, "order_items", threshold=3), "quantity").samples == ()
+
+
+def test_a_source_with_no_modified_time_is_profiled_every_time(fixture_db, tmp_path):
+    """Caching against nothing means caching forever, and a profile that is never re-read
+    is a wrong answer with no symptom. So a source that cannot say when a table changed
+    pays for every profile."""
+    catalog = FixtureCatalog(fixture_db, modified=None)
+    kept = Profiles(tmp_path / "profiles.json")
+
+    kept.read(catalog, "orders")
+    statements = list(catalog.statements)
+    kept.read(catalog, "orders")
+
+    assert len(catalog.statements) == 2 * len(statements)
+    assert not (tmp_path / "profiles.json").exists()
+
+
+def test_a_profile_survives_the_process_that_paid_for_it(catalog, tmp_path):
+    """A restart is what re-profiled a whole schema before this, at two statements a table
+    and a bill each time."""
+    path = tmp_path / "profiles.json"
+    first = Profiles(path).read(catalog, "orders")
+    statements = list(catalog.statements)
+
+    restarted = Profiles(path).read(catalog, "orders")
+
+    assert restarted == first
+    assert catalog.statements == statements
+
+
+def test_a_file_written_under_another_format_is_discarded_rather_than_read(catalog, tmp_path):
+    path = tmp_path / "profiles.json"
+    Profiles(path).read(catalog, "orders")
+    written = json.loads(path.read_text())
+    path.write_text(json.dumps({**written, "version": CACHE_VERSION + 1}))
+    statements = list(catalog.statements)
+
+    Profiles(path).read(catalog, "orders")
+
+    assert len(catalog.statements) > len(statements)
+
+
+def test_a_file_that_cannot_be_read_costs_a_profile_rather_than_the_answer(catalog, tmp_path):
+    """A cache nobody can read is the cheapest failure there is. Raising here would turn it
+    into a server that answers nothing until somebody finds the file and deletes it."""
+    path = tmp_path / "profiles.json"
+    path.write_text("{not json at all")
+
+    profile = Profiles(path).read(catalog, "orders")
+
+    assert profile == profile_table(catalog, "orders")
+    assert json.loads(path.read_text())["version"] == CACHE_VERSION
+
+
+def test_profiling_a_schema_at_once_stores_every_table_it_paid_for(catalog, tmp_path):
+    """The tables are profiled eight at a time and they all write one file, so this is
+    what says the last writer did not drop the other seven."""
+    path = tmp_path / "profiles.json"
+    kept = Profiles(path)
+    names = catalog.tables()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        profiled = list(pool.map(lambda name: kept.read(catalog, name), names))
+    statements = list(catalog.statements)
+
+    restarted = Profiles(path)
+    assert [restarted.read(catalog, name) for name in names] == profiled
+    assert catalog.statements == statements
+    assert set(json.loads(path.read_text())["profiles"]) == set(names)
+
+
+def test_one_table_changing_does_not_reprofile_the_others(catalog, tmp_path):
+    kept = Profiles(tmp_path / "profiles.json")
+    for name in ("orders", "order_items"):
+        kept.read(catalog, name)
+    statements = list(catalog.statements)
+
+    catalog.modified_times["orders"] = "2"
+    for name in ("orders", "order_items"):
+        kept.read(catalog, name)
+
+    fresh = catalog.statements[len(statements) :]
+    assert fresh
+    assert all('"order_items"' not in statement for statement in fresh)
 
 
 @needs_warehouse

@@ -13,13 +13,19 @@ A sample list is exact while the distinct count next to it usually is not, so th
 can disagree by a value or two on the same column. Whatever writes a profile into a
 prompt has to say which of the two it is quoting.
 
-Caching is not built here. When it is, the key is the source's own last modified time
-for the table plus the threshold, because lowering the threshold has to silence samples
-that a cached profile still holds. The catalog does not report a modified time yet.
+`Profiles` is the cache in front of all of that, keyed on the source's own modified time
+for the table plus the threshold the profile was built with, because lowering the
+threshold has to silence samples that a stored profile still holds.
 """
 
 import dataclasses
+import json
+import os
+import tempfile
+import threading
+from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple
 
 from vizmith.catalog import DATE, DECIMAL, INTEGER, TIMESTAMP, UNSUPPORTED, Catalog, Column
@@ -31,6 +37,11 @@ SAMPLE_THRESHOLD = 25
 # Only these carry a meaningful minimum and maximum. Free text has one and it says
 # nothing, booleans have one and it is already in the type.
 ORDERED = {INTEGER, DECIMAL, DATE, TIMESTAMP}
+
+# The shape of the file `Profiles` writes. A stored profile written under a different one
+# is dropped rather than read or migrated: this is a cache, and the cheapest way to change
+# what it holds is to pay for one more profile.
+CACHE_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -92,6 +103,74 @@ def profile_table(catalog: Catalog, name: str, threshold: int = SAMPLE_THRESHOLD
             )
         )
     return TableProfile(table=table.name, row_count=row_count, columns=tuple(profiles))
+
+
+class Profiles:
+    """Profiles kept in a file the server owns, under the source's own modified time.
+
+    A stored profile is read back only where that time and the threshold both still match,
+    so a table that was written to is profiled again and a threshold that was lowered
+    cannot be answered with samples collected under a higher one.
+
+    A table the source reports no modified time for is profiled every time and never
+    stored. Keeping one forever to save two statements trades a bill for a stale profile,
+    and a stale profile is the worse of the two: the figures still look like figures and
+    the model reads them as current.
+
+    Several tables are profiled at once, so every method that touches the file holds the
+    lock, and the file is written whole and moved into place rather than edited. Two of
+    these storing at the same moment can still lose one of the two entries, since each
+    read the file when it was built. That costs a profile rather than producing a wrong
+    one, which is the trade a cache is allowed to make."""
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._lock = threading.Lock()
+        self._stored: dict[str, dict] = {}
+        # A file that cannot be read is dropped exactly like one written under another
+        # version. Refusing to serve because a cache is unreadable would turn the cheapest
+        # possible failure, one more profile, into a server that answers nothing.
+        with suppress(OSError, ValueError):
+            written = json.loads(path.read_text())
+            if written.get("version") == CACHE_VERSION:
+                self._stored = written.get("profiles", {})
+
+    def read(self, catalog: Catalog, name: str, threshold: int = SAMPLE_THRESHOLD) -> TableProfile:
+        """The table's profile, from the file where it is still current and from the
+        source where it is not. Asking the source when the table last changed is the price
+        of the answer, and it is a metadata read rather than a pass over the table."""
+        modified = catalog.modified(name)
+        if modified is not None:
+            with self._lock:
+                stored = self._stored.get(name)
+            if stored is not None and (stored["modified"], stored["threshold"]) == (modified, threshold):
+                return TableProfile.from_dict(stored["profile"])
+
+        profile = profile_table(catalog, name, threshold)
+        if modified is not None:
+            self._store(name, modified, threshold, profile)
+        return profile
+
+    def _store(self, name: str, modified: str, threshold: int, profile: TableProfile) -> None:
+        with self._lock:
+            self._stored[name] = {
+                "modified": modified,
+                "threshold": threshold,
+                "profile": profile.as_dict(),
+            }
+            written = json.dumps(
+                {"version": CACHE_VERSION, "profiles": self._stored}, indent=2, sort_keys=True
+            )
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            # Written beside the file and moved onto it, because a reader arriving while a
+            # table is being stored should find the last whole file rather than the first
+            # half of the next one. The name beside it is unique per write, since a second
+            # request can be storing at the same moment and must not move the first one's
+            # file out from under it.
+            handle, beside = tempfile.mkstemp(dir=self._path.parent, prefix=self._path.name + ".")
+            with os.fdopen(handle, "w") as writing:
+                writing.write(written)
+            os.replace(beside, self._path)
 
 
 class _Statistics(NamedTuple):

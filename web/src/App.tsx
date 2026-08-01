@@ -533,7 +533,7 @@ function Working({ asking }: { asking: boolean }) {
         <p className="working__title">{asking ? "Answering the question" : "Running the spec"}</p>
         <p className="working__body">
           {asking
-            ? "A first question reads the schema and profiles every column before the model is asked anything, and a warehouse that was idle has to start before any of it runs. The profiles are kept for as long as the server runs, so the next question skips them."
+            ? "A first question reads the schema and profiles every column before the model is asked anything, and a warehouse that was idle has to start before any of it runs. A profile is kept until the table it describes changes, so the next question skips it, and so does the next restart."
             : "The source is running the query. The rows come back to the chart and go nowhere near the model."}
         </p>
       </div>
