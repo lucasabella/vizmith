@@ -30,7 +30,7 @@ from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Relationship
 from vizmith.model import Endpoint, Model, ModelError
-from vizmith.profiler import profile_table
+from vizmith.profiler import Profiles, TableProfile
 from vizmith.relationships import Confirmations, graph, resolve, suggest
 from vizmith.spec import validate_spec
 
@@ -83,26 +83,44 @@ def constrains(writer: Model) -> bool:
 PROFILE_WORKERS = 8
 
 
-@lru_cache(maxsize=1)
-def profiles(catalog: Catalog) -> tuple:
-    """Every table in the configured schema, profiled once and kept for the life of the
-    process. Profiling a table is two warehouse queries, so doing it per question would
-    make asking one the slowest thing here, every time. A schema that changes under a
-    running server is not noticed until it restarts.
+def profiles(catalog: Catalog) -> tuple[TableProfile, ...]:
+    """Every table in the configured schema, read through the profile cache.
+
+    The cache is what keeps this affordable: profiling a table is two passes over it, and
+    a table that has not changed since the last one is answered out of the file instead.
+    What is paid on every call is one metadata read per table asking the source when the
+    table last changed, which is what lets a schema that moved under a running server be
+    noticed without restarting it.
 
     `tables` runs first and on this thread, which is also what builds the source's client
     before anything shares it."""
     names = catalog.tables()
+    kept = Profiles(state_dir() / "profiles.json")
     with ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as pool:
-        return tuple(pool.map(lambda name: profile_table(catalog, name), names))
+        return tuple(pool.map(lambda name: kept.read(catalog, name), names))
+
+
+def profile(catalog: Catalog, name: str) -> TableProfile:
+    """One table, through the same cache the whole schema is read through, which is what
+    makes reading one table on its own honest: a profile is a profile whether it was asked
+    for by name or as part of a schema, and both find the same stored one. Reading the
+    whole schema to answer for one table would pay for fifteen freshness checks to serve
+    one, which is what a panel drawing a tree of tables does per table."""
+    return Profiles(state_dir() / "profiles.json").read(catalog, name)
+
+
+def state_dir() -> Path:
+    """Where the server keeps what it has to remember between runs: what a person answered
+    about a suggested relationship, and the profiles it has already paid for. Nothing else,
+    and no key ever. `VIZMITH_STATE_DIR` moves it."""
+    return Path(os.environ.get("VIZMITH_STATE_DIR") or Path.home() / ".vizmith")
 
 
 def answers() -> Confirmations:
     """What a person has said about the suggested relationships, read from disk on every
     request rather than cached, because the file is small and a cache would be one more
-    thing that can hold a stale answer. `VIZMITH_STATE_DIR` is where it lives."""
-    directory = Path(os.environ.get("VIZMITH_STATE_DIR") or Path.home() / ".vizmith")
-    return Confirmations(directory / "relationships.json")
+    thing that can hold a stale answer."""
+    return Confirmations(state_dir() / "relationships.json")
 
 
 def relationship_graph(catalog: Catalog) -> list[Relationship]:
@@ -158,11 +176,11 @@ def tables(catalog: Annotated[Catalog, Depends(source)]):
     """The qualified name of every table in the configured schema.
 
     The names come out of the profiles rather than out of a second listing, so a name here
-    is one the endpoint below can answer for. The first request profiles the schema, which
-    is the wait the first question pays and then never pays again, since the two read the
-    same cache."""
+    is one the endpoint below can answer for. Profiling a schema nobody has profiled is the
+    wait the first question pays, and the two read the same cache, so it is paid once
+    however it is reached and not again until a table changes."""
     try:
-        return {"tables": [profile.table for profile in profiles(catalog)]}
+        return {"tables": [table.table for table in profiles(catalog)]}
     except RuntimeError as failure:
         return refused("source", failure)
 
@@ -181,19 +199,19 @@ def table(name: str, catalog: Annotated[Catalog, Depends(source)]):
     with a profile and never with a row.
 
     A name the schema does not hold is refused at 404 naming it, rather than raising. The
-    panel takes its names from the list above, so a miss means the schema changed under a
-    server that profiled it once and has no way to notice."""
+    name is checked against the source's own listing rather than against the profiles,
+    because profiling a schema to find out that one of its tables is missing is a bill for
+    an answer the listing already had. The panel takes its names from the list above, so a
+    miss means the table went away between the two requests."""
     try:
-        known = profiles(catalog)
+        if name not in catalog.tables():
+            return JSONResponse(
+                status_code=404,
+                content={"errors": [f"no table named {name} in the configured schema"]},
+            )
+        return profile(catalog, name).as_dict()
     except RuntimeError as failure:
         return refused("source", failure)
-    for profile in known:
-        if profile.table == name:
-            return profile.as_dict()
-    return JSONResponse(
-        status_code=404,
-        content={"errors": [f"no table named {name} in the configured schema"]},
-    )
 
 
 @app.get("/api/relationships")

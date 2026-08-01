@@ -122,6 +122,17 @@ class Catalog(Protocol):
         """The relationships the source declares for itself, and only those. What is
         inferred from names and types is not the source's word and is not reported here."""
 
+    def modified(self, name: str) -> str | None:
+        """When the source last changed this table, as a token that is only ever compared
+        with the last one seen, and None where the source has none to give.
+
+        A token rather than a time, because a source whose honest answer is a commit
+        version should not have to dress it up as a clock to be compared with itself. What
+        it has to do is move when the table's data moves: something that only tracks the
+        definition is not this, and reporting None is the right answer where that is all
+        the source has. A caller caching against None must not cache at all, since a
+        profile that is never re-read is a wrong answer with no symptom."""
+
     def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
         """Rows for a statement built above this layer, with every value bound by name
         rather than written into the statement.
@@ -164,7 +175,36 @@ class DatabricksCatalog:
                 found.extend(_foreign_key(name, constraint))
         return sorted(found)
 
+    def modified(self, name: str) -> str | None:
+        """The last time this table's data or definition changed, from `DESCRIBE DETAIL`.
+
+        Unity Catalog's own `updated_at` on a table, which is the same field the
+        information schema calls `last_altered`, is not this: Databricks documents that it
+        tracks the table's structure and does not move for an insert, an update or a
+        delete. It is free to read where this costs a statement, and a cache keyed on it
+        would never notice a write, which is the failure this whole key exists to prevent.
+        So the more expensive answer is the only correct one.
+
+        A source object `DESCRIBE DETAIL` does not answer for, a view among them, has no
+        modified time here rather than a failure: what it means is that the table cannot be
+        cached, and a caller is told that by None."""
+        detail = f"DESCRIBE DETAIL {self.dialect.qualified(self.qualify(name))}"
+        try:
+            columns, rows = self._statement(detail)
+        except RuntimeError:
+            return None
+        found = dict(zip(columns, rows[0])) if rows else {}
+        modified = found.get("lastModified")
+        return None if modified is None else str(modified)
+
     def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
+        return self._statement(sql, parameters)[1]
+
+    def _statement(self, sql: str, parameters: dict | None = None) -> tuple[list[str], list[tuple]]:
+        """`run` plus the names the manifest gave the columns, which `run` drops because
+        the result set contract is positional. Only this class reads the names, and only to
+        find one field of a `DESCRIBE DETAIL` whose column order has changed between
+        runtime versions."""
         from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
         execution = self._workspace().statement_execution
@@ -202,8 +242,11 @@ class DatabricksCatalog:
         if response.manifest.truncated or response.manifest.total_chunk_count > 1:
             raise RuntimeError("statement returned more rows than one chunk holds")
 
-        types = [_type(column) for column in response.manifest.schema.columns]
-        return [tuple(_value(v, t) for v, t in zip(row, types)) for row in response.result.data_array or []]
+        described = response.manifest.schema.columns
+        types = [_type(column) for column in described]
+        return [column.name for column in described], [
+            tuple(_value(v, t) for v, t in zip(row, types)) for row in response.result.data_array or []
+        ]
 
     def qualify(self, name: str) -> str:
         segments = name.split(".")

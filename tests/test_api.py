@@ -16,7 +16,6 @@ from vizmith.api import (
     app,
     constrains,
     model,
-    profiles,
     source,
 )
 from vizmith.ask import ATTEMPTS, SCHEMA
@@ -149,7 +148,9 @@ def test_no_table_endpoint_answers_with_a_row(client, catalog):
 def test_a_second_request_for_a_table_does_not_profile_it_again(client, catalog):
     """Profiling a table is two warehouse queries. A panel that reads a profile per table
     would pay for the schema again on every render."""
+    client.get("/api/tables")
     client.get(f"/api/tables/{ORDERS}")
+    client.get(f"/api/tables/{SCANS}")
     profiled = list(catalog.statements)
 
     client.get(f"/api/tables/{ORDERS}")
@@ -158,6 +159,15 @@ def test_a_second_request_for_a_table_does_not_profile_it_again(client, catalog)
 
     assert profiled
     assert catalog.statements == profiled
+
+
+def test_reading_one_table_does_not_profile_the_schema_around_it(client, catalog):
+    """The panel asks for a profile per table, so a request that profiled everything to
+    answer for one would pay for the schema once per table in the tree."""
+    client.get(f"/api/tables/{ORDERS}")
+
+    assert catalog.statements
+    assert all('"orders"' in statement for statement in catalog.statements)
 
 
 def test_a_question_after_a_profile_request_profiles_nothing_again(asking, catalog):
@@ -173,9 +183,40 @@ def test_a_question_after_a_profile_request_profiles_nothing_again(asking, catal
     assert len(catalog.statements) == len(profiled) + 1, "the question ran its own query and no more"
 
 
+def test_a_restarted_server_does_not_profile_the_schema_again(catalog):
+    """The cache is on disk, so what a restart used to cost is now paid once. Two clients
+    over one state directory is what a restart looks like from here."""
+    app.dependency_overrides[source] = lambda: catalog
+    try:
+        TestClient(app).get("/api/tables")
+        profiled = list(catalog.statements)
+        listed = TestClient(app).get("/api/tables")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert profiled
+    assert listed.json()["tables"] == catalog.tables()
+    assert catalog.statements == profiled
+
+
+def test_a_table_written_to_under_a_running_server_is_profiled_again(client, catalog):
+    """What the old cache could not do. The schema moved, and the panel and the prompt both
+    describe the table as it is now rather than as it was when the server started."""
+    client.get("/api/tables")
+    profiled = list(catalog.statements)
+
+    catalog.modified_times["orders"] = "2"
+    response = client.get(f"/api/tables/{ORDERS}")
+
+    fresh = catalog.statements[len(profiled) :]
+    assert response.status_code == 200
+    assert fresh
+    assert all('"orders"' in statement for statement in fresh)
+
+
 def test_a_table_name_the_schema_does_not_hold_is_refused_naming_it(client):
-    """The panel takes its names from the list, so a miss means the schema moved under a
-    server that profiled it once. That reads as a missing table, not as a crash."""
+    """The panel takes its names from the list, so a miss means the table went away between
+    the two requests. That reads as a missing table, not as a crash."""
     response = client.get("/api/tables/vizmith.shop.nowhere")
 
     assert response.status_code == 404
@@ -254,6 +295,11 @@ class RefusingCatalog:
 
     def relationships(self):
         return self._catalog.relationships()
+
+    def modified(self, name):
+        """None, which is what a source whose statements all fail honestly reports: a
+        modified time is a statement too, and one that cannot run has no time to give. So
+        nothing is cached and the failure below is what every request meets."""
 
     def run(self, sql, parameters=None):
         raise RuntimeError(self._message)
@@ -540,10 +586,8 @@ def browsing(catalog, tmp_path):
     what the relationship endpoints write to. Nothing here reaches a home directory."""
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
-    profiles.cache_clear()
     yield TestClient(app)
     app.dependency_overrides.clear()
-    profiles.cache_clear()
 
 
 ORDERS = "vizmith.shop.orders"
