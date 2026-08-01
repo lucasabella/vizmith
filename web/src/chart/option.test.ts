@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import Chart from "./Chart";
 import {
   buildOption,
+  clickedValue,
+  instant,
   markText,
   overSeriesLimit,
   seriesCount,
@@ -497,23 +499,60 @@ it("maps arc x to the slice label and y to the slice value", () => {
   expect(option).not.toHaveProperty("yAxis");
 });
 
-it("gives a temporal x a time axis", () => {
-  const option = buildOption(
-    spec({
-      mark: "line",
-      encoding: { x: { field: "month", type: "temporal" }, y: quantitative("order_count") },
-    }),
-    [
-      { month: "2026-01-01", order_count: 5 },
-      { month: "2026-02-01", order_count: 8 },
-    ],
-  );
+describe("a temporal axis", () => {
+  const MONTHLY = spec({
+    mark: "line",
+    encoding: { x: { field: "month", type: "temporal" }, y: quantitative("order_count") },
+  });
+  const ROWS: Row[] = [
+    { month: "2026-01-01", order_count: 5 },
+    { month: "2026-02-01", order_count: 8 },
+  ];
 
-  expect(option?.xAxis).toMatchObject({ type: "time" });
-  expect(seriesOf(option)[0].data).toEqual([
-    ["2026-01-01", 5],
-    ["2026-02-01", 8],
-  ]);
+  it("reads both of the shapes the result set contract allows", () => {
+    expect(instant("2026-01-01")).toBe(new Date(2026, 0, 1).getTime());
+    expect(instant("2026-01-01T09:30:00")).toBe(new Date(2026, 0, 1, 9, 30).getTime());
+    expect(instant("2026-01-01T09:30:00.123456")).toBe(new Date(2026, 0, 1, 9, 30, 0, 123).getTime());
+  });
+
+  it("reads a date and a midnight timestamp as one moment", () => {
+    // The two forms one contract allows, which ECharts' own parser puts a timezone apart:
+    // it reads a bare date as UTC and a date with a time as local.
+    expect(instant("2026-01-01")).toBe(instant("2026-01-01T00:00:00"));
+  });
+
+  it("draws no mark for a value that is not the contract's shape", () => {
+    expect(instant("2026-01-01T00:00:00.000Z")).toBeNull();
+    expect(instant("January")).toBeNull();
+    expect(instant(5)).toBeNull();
+  });
+
+  it("plots the moment rather than the text it arrived as", () => {
+    const option = buildOption(MONTHLY, ROWS);
+
+    expect(option?.xAxis).toMatchObject({ type: "time" });
+    expect(seriesOf(option)[0].data).toEqual([
+      [instant("2026-01-01"), 5],
+      [instant("2026-02-01"), 8],
+    ]);
+  });
+
+  it("names the value the source sent on hover, not the moment it plotted", () => {
+    const hovered = hover(buildOption(MONTHLY, ROWS), { name: "", value: [instant("2026-01-01"), 5] });
+
+    expect(hovered).toBe("month: 2026-01-01\norder_count: 5");
+  });
+
+  it("hands a click the value the source sent, which is what a drill filters on", () => {
+    expect(clickedValue(MONTHLY, ROWS, { value: [instant("2026-02-01"), 8] })).toBe("2026-02-01");
+  });
+
+  it("hands a click on a category axis the label, the way it always did", () => {
+    const bars = spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } });
+    const rows = [{ country: "Netherlands", revenue: 1 }];
+
+    expect(clickedValue(bars, rows, { name: "Netherlands", value: 1 })).toBe("Netherlands");
+  });
 });
 
 it("titles an axis by its channel title, falling back to the field", () => {

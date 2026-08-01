@@ -20,6 +20,7 @@ from vizmith.catalog import (
     Dialect,
     Relationship,
     Table,
+    conform,
 )
 
 # The same .env the serve command reads, so a workspace that is configured for running the
@@ -110,7 +111,22 @@ class FixtureCatalog:
     def run(self, sql, parameters=None):
         with self._lock:
             self.statements.append(sql)
-            return self._connection.execute(sql, parameters or {}).fetchall()
+            rows = self._connection.execute(sql, parameters or {}).fetchall()
+        # DuckDB answers in Python objects, and a decimal column comes back as a Decimal
+        # where the shipping catalog gives a float. The harness conforms to the same
+        # contract rather than being the one source whose rows read differently, which is
+        # the whole point of writing the shapes down. See ROADMAP.md.
+        return [tuple(conform(value) for value in row) for row in rows]
+
+
+def shapes(rows):
+    """What a result set holds, per column, as the set of types its values have. Nulls are
+    left out, since a null is None whatever the column is. Two sources answering one spec
+    have to agree on this, and comparing the rows themselves would instead be comparing
+    two copies of the fixture data."""
+    return {
+        name: {type(row[name]) for row in rows if row[name] is not None} for name in (rows[0] if rows else {})
+    }
 
 
 def load_fixture_db():

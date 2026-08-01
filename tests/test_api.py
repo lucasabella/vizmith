@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -31,6 +32,7 @@ VALID = sorted((FIXTURES / "valid").glob("*.json"))
 INVALID = sorted((FIXTURES / "invalid").glob("*.json"))
 
 REVENUE_BY_COUNTRY = FIXTURES / "valid" / "revenue_by_country.json"
+ORDERS_PER_MONTH = FIXTURES / "valid" / "orders_per_month.json"
 
 
 def load(path: Path) -> dict:
@@ -470,6 +472,19 @@ def test_a_measure_arrives_as_a_number_rather_than_as_text(client):
     response = client.post("/api/execute", json={"spec": load(REVENUE_BY_COUNTRY)})
 
     assert all(isinstance(row["revenue"], (int, float)) for row in response.json()["rows"])
+
+
+def test_a_temporal_value_arrives_as_iso_8601_text(client):
+    """JSON has no date, so text is the shape a temporal value crosses the wire in, and
+    the contract says which text: what `isoformat` writes, with no zone on the end of it.
+    That is what the renderer parses, so a second encoder that wrote a different one would
+    move every mark on a time axis rather than fail. See ROADMAP.md."""
+    body = client.post("/api/execute", json={"spec": load(ORDERS_PER_MONTH)}).json()
+
+    assert body["rows"]
+    assert all(
+        re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", row["month"]) for row in body["rows"]
+    ), body["rows"][0]
 
 
 @pytest.mark.parametrize("path", INVALID, ids=lambda p: p.name)

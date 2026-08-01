@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import FixtureCatalog, needs_warehouse
+from conftest import FixtureCatalog, needs_warehouse, shapes
 
 from vizmith.query import build, execute
 from vizmith.spec import output_columns
@@ -164,15 +164,24 @@ def test_a_valid_fixture_executes_against_the_warehouse(path, live_catalog, cata
     the data, and that is the failure worth catching here."""
     spec = load(path)
     rows = execute(spec, live_catalog)
+    offline = execute(spec, catalog)
 
     assert rows
     assert list(rows[0]) == output_columns(spec["query"])
-    assert len(rows) == len(execute(spec, catalog)), (
-        "the workspace copy of the fixture data may be stale"
+    assert len(rows) == len(offline), "the workspace copy of the fixture data may be stale"
+    # The rest of the result set contract, on the only two sources there are to compare.
+    # A column that is a date here and a string there is what makes a renderer ask which
+    # source drew the chart, which is the question the catalog interface exists to remove.
+    assert shapes(rows) == shapes(offline), (
+        "the two sources disagree about what a value is, against ROADMAP.md's result set contract"
     )
 
 
 def test_a_truncated_column_carries_its_alias(catalog):
     rows = execute(load(FIXTURES / "valid" / "orders_per_month.json"), catalog)
     assert list(rows[0]) == ["month", "orders"]
+    # Every month starts on the first, which is what the truncation did. Reading a field
+    # off the value leans on the result set contract rather than on this source: a
+    # temporal value is an object from every catalog, and test_result_set.py is where that
+    # is established for each of them.
     assert all(row["month"].day == 1 for row in rows)

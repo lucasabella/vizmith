@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as echarts from "echarts";
-import { buildOption, label, type Row, type Spec, type Value } from "./option";
+import { buildOption, clickedValue, label, type Row, type Spec } from "./option";
 import type { Clicked } from "../spec/drill";
 
 export default function Chart({
@@ -25,13 +25,13 @@ export default function Chart({
     chart.setOption(option);
     // A click carries what the renderer drew: the category on the axis and the series
     // name where a colour channel made one. Both are labels, and what they stand for is
-    // looked up in the result set rather than parsed back out of them.
+    // looked up in the result set rather than parsed back out of them. A time axis is
+    // drawn from instants rather than from labels, so that lookup is where the value the
+    // source sent comes back.
     chart.on("click", (params: { name?: string; seriesName?: string; value?: unknown }) => {
       if (select.current === undefined) return;
-      const pair = Array.isArray(params.value) ? (params.value as Value[]) : null;
-      const category = pair ? pair[0] : (params.name ?? null);
       select.current({
-        category,
+        category: clickedValue(spec, rows, params),
         series: spec.chart.encoding.color ? params.seriesName : undefined,
       });
     });
@@ -43,7 +43,7 @@ export default function Chart({
       observer.disconnect();
       chart.dispose();
     };
-  }, [option, spec.chart.encoding.color]);
+  }, [option, rows, spec]);
 
   // A question with no dimension. The validator has already established that the query
   // returns one row, so the measure is read off it and drawn as a figure. There is no

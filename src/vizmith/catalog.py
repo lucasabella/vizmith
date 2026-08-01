@@ -1,14 +1,17 @@
 """What a data source says about itself, in words the rest of Vizmith understands.
 
 Nothing above this module knows that the source is Databricks. A caller gets
-qualified names, a closed set of types and nullability, and nothing else.
+qualified names, a closed set of types and nullability, and rows whose values are the
+one shape the result set contract fixes, and nothing else.
 """
 
 import dataclasses
+import datetime as dt
 import json
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Protocol
 
 STRING = "string"
@@ -38,6 +41,20 @@ TYPES = {
     "DATE": DATE,
     "TIMESTAMP": TIMESTAMP,
     "TIMESTAMP_NTZ": TIMESTAMP,
+}
+
+# What a value of each type is once it has left a catalog. The set above says what a
+# column is; this says what a row holds, so that a caller reading a result set does not
+# have to know which source produced it. A null is None whatever the column's type, and a
+# column the set calls unsupported cannot be selected, so neither has an entry here. The
+# reasons for these particular shapes, temporal and decimal especially, are in ROADMAP.md.
+SHAPES = {
+    STRING: str,
+    INTEGER: int,
+    DECIMAL: float,
+    BOOLEAN: bool,
+    DATE: dt.date,
+    TIMESTAMP: dt.datetime,
 }
 
 
@@ -137,9 +154,36 @@ class Catalog(Protocol):
         """Rows for a statement built above this layer, with every value bound by name
         rather than written into the statement.
 
+        Every value is in the shape `SHAPES` gives its type, whatever the source's own
+        client answers in. That is the half of the result set contract this layer owns: a
+        renderer that had to know which source drew a chart is what the interface exists to
+        prevent, and a catalog that answered in its client's shapes would put it there.
+
         Callable from several threads at once, because profiling a schema runs several
         tables in parallel and a warehouse round trip is nearly all waiting. A source whose
         client is not safe to share serialises here rather than making the caller ask."""
+
+
+def conform(value):
+    """One value in the shape the contract fixes, for a source whose client answers in
+    Python objects rather than in text.
+
+    Three things move. A decimal becomes a float, because the closed set folds FLOAT and
+    DOUBLE in with DECIMAL and no shape can be exact for all three. A timestamp that
+    carries a zone becomes the same instant in UTC without one, because a result set holds
+    one shape and a zone is not part of it. And an array's values are conformed too, since
+    the profiler's samples arrive inside one.
+
+    Everything else is returned untouched. A value this does not recognise is not
+    converted, because a shape nobody planned for is a source's bug, and guessing here
+    would hide it rather than report it."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dt.datetime) and value.tzinfo is not None:
+        return value.astimezone(dt.UTC).replace(tzinfo=None)
+    if isinstance(value, (list, tuple)):
+        return [conform(item) for item in value]
+    return value
 
 
 class DatabricksCatalog:
@@ -303,7 +347,9 @@ def _type(column) -> str:
 
 def _value(text: str | None, type_name: str):
     """Rows come back as text with the types in the manifest, so the source's own type is
-    what turns a total back into a number before it reaches a chart.
+    what turns a total back into a number and a month back into a date before either
+    reaches a chart. What it turns them into is `SHAPES`, which is the same answer the
+    harness gives for the same column.
 
     An array arrives as the JSON text of one. It is handled here rather than in `TYPES`
     because that set says which column types can be charted, and an array still cannot be.
@@ -321,7 +367,27 @@ def _value(text: str | None, type_name: str):
         return float(text)
     if kind == BOOLEAN:
         return text == "true"
+    if kind in (DATE, TIMESTAMP):
+        return _temporal(text, kind, type_name)
     return text
+
+
+def _temporal(text: str, kind: str, type_name: str):
+    """A date or a timestamp as an object rather than as the text the API sent.
+
+    A TIMESTAMP arrives with a `Z` on the end where a TIMESTAMP_NTZ arrives without one,
+    so this is also where the zone goes: the instant is carried to UTC and stripped of it,
+    because the contract has one shape for a timestamp and a zone is not part of it.
+
+    Text the manifest called temporal and Python cannot read is the source failing rather
+    than the spec, and it raises the error the API attributes to a source. Returning the
+    text would be worse than raising: it puts the shape this exists to remove into a
+    result set, and only whatever reads the value much later would notice."""
+    try:
+        moment = dt.date.fromisoformat(text) if kind == DATE else dt.datetime.fromisoformat(text)
+    except ValueError as failure:
+        raise RuntimeError(f"the source answered {text!r} for a {type_name} column") from failure
+    return conform(moment)
 
 
 def _foreign_key(table: str, constraint) -> list[Relationship]:
