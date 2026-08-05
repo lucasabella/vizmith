@@ -5,7 +5,9 @@ import type { Row, Spec } from "./chart/option";
 import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";
 import Data from "./views/Data";
+import Dashboards from "./views/Dashboards";
 import { drawable, type Draft, type Field } from "./spec/spec";
+import type { Dashboard } from "./dashboard/dashboard";
 
 /** Which part refused, as the server named it. It is the only thing that can: a question
  * passes through the source, the model and the source again, and from here they are one
@@ -48,7 +50,7 @@ export default function App() {
   const [source, setSource] = useState(false);
   const [model, setModel] = useState(false);
   const [question, setQuestion] = useState("");
-  const [view, setView] = useState<"chart" | "data">("chart");
+  const [view, setView] = useState<"chart" | "dashboards" | "data">("chart");
   const [visualisationOpen, setVisualisationOpen] = useState(true);
   const [fieldsOpen, setFieldsOpen] = useState(true);
   const [json, setJson] = useState(false);
@@ -62,6 +64,10 @@ export default function App() {
   // Where a drill came from. A drill that cannot be undone is a trap, so the spec that was
   // replaced stays reachable, as the text and the chart it drew.
   const [before, setBefore] = useState<{ text: string; outcome: Outcome }[]>([]);
+  // The dashboard being arranged. It lives here rather than in the view, because adding
+  // the chart on screen to it means going back to the Chart view to build the next one,
+  // and a view holding it would throw the arrangement away on the way out.
+  const [dashboard, setDashboard] = useState<Dashboard>({ name: "", tiles: [] });
   const running = working !== null;
 
   useEffect(() => {
@@ -259,6 +265,15 @@ export default function App() {
             <ChartIcon />
           </button>
           <button
+            className={view === "dashboards" ? "rail__btn rail__btn--on" : "rail__btn"}
+            title="Dashboards"
+            aria-label="Dashboards"
+            aria-pressed={view === "dashboards"}
+            onClick={() => setView("dashboards")}
+          >
+            <DashboardIcon />
+          </button>
+          <button
             className={view === "data" ? "rail__btn rail__btn--on" : "rail__btn"}
             title="Data"
             aria-label="Data"
@@ -272,6 +287,12 @@ export default function App() {
         {view === "data" ? (
           <main className="canvas canvas--data">
             <Data />
+          </main>
+        ) : view === "dashboards" ? (
+          // The spec on screen is what a dashboard adds, so the two views share the one
+          // draft rather than the dashboard holding a copy that can drift from it.
+          <main className="canvas canvas--data">
+            <Dashboards current={draft} dashboard={dashboard} onChange={setDashboard} />
           </main>
         ) : (
           <main className="canvas">
@@ -303,9 +324,10 @@ export default function App() {
               />
             </div>
 
+            {/* The page tabs that used to sit here were markup and did nothing. Several
+                charts at once is the Dashboards view now, and a control that looks like it
+                does that and does not is worse than not having one. */}
             <div className="pages">
-              <span className="pages__tab pages__tab--on">Page 1</span>
-              <span className="pages__tab pages__tab--add">+ page</span>
               {before.length > 0 ? (
                 <button className="pages__back" onClick={back}>
                   &larr; the chart this came from
@@ -547,6 +569,17 @@ function ChartIcon() {
       <rect x="2" y="9" width="3.4" height="7" fill="currentColor" />
       <rect x="7.3" y="5" width="3.4" height="11" fill="currentColor" />
       <rect x="12.6" y="2" width="3.4" height="14" fill="currentColor" />
+    </svg>
+  );
+}
+
+function DashboardIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect x="2" y="2" width="6" height="7" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="10" y="2" width="6" height="4" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="2" y="11" width="6" height="5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="10" y="8" width="6" height="8" fill="none" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   );
 }

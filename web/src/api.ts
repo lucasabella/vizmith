@@ -6,6 +6,8 @@
  * the resolver's. The panels show what came back and add no opinion about it.
  */
 
+import type { Row, Spec } from "./chart/option";
+import type { Dashboard, Saved, Tile } from "./dashboard/dashboard";
 import type { Join } from "./spec/spec";
 
 export type ColumnProfile = {
@@ -73,6 +75,35 @@ export const answerRelationship = (
       answer,
     }),
   });
+
+/** The rows a spec produces, from the one endpoint that runs one. A tile on a dashboard
+ * goes through this exactly as a single chart does, so there is no second answer to what a
+ * spec means. */
+export const execute = (spec: Spec): Promise<{ spec: Spec; rows: Row[] }> =>
+  json("/api/execute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spec }),
+  });
+
+/** Every saved dashboard, as a name and a tile count. No spec comes back here: this is
+ * what a menu is drawn from. */
+export const getDashboards = (): Promise<{ dashboards: Saved[] }> => json("/api/dashboards");
+
+export const getDashboard = (name: string): Promise<Dashboard> =>
+  json(`/api/dashboards/${encodeURIComponent(name)}`);
+
+/** Save under a name, replacing whatever it held. The tiles are refused whole where one of
+ * them does not validate, and the refusal carries the validator's own words. */
+export const saveDashboard = (name: string, tiles: Tile[]): Promise<Dashboard> =>
+  json(`/api/dashboards/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tiles }),
+  });
+
+export const deleteDashboard = (name: string): Promise<unknown> =>
+  json(`/api/dashboards/${encodeURIComponent(name)}`, { method: "DELETE" });
 
 /** How to get from one table to another, as the joins a spec carries. The resolver
  * decides; a browser that worked this out from the relationship list would be a second

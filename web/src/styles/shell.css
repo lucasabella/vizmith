@@ -577,27 +577,6 @@ button:focus-visible {
   border-top: 1px solid var(--rule-2);
 }
 
-.pages__tab {
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  font-size: 12px;
-  color: var(--ink-2);
-  border-right: 1px solid var(--rule);
-}
-
-.pages__tab--on {
-  background: var(--surf);
-  color: var(--ink);
-  font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--chrome);
-}
-
-.pages__tab--add {
-  color: var(--ink-3);
-  border-right: 0;
-}
-
 /* The way back from a drill. A drill that cannot be undone is a trap, so the chart that
    was replaced is one control away rather than gone. */
 .pages__back {
@@ -1272,4 +1251,215 @@ button:focus-visible {
   font-size: 11px;
   line-height: 1.45;
   color: var(--ink-2);
+}
+
+/* Dashboards. The list of what is saved sits beside the one being arranged, because
+   opening another is the thing a person does most here and a menu that has to be opened
+   first would hide it. */
+.dash {
+  max-width: 1100px;
+}
+
+.dash__head {
+  margin-bottom: 18px;
+}
+
+.dash__title {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.dash__lead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+
+.dash__body {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.dash__sub {
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.dash__note {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.dash__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.5;
+}
+
+.dash__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+}
+
+.dash__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.dash__item + .dash__item {
+  border-top: 1px solid var(--rule);
+}
+
+.dash__item--on {
+  background: var(--surf-2);
+  box-shadow: inset 2px 0 0 var(--chrome);
+}
+
+.dash__open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+}
+
+.dash__name {
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.dash__tally {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.dash__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dash__field {
+  flex: 1;
+  max-width: 34ch;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+}
+
+.dash__count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+/* Two columns, and a tile takes one of them or both. An order and a width is the whole
+   arrangement: pixel positions would be a geometry that is wrong on the next screen. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.grid__cell {
+  display: flex;
+  flex-direction: column;
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.grid__head {
+  flex: none;
+  height: var(--h-panel-head);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 11px;
+  background: var(--surf-2);
+  border-bottom: 1px solid var(--rule);
+}
+
+.grid__title {
+  flex: 1;
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid__actions {
+  display: flex;
+  gap: 3px;
+}
+
+.grid__btn {
+  min-width: 24px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+}
+
+.grid__btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+.grid__btn:disabled {
+  color: var(--rule-2);
+  cursor: default;
+}
+
+.grid__body {
+  height: 260px;
+  display: flex;
+}
+
+.grid__body > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.grid__working {
+  margin: auto;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* A tile that failed says so in its own tile. The rest of the dashboard is still
+   readable, which is the reason the rows are fetched per tile in the first place. */
+.grid__refusal {
+  margin: auto;
+  padding: 14px;
+  max-width: 46ch;
 }

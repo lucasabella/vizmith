@@ -11,6 +11,11 @@ of the whole design. A source's own error message is passed on even where it quo
 statement that failed, because the person reading it asked for that query and withholding
 the only clue protects nothing.
 
+Two things here write, and both write specs or answers about them rather than configuration:
+a person's answer about a suggested relationship, and a dashboard, which is several specs
+saved under a name. Neither can point the server at data, which is the sentence the read
+only surface existed to keep.
+
 Validator messages are returned word for word. They are written to be fed back to a model
 on retry, so rewording them here would break that loop before it is written.
 """
@@ -29,6 +34,7 @@ from pydantic import BaseModel
 from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Relationship
+from vizmith.dashboards import Dashboards, Refused
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
 from vizmith.relationships import Confirmations, graph, resolve, suggest
@@ -111,9 +117,16 @@ def profile(catalog: Catalog, name: str) -> TableProfile:
 
 def state_dir() -> Path:
     """Where the server keeps what it has to remember between runs: what a person answered
-    about a suggested relationship, and the profiles it has already paid for. Nothing else,
-    and no key ever. `VIZMITH_STATE_DIR` moves it."""
+    about a suggested relationship, the profiles it has already paid for, and the
+    dashboards they saved. Nothing else, and no key ever. `VIZMITH_STATE_DIR` moves it."""
     return Path(os.environ.get("VIZMITH_STATE_DIR") or Path.home() / ".vizmith")
+
+
+def saved() -> Dashboards:
+    """The dashboards a person saved, read from disk on every request for the same reason
+    the relationship answers are: the file is small, and a copy held between requests is
+    one more thing that can answer with what was true a moment ago."""
+    return Dashboards(state_dir() / "dashboards.json")
 
 
 def answers() -> Confirmations:
@@ -144,6 +157,17 @@ class SpecRequest(BaseModel):
 
 class QuestionRequest(BaseModel):
     question: str
+
+
+class DashboardRequest(BaseModel):
+    """The tiles of one dashboard. The name is in the path, because it is what addresses
+    the dashboard, and a name in the body as well would be two of them to disagree.
+
+    The tiles are untyped for the same reason a spec is: the validator answers for every
+    shape a spec can arrive in, and a model that rejected the wrong ones first would
+    replace its message with one of pydantic's."""
+
+    tiles: list[object]
 
 
 class AnswerRequest(BaseModel):
@@ -336,6 +360,61 @@ def _joins(left: str, path: list[Relationship]) -> list[dict]:
 def validate(request: SpecRequest):
     """The validator's errors. An empty list means valid. Reaches no source."""
     return {"errors": validate_spec(request.spec)}
+
+
+@app.get("/api/dashboards")
+def dashboards(store: Annotated[Dashboards, Depends(saved)]):
+    """Every saved dashboard, as its name and how many tiles are under it.
+
+    The tiles themselves are not here. A list of names is what a person picks from, and
+    answering it with every spec of every dashboard would send the whole store to draw a
+    menu. Reaches no source: a dashboard is specs, and running one is what runs a query."""
+    return {
+        "dashboards": [
+            {"name": name, "tiles": len(store.read(name).tiles)} for name in store.names()
+        ]
+    }
+
+
+@app.get("/api/dashboards/{name}")
+def dashboard(name: str, store: Annotated[Dashboards, Depends(saved)]):
+    """One dashboard: its tiles, in the order they are drawn in, each with its width. The
+    rows are not here either. Every tile goes back through `/api/execute`, so a tile and a
+    single chart are the same spec run the same way against the same source."""
+    found = store.read(name)
+    if found is None:
+        return JSONResponse(
+            status_code=404, content={"errors": [f"nothing is saved under the name '{name}'"]}
+        )
+    return found.as_dict()
+
+
+@app.put("/api/dashboards/{name}")
+def save_dashboard(
+    name: str, request: DashboardRequest, store: Annotated[Dashboards, Depends(saved)]
+):
+    """Save a dashboard under a name, replacing whatever that name held.
+
+    Every tile is validated before anything is written, and a rejection comes back in the
+    same `errors` list the validator's own refusal uses, naming which tile by its position
+    on the grid. Nothing partial is stored: a save that refused one tile leaves what was
+    saved before exactly as it was, because half a dashboard is not a thing a person asked
+    for."""
+    try:
+        return store.save(name, request.tiles).as_dict()
+    except Refused as failure:
+        return JSONResponse(status_code=400, content={"errors": failure.errors})
+
+
+@app.delete("/api/dashboards/{name}")
+def delete_dashboard(name: str, store: Annotated[Dashboards, Depends(saved)]):
+    """Forget one. A name nothing is saved under is a 404 rather than a quiet success,
+    since a delete that always succeeds cannot tell a person they deleted the other one."""
+    if not store.delete(name):
+        return JSONResponse(
+            status_code=404, content={"errors": [f"nothing is saved under the name '{name}'"]}
+        )
+    return {"name": name}
 
 
 def refused(spoke: str, failure: Exception, status: int = 502) -> JSONResponse:
