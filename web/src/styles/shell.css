@@ -1463,3 +1463,35 @@ button:focus-visible {
   padding: 14px;
   max-width: 46ch;
 }
+
+/* The tile being corrected, and the way back into it. Both are said in words as well as
+   in a border, because provenance encoded in colour alone has been cut from this project
+   twice already. */
+.grid__cell--editing {
+  border-color: var(--chrome-3);
+  box-shadow: 0 0 0 1px var(--chrome-3), var(--shadow-card);
+}
+
+.grid__editing {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--rule-2);
+  color: var(--ink-2);
+}
+
+.pages__correcting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-left: 1px solid var(--rule);
+}
+
+.pages__note {
+  font-size: 11.5px;
+  color: var(--ink-2);
+}

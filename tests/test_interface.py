@@ -229,3 +229,72 @@ def test_a_dashboard_that_is_deleted_is_gone_from_the_list(page):
 
     assert page.locator(".dash__list").count() == 0
     assert "Nothing is saved yet" in page.locator(".dash__saved").inner_text()
+
+
+@needs_built_frontend
+def test_a_tile_is_corrected_where_it_was_made_and_goes_back_where_it_came_from(page):
+    """A tile opens into the Chart view, the correction is made there, and it lands in the
+    tile it came from rather than as a new one at the end."""
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.get_by_role("button", name="Chart", exact=True).first.click()
+    run_spec(page, ORDERS_PER_MONTH)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.wait_for_selector(".grid__cell:nth-child(2) canvas", timeout=DRAWN)
+
+    page.locator(".grid__cell").first.get_by_title("Correct this chart").click()
+    chart_drawn(page)
+    corrected = json.loads(spec(REVENUE_BY_COUNTRY)) | {"title": "Revenue, corrected"}
+    page.locator("textarea.spec__text").fill(json.dumps(corrected))
+    page.get_by_role("button", name="Run spec").click()
+    chart_drawn(page)
+    page.get_by_role("button", name="Put it back").click()
+    page.wait_for_selector(".grid__cell canvas", timeout=DRAWN)
+
+    # In place, not appended, and the second tile is untouched.
+    assert page.locator(".grid__title").all_inner_texts() == [
+        "Revenue, corrected",
+        "Orders per month",
+    ]
+
+
+@needs_built_frontend
+def test_a_correction_can_be_abandoned(page):
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.wait_for_selector(".grid__cell canvas", timeout=DRAWN)
+
+    page.locator(".grid__cell").first.get_by_title("Correct this chart").click()
+    chart_drawn(page)
+    page.locator("textarea.spec__text").fill(spec(ORDERS_PER_MONTH))
+    page.get_by_role("button", name="Never mind").click()
+    page.get_by_role("button", name="Dashboards").click()
+
+    assert page.locator(".grid__title").all_inner_texts() == ["Revenue by country, 2025"]
+    assert page.locator(".grid__cell--editing").count() == 0
+
+
+@needs_built_frontend
+def test_a_dashboard_is_renamed_in_one_gesture(page):
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.get_by_label("Dashboard name").fill("Trade")
+    page.get_by_role("button", name="Save").click()
+    page.wait_for_selector("text=Saved as Trade", timeout=DRAWN)
+
+    page.get_by_label("Dashboard name").fill("Trade, 2026")
+    page.get_by_role("button", name="Rename Trade").click()
+    page.wait_for_selector("text=Renamed Trade to Trade, 2026", timeout=DRAWN)
+    page.reload(wait_until="networkidle")
+    page.get_by_role("button", name="Dashboards").click()
+
+    names = page.locator(".dash__name").all_inner_texts()
+    assert names == ["Trade, 2026"]
