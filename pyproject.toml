@@ -16,11 +16,15 @@ dependencies = [
 [project.optional-dependencies]
 # DuckDB is the test harness, not part of the product: it writes the fixture Parquet
 # and builds the local database the deterministic tests run against. httpx is not here
-# because the model adapter ships with it.
+# because the model adapter ships with it. Playwright drives the interface in a browser;
+# installing it does not install a browser, and the suite that needs one skips where
+# there is none, so a checkout that only wants the fast tests pays a wheel and nothing
+# else.
 dev = [
     "pytest>=8.3",
     "ruff>=0.8",
     "duckdb>=1.1",
+    "playwright>=1.49",
 ]
 
 [project.scripts]
