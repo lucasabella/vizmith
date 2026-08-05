@@ -91,6 +91,16 @@ Tests and lint:
 .venv/bin/ruff check .
 ```
 
+A handful of flows are driven in a real browser, against the same fixture data through the real server. They need the frontend built and a Chromium that Playwright can launch, and they skip where either is missing:
+
+```
+cd web && npm run build && cd ..
+.venv/bin/playwright install chromium
+.venv/bin/pytest tests/test_interface.py
+```
+
+Set `VIZMITH_CHROMIUM` to a browser's path where one is already installed and Playwright's own copy is not it. These cover what crosses a view, a reload or a repaint, which is what a static render cannot reach; everything else about the interface is tested by `npm test`.
+
 The suite runs offline against DuckDB. With a profile and a warehouse in `.env` it also compiles and runs every fixture spec against the workspace, through the query builder and through the HTTP API. Without one those tests skip.
 
 Scoring the model on a fixed question set:

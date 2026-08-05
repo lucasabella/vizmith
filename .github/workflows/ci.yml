@@ -56,3 +56,36 @@ jobs:
       - name: npm run build
         working-directory: web
         run: npm run build
+
+  # A separate job rather than a step in the one above, because a browser can fail for
+  # reasons that belong to the runner rather than to the change under review, and a flake
+  # inside the suite would read as the suite failing. It is here at all because the class
+  # of bug it catches is invisible to everything else: every other frontend test is a
+  # static render, and the state bug #59 shipped passed all of them. See ROADMAP.md.
+  interface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install the package with its dev extra
+        run: pip install -e '.[dev]'
+
+      # Chromium only. The suite drives one browser, and installing three would triple
+      # the slowest step in CI to cover engines nothing here is written against.
+      - name: Install Chromium for Playwright
+        run: playwright install --with-deps chromium
+
+      - name: Build the frontend the server serves
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: pytest tests/test_interface.py
+        run: pytest tests/test_interface.py
