@@ -1,0 +1,328 @@
+import { useEffect, useState } from "react";
+import {
+  Refused,
+  deleteDashboard,
+  execute,
+  getDashboard,
+  getDashboards,
+  saveDashboard,
+} from "../api";
+import Chart from "../chart/Chart";
+import type { Row, Spec } from "../chart/option";
+import { overSeriesLimit } from "../chart/option";
+import {
+  COLUMNS,
+  TILE_LIMIT,
+  add,
+  move,
+  nameProblem,
+  remove,
+  tileTitle,
+  widen,
+  type Dashboard,
+  type Saved,
+  type Tile,
+} from "../dashboard/dashboard";
+import { drawable, type Draft } from "../spec/spec";
+
+/**
+ * Dashboards: several specs under one name, arranged, and opened again.
+ *
+ * A tile is a spec and nothing else, so what is on screen here is drawn the same way the
+ * single chart is: each tile runs its own spec through `/api/execute` and hands the rows
+ * to the same renderer. No rows are stored and none are shared between tiles, which means
+ * a tile that fails fails on its own and the rest of the dashboard still draws.
+ *
+ * The arrangement is an order and a width. Both are controls a person can see, for the
+ * same reason a well shows the aggregate it inferred: a layout that cannot be seen and
+ * cannot be changed is the quiet kind of wrong this project exists to avoid.
+ */
+export default function Dashboards({
+  current,
+  dashboard,
+  onChange,
+}: {
+  current: Draft | null;
+  dashboard: Dashboard;
+  onChange: (dashboard: Dashboard) => void;
+}) {
+  const [list, setList] = useState<Saved[] | null>(null);
+  // What the last save or open said, in the server's words where it spoke.
+  const [refusal, setRefusal] = useState<string[] | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+
+  // The dashboard being arranged lives in the application rather than here, because
+  // adding the chart on screen means leaving this view to build the next one, and state
+  // that belongs to a view is state that is thrown away when the view is.
+  const { name, tiles } = dashboard;
+  const setName = (next: string) => onChange({ name: next, tiles });
+  const setTiles = (next: Tile[]) => onChange({ name, tiles: next });
+
+  const read = () => {
+    getDashboards()
+      .then((body) => setList(body.dashboards))
+      .catch((error: Error) => setRefusal([error.message]));
+  };
+
+  useEffect(read, []);
+
+  const open = async (opening: string) => {
+    setWorking(true);
+    try {
+      const opened = await getDashboard(opening);
+      onChange(opened);
+      setRefusal(null);
+      setNote(null);
+    } catch (error) {
+      setRefusal(errorsOf(error));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const save = async () => {
+    const problem = nameProblem(name);
+    if (problem !== null) {
+      setRefusal([problem]);
+      return;
+    }
+    setWorking(true);
+    try {
+      const stored = await saveDashboard(name.trim(), tiles);
+      onChange(stored);
+      setRefusal(null);
+      setNote(`Saved as ${stored.name}.`);
+      read();
+    } catch (error) {
+      setRefusal(errorsOf(error));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const forget = async (forgetting: string) => {
+    setWorking(true);
+    try {
+      await deleteDashboard(forgetting);
+      if (forgetting === name) onChange({ name: "", tiles: [] });
+      setNote(`Deleted ${forgetting}.`);
+      read();
+    } catch (error) {
+      setRefusal(errorsOf(error));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  /** The spec on screen, added as a tile. It is not saved by adding it: a person who
+   * arranges four tiles and closes the tab has saved nothing, and a Save button that was
+   * pressed is the only thing that says otherwise. */
+  const addCurrent = () => {
+    if (current === null || !drawable(current)) return;
+    setTiles(add(tiles, current));
+    setNote(null);
+  };
+
+  const addable = current !== null && drawable(current) && tiles.length < TILE_LIMIT;
+
+  return (
+    <div className="dash">
+      <div className="dash__head">
+        <h1 className="dash__title">Dashboards</h1>
+        <p className="dash__lead">
+          A dashboard is a set of specs under a name. Each tile runs its own spec against the
+          source when the dashboard is opened, so a tile shows what the data says now rather
+          than what it said when it was saved.
+        </p>
+      </div>
+
+      <div className="dash__body">
+        <aside className="dash__saved">
+          <h2 className="dash__sub">Saved</h2>
+          {list === null ? (
+            <p className="dash__note">Reading what is saved.</p>
+          ) : list.length === 0 ? (
+            <p className="dash__empty">
+              Nothing is saved yet. Build a chart, then add it to a dashboard and save it
+              under a name.
+            </p>
+          ) : (
+            <ul className="dash__list">
+              {list.map((entry) => (
+                <li key={entry.name} className={entry.name === name ? "dash__item dash__item--on" : "dash__item"}>
+                  <button className="dash__open" onClick={() => open(entry.name)} disabled={working}>
+                    <span className="dash__name">{entry.name}</span>
+                    <span className="dash__tally">
+                      {entry.tiles} {entry.tiles === 1 ? "tile" : "tiles"}
+                    </span>
+                  </button>
+                  <button
+                    className="btn btn--quiet"
+                    onClick={() => forget(entry.name)}
+                    disabled={working}
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
+
+        <section className="dash__editor">
+          <div className="dash__bar">
+            <input
+              className="dash__field"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Name this dashboard"
+              aria-label="Dashboard name"
+            />
+            <button className="btn" onClick={save} disabled={working || tiles.length === 0}>
+              {working ? "Working" : "Save"}
+            </button>
+            <button className="btn btn--quiet" onClick={addCurrent} disabled={!addable}>
+              Add the chart on screen
+            </button>
+            <span className="dash__count">
+              {tiles.length} of {TILE_LIMIT} tiles
+            </span>
+          </div>
+
+          {current === null || drawable(current) ? null : (
+            <p className="dash__note">
+              The chart on screen has no measure yet, so there is nothing to add. Finish it in
+              the Visualisation panel first.
+            </p>
+          )}
+
+          {refusal !== null ? (
+            <div className="refusal">
+              <p className="refusal__head">What the server said</p>
+              <ul className="refusal__lines">
+                {refusal.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : note !== null ? (
+            <p className="dash__note">{note}</p>
+          ) : null}
+
+          {tiles.length === 0 ? (
+            <p className="dash__empty">
+              No tiles. Open a saved dashboard on the left, or build a chart in the Chart view
+              and add it here.
+            </p>
+          ) : (
+            <div className="grid">
+              {tiles.map((tile, index) => (
+                <article
+                  key={index}
+                  className="grid__cell"
+                  style={{ gridColumn: `span ${Math.min(tile.width, COLUMNS)}` }}
+                >
+                  <header className="grid__head">
+                    <span className="grid__title">{tileTitle(tile, index)}</span>
+                    <span className="grid__actions">
+                      <button
+                        className="grid__btn"
+                        onClick={() => setTiles(move(tiles, index, -1))}
+                        disabled={index === 0}
+                        aria-label={`Move ${tileTitle(tile, index)} earlier`}
+                        title="Move earlier"
+                      >
+                        &larr;
+                      </button>
+                      <button
+                        className="grid__btn"
+                        onClick={() => setTiles(move(tiles, index, 1))}
+                        disabled={index === tiles.length - 1}
+                        aria-label={`Move ${tileTitle(tile, index)} later`}
+                        title="Move later"
+                      >
+                        &rarr;
+                      </button>
+                      <button
+                        className="grid__btn"
+                        onClick={() => setTiles(widen(tiles, index, tile.width === COLUMNS ? 1 : COLUMNS))}
+                        aria-pressed={tile.width === COLUMNS}
+                        aria-label={`Width of ${tileTitle(tile, index)}`}
+                        title="Half width or full width"
+                      >
+                        {tile.width === COLUMNS ? "Full" : "Half"}
+                      </button>
+                      <button
+                        className="grid__btn"
+                        onClick={() => setTiles(remove(tiles, index))}
+                        aria-label={`Remove ${tileTitle(tile, index)}`}
+                        title="Remove"
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  </header>
+                  <div className="grid__body">
+                    <TileChart spec={tile.spec} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One tile's rows, fetched by the tile itself.
+ *
+ * Per tile rather than per dashboard, because a dashboard that fetched everything at once
+ * would be as slow as its slowest tile and as broken as its worst one. What refused is
+ * shown in the tile it refused for, so the other tiles are still readable.
+ */
+export function TileChart({ spec }: { spec: Spec }) {
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    setRefusal(null);
+    execute(spec)
+      .then((body) => live && setRows(body.rows))
+      .catch((error: Error) => live && setRefusal(error.message));
+    return () => {
+      live = false;
+    };
+  }, [spec]);
+
+  if (refusal !== null) {
+    return (
+      <div className="grid__refusal">
+        <p className="refusal__head">What the source said</p>
+        <p className="refusal__plain">{refusal}</p>
+      </div>
+    );
+  }
+
+  if (rows === null) return <p className="grid__working">Running the spec.</p>;
+
+  const tooMany = overSeriesLimit(spec, rows);
+  if (tooMany !== null) {
+    return (
+      <div className="grid__refusal">
+        <p className="refusal__head">What the renderer said</p>
+        <p className="refusal__plain">{tooMany}</p>
+      </div>
+    );
+  }
+
+  return <Chart spec={spec} rows={rows} />;
+}
+
+/** A refusal carries the server's own list; anything else has one message. */
+const errorsOf = (error: unknown): string[] =>
+  error instanceof Refused ? error.errors : [(error as Error).message];

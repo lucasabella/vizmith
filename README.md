@@ -4,7 +4,7 @@ Ask a question in plain language, get a chart back.
 
 Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees your raw rows.
 
-**Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, and the Data view is where a suggested relationship is confirmed. Asking a question in words needs a model endpoint. Dashboards and the eval harness do not exist.
+**Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so does the eval harness that scores one.
 
 ## Why metadata and not the data
 
@@ -29,6 +29,8 @@ The spec is versioned JSON, validated against a schema, diffable in git. Every f
 Nothing generated is executed as code. A spec the interface writes goes through the same validator a model's answer does, because the validator is the only judge of what is legal.
 
 A chart built by dragging needs to know how two tables relate, and that comes from the catalog rather than from a prompt. Foreign keys the source declares are facts; everything else is suggested from column names and types and is not used for a join until somebody confirms it in the Data view. A wrong join produces a plausible number rather than an error, which is the failure the whole design exists to prevent, so a column with no confirmed path between its table and the query's is refused with both table names rather than joined on a guess.
+
+A dashboard is the last of those bullets: several specs saved under a name, in the state directory beside the relationship answers. A tile holds a spec and never a row, so opening a dashboard runs each tile against the source through the same endpoint a single chart goes through, and what a tile shows is what the data says now rather than what it said when it was saved. That is one statement per tile, which is why a dashboard is capped at 24 of them. Arranging is an order and a width, both of them controls you can see, and the name is what identifies a dashboard, so renaming one is saving it under the new name.
 
 ## Bring your own model
 

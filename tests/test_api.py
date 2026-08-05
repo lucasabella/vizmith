@@ -17,10 +17,12 @@ from vizmith.api import (
     app,
     constrains,
     model,
+    saved,
     source,
 )
 from vizmith.ask import ATTEMPTS, SCHEMA
 from vizmith.catalog import WAIT_LIMIT
+from vizmith.dashboards import Dashboards
 from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
 from vizmith.query import build
@@ -723,3 +725,111 @@ def test_a_request_cannot_name_a_source_or_carry_sql(client, catalog):
     assert response.status_code == 200
     assert response.json()["rows"]
     assert "elsewhere" not in "".join(catalog.statements)
+
+
+@pytest.fixture
+def keeping(catalog, tmp_path):
+    """The API with a dashboard file of its own. The source is overridden too, so a test
+    can assert that saving and listing reach no warehouse rather than that they happen to
+    have credentials."""
+    app.dependency_overrides[source] = lambda: catalog
+    app.dependency_overrides[saved] = lambda: Dashboards(tmp_path / "dashboards.json")
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_a_dashboard_is_saved_and_read_back_over_http(keeping):
+    tiles = [
+        {"spec": load(REVENUE_BY_COUNTRY), "width": 2},
+        {"spec": load(ORDERS_PER_MONTH), "width": 1},
+    ]
+
+    saving = keeping.put("/api/dashboards/Revenue", json={"tiles": tiles})
+    read = keeping.get("/api/dashboards/Revenue")
+
+    assert saving.status_code == 200
+    assert read.status_code == 200
+    assert read.json() == {"name": "Revenue", "tiles": tiles}
+
+
+def test_the_list_names_every_dashboard_and_how_many_tiles_it_holds(keeping):
+    keeping.put("/api/dashboards/Revenue", json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}]})
+    keeping.put(
+        "/api/dashboards/Shipping",
+        json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}, {"spec": load(ORDERS_PER_MONTH)}]},
+    )
+
+    body = keeping.get("/api/dashboards").json()
+
+    assert body["dashboards"] == [
+        {"name": "Revenue", "tiles": 1},
+        {"name": "Shipping", "tiles": 2},
+    ]
+
+
+def test_the_list_carries_no_spec(keeping):
+    """A menu of names is what it is for. Answering it with every spec of every dashboard
+    would send the whole store to draw a list."""
+    keeping.put("/api/dashboards/Revenue", json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}]})
+
+    assert "query" not in keeping.get("/api/dashboards").text
+
+
+def test_a_dashboard_is_deleted_and_is_then_a_404(keeping):
+    keeping.put("/api/dashboards/Revenue", json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}]})
+
+    deleted = keeping.delete("/api/dashboards/Revenue")
+    gone = keeping.get("/api/dashboards/Revenue")
+
+    assert deleted.status_code == 200
+    assert gone.status_code == 404
+    assert "Revenue" in gone.json()["errors"][0]
+    assert keeping.delete("/api/dashboards/Revenue").status_code == 404
+
+
+def test_a_tile_the_validator_rejects_is_refused_with_the_validators_words(keeping):
+    """The same `errors` list every other refusal here uses, so the interface keeps one
+    way to show one, and the tile is named by where it sits on the grid."""
+    response = keeping.put(
+        "/api/dashboards/Revenue",
+        json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}, {"spec": load(INVALID[0])}]},
+    )
+
+    assert response.status_code == 400
+    assert all(error.startswith("tile 2: ") for error in response.json()["errors"])
+    assert keeping.get("/api/dashboards/Revenue").status_code == 404
+
+
+def test_saving_and_listing_dashboards_reach_no_source(keeping, catalog):
+    """A dashboard is specs. Running one is what runs a query, and that goes through
+    /api/execute like any other spec."""
+    keeping.put("/api/dashboards/Revenue", json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}]})
+    keeping.get("/api/dashboards")
+    keeping.get("/api/dashboards/Revenue")
+
+    assert catalog.statements == []
+
+
+def test_a_dashboard_is_kept_in_the_state_directory_and_nowhere_else(catalog, state_dir):
+    """The default path rather than an overridden one, which is what says a saved
+    dashboard sits beside the relationship answers instead of somewhere a test invented."""
+    app.dependency_overrides[source] = lambda: catalog
+    try:
+        client = TestClient(app)
+        client.put("/api/dashboards/Revenue", json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}]})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert json.loads((state_dir / "dashboards.json").read_text())["dashboards"]["Revenue"]
+
+
+def test_every_tile_of_a_saved_dashboard_still_runs_through_execute(keeping):
+    """What a tile is drawn from. There is no endpoint that runs a dashboard, because a
+    second path to the source would be a second answer to what a spec means."""
+    tiles = [{"spec": load(REVENUE_BY_COUNTRY)}, {"spec": load(ORDERS_PER_MONTH)}]
+    keeping.put("/api/dashboards/Revenue", json={"tiles": tiles})
+
+    for tile in keeping.get("/api/dashboards/Revenue").json()["tiles"]:
+        response = keeping.post("/api/execute", json={"spec": tile["spec"]})
+        assert response.status_code == 200
+        assert response.json()["rows"]
