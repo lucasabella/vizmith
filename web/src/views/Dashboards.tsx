@@ -12,14 +12,18 @@ import type { Row, Spec } from "../chart/option";
 import { overSeriesLimit } from "../chart/option";
 import {
   COLUMNS,
+  NOTHING,
   TILE_LIMIT,
   add,
+  editingIndex,
   move,
   nameProblem,
+  opened,
   remove,
+  renameable,
   tileTitle,
   widen,
-  type Dashboard,
+  type Arrangement,
   type Saved,
   type Tile,
 } from "../dashboard/dashboard";
@@ -36,15 +40,22 @@ import { drawable, type Draft } from "../spec/spec";
  * The arrangement is an order and a width. Both are controls a person can see, for the
  * same reason a well shows the aggregate it inferred: a layout that cannot be seen and
  * cannot be changed is the quiet kind of wrong this project exists to avoid.
+ *
+ * A tile is corrected where it was made, in the Chart view, because that is where the
+ * wells and `{ } JSON` are and a second editor here would be a second thing to keep true.
+ * Opening one hands its spec to that view and marks the tile it came from; what comes back
+ * replaces that tile and nothing else.
  */
 export default function Dashboards({
   current,
-  dashboard,
+  arrangement,
   onChange,
+  onEdit,
 }: {
   current: Draft | null;
-  dashboard: Dashboard;
-  onChange: (dashboard: Dashboard) => void;
+  arrangement: Arrangement;
+  onChange: (arrangement: Arrangement) => void;
+  onEdit: (tile: Tile) => void;
 }) {
   const [list, setList] = useState<Saved[] | null>(null);
   // What the last save or open said, in the server's words where it spoke.
@@ -55,9 +66,10 @@ export default function Dashboards({
   // The dashboard being arranged lives in the application rather than here, because
   // adding the chart on screen means leaving this view to build the next one, and state
   // that belongs to a view is state that is thrown away when the view is.
-  const { name, tiles } = dashboard;
-  const setName = (next: string) => onChange({ name: next, tiles });
-  const setTiles = (next: Tile[]) => onChange({ name, tiles: next });
+  const { name, tiles } = arrangement;
+  const setName = (next: string) => onChange({ ...arrangement, name: next });
+  const setTiles = (next: Tile[]) => onChange({ ...arrangement, tiles: next });
+  const beingEdited = editingIndex(arrangement);
 
   const read = () => {
     getDashboards()
@@ -70,8 +82,7 @@ export default function Dashboards({
   const open = async (opening: string) => {
     setWorking(true);
     try {
-      const opened = await getDashboard(opening);
-      onChange(opened);
+      onChange(opened(await getDashboard(opening)));
       setRefusal(null);
       setNote(null);
     } catch (error) {
@@ -90,9 +101,32 @@ export default function Dashboards({
     setWorking(true);
     try {
       const stored = await saveDashboard(name.trim(), tiles);
-      onChange(stored);
+      onChange({ ...arrangement, ...stored, savedAs: stored.name });
       setRefusal(null);
       setNote(`Saved as ${stored.name}.`);
+      read();
+    } catch (error) {
+      setRefusal(errorsOf(error));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  /**
+   * Save under the name in the field and forget the old one, which is what renaming is
+   * when the name is the identity. In that order: a delete that went first would leave
+   * nothing behind if the save were refused.
+   */
+  const rename = async () => {
+    const from = arrangement.savedAs;
+    if (from === null) return;
+    setWorking(true);
+    try {
+      const stored = await saveDashboard(name.trim(), tiles);
+      await deleteDashboard(from);
+      onChange({ ...arrangement, ...stored, savedAs: stored.name });
+      setRefusal(null);
+      setNote(`Renamed ${from} to ${stored.name}.`);
       read();
     } catch (error) {
       setRefusal(errorsOf(error));
@@ -105,7 +139,7 @@ export default function Dashboards({
     setWorking(true);
     try {
       await deleteDashboard(forgetting);
-      if (forgetting === name) onChange({ name: "", tiles: [] });
+      if (forgetting === arrangement.savedAs) onChange(NOTHING);
       setNote(`Deleted ${forgetting}.`);
       read();
     } catch (error) {
@@ -182,6 +216,11 @@ export default function Dashboards({
             <button className="btn" onClick={save} disabled={working || tiles.length === 0}>
               {working ? "Working" : "Save"}
             </button>
+            {renameable(arrangement) ? (
+              <button className="btn btn--quiet" onClick={rename} disabled={working}>
+                Rename {arrangement.savedAs}
+              </button>
+            ) : null}
             <button className="btn btn--quiet" onClick={addCurrent} disabled={!addable}>
               Add the chart on screen
             </button>
@@ -220,12 +259,23 @@ export default function Dashboards({
               {tiles.map((tile, index) => (
                 <article
                   key={index}
-                  className="grid__cell"
+                  className={index === beingEdited ? "grid__cell grid__cell--editing" : "grid__cell"}
                   style={{ gridColumn: `span ${Math.min(tile.width, COLUMNS)}` }}
                 >
                   <header className="grid__head">
                     <span className="grid__title">{tileTitle(tile, index)}</span>
+                    {index === beingEdited ? (
+                      <span className="grid__editing">being corrected</span>
+                    ) : null}
                     <span className="grid__actions">
+                      <button
+                        className="grid__btn"
+                        onClick={() => onEdit(tile)}
+                        aria-label={`Correct ${tileTitle(tile, index)}`}
+                        title="Correct this chart"
+                      >
+                        Edit
+                      </button>
                       <button
                         className="grid__btn"
                         onClick={() => setTiles(move(tiles, index, -1))}

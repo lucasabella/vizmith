@@ -7,7 +7,14 @@ import Wells from "./panels/Wells";
 import Data from "./views/Data";
 import Dashboards from "./views/Dashboards";
 import { drawable, type Draft, type Field } from "./spec/spec";
-import type { Dashboard } from "./dashboard/dashboard";
+import {
+  NOTHING,
+  editingIndex,
+  putBack,
+  tileTitle,
+  type Arrangement,
+  type Tile,
+} from "./dashboard/dashboard";
 
 /** Which part refused, as the server named it. It is the only thing that can: a question
  * passes through the source, the model and the source again, and from here they are one
@@ -66,8 +73,10 @@ export default function App() {
   const [before, setBefore] = useState<{ text: string; outcome: Outcome }[]>([]);
   // The dashboard being arranged. It lives here rather than in the view, because adding
   // the chart on screen to it means going back to the Chart view to build the next one,
-  // and a view holding it would throw the arrangement away on the way out.
-  const [dashboard, setDashboard] = useState<Dashboard>({ name: "", tiles: [] });
+  // and a view holding it would throw the arrangement away on the way out. Correcting a
+  // tile is the same journey in reverse, which is why the tile being corrected is part of
+  // it rather than a second piece of state somewhere else.
+  const [arrangement, setArrangement] = useState<Arrangement>(NOTHING);
   const running = working !== null;
 
   useEffect(() => {
@@ -206,6 +215,30 @@ export default function App() {
     send("/api/execute", { spec: next });
   };
 
+  /**
+   * A tile opened for correction. Its spec goes into the editor and runs, and the view
+   * changes to the one that can edit it, because a correction made anywhere else would be
+   * a second editor to keep true. What is on screen before this is not saved anywhere, so
+   * a tile is opened rather than swapped: the person asked for the tile.
+   */
+  const correct = (tile: Tile) => {
+    setArrangement({ ...arrangement, editing: tile });
+    setText(JSON.stringify(tile.spec, null, 2));
+    send("/api/execute", { spec: tile.spec });
+    setView("chart");
+  };
+
+  /** The corrected spec, back in the tile it came from. It goes back only when it is
+   * asked for: a tile that changed on every run would move under the person correcting
+   * it, and half a spec is not a chart anybody wants on a dashboard. */
+  const putItBack = () => {
+    if (draft === null || !drawable(draft)) return;
+    setArrangement(putBack(arrangement, draft));
+    setView("dashboards");
+  };
+
+  const stopCorrecting = () => setArrangement({ ...arrangement, editing: null });
+
   const back = () => {
     const previous = before[before.length - 1];
     if (previous === undefined) return;
@@ -292,7 +325,12 @@ export default function App() {
           // The spec on screen is what a dashboard adds, so the two views share the one
           // draft rather than the dashboard holding a copy that can drift from it.
           <main className="canvas canvas--data">
-            <Dashboards current={draft} dashboard={dashboard} onChange={setDashboard} />
+            <Dashboards
+              current={draft}
+              arrangement={arrangement}
+              onChange={setArrangement}
+              onEdit={correct}
+            />
           </main>
         ) : (
           <main className="canvas">
@@ -332,6 +370,14 @@ export default function App() {
                 <button className="pages__back" onClick={back}>
                   &larr; the chart this came from
                 </button>
+              ) : null}
+              {arrangement.editing !== null ? (
+                <Correcting
+                  arrangement={arrangement}
+                  drawable={draft !== null && drawable(draft)}
+                  onPutBack={putItBack}
+                  onStop={stopCorrecting}
+                />
               ) : null}
               <span className="pages__meta">
                 {outcome.kind === "chart" ? `${outcome.rows.length} rows` : "no rows"}
@@ -435,6 +481,51 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The tile being corrected, and the two ways out of it.
+ *
+ * A correction that cannot be abandoned is the same trap a drill without a way back is,
+ * so Never mind is next to Put it back rather than somewhere else. A tile that was removed
+ * while it was being corrected has nowhere to go back to, and that is said rather than
+ * left for the button to do nothing about.
+ */
+function Correcting({
+  arrangement,
+  drawable,
+  onPutBack,
+  onStop,
+}: {
+  arrangement: Arrangement;
+  drawable: boolean;
+  onPutBack: () => void;
+  onStop: () => void;
+}) {
+  const at = editingIndex(arrangement);
+  const tile = arrangement.editing;
+  return (
+    <span className="pages__correcting">
+      {at === -1 || tile === null ? (
+        <span className="pages__note">
+          The tile you were correcting is no longer on the dashboard.
+        </span>
+      ) : (
+        <>
+          <span className="pages__note">
+            Correcting <b>{tileTitle(tile, at)}</b>
+            {arrangement.name === "" ? null : ` on ${arrangement.name}`}
+          </span>
+          <button className="btn btn--small" onClick={onPutBack} disabled={!drawable}>
+            Put it back
+          </button>
+        </>
+      )}
+      <button className="btn btn--quiet" onClick={onStop}>
+        Never mind
+      </button>
+    </span>
   );
 }
 

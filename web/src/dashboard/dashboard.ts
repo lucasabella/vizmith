@@ -28,6 +28,55 @@ export type Tile = { spec: Spec; width: number };
 
 export type Dashboard = { name: string; tiles: Tile[] };
 
+/**
+ * The dashboard on screen, which is more than the one on the server.
+ *
+ * `savedAs` is the name it was last opened or saved under, and it is what makes a rename
+ * one gesture rather than a save and a delete somebody has to know to do. It is null for a
+ * dashboard that has never been saved, where there is nothing to rename.
+ *
+ * `editing` is the tile whose spec is being corrected in the Chart view, held as the tile
+ * itself rather than as a position in the list. A position would go on pointing somewhere
+ * after the list was reordered, and the correction would come back into the wrong tile —
+ * silently, since both of them draw. A tile that was removed while it was being corrected
+ * is then a tile this cannot find, which is a sentence the interface can say.
+ */
+export type Arrangement = Dashboard & { savedAs: string | null; editing: Tile | null };
+
+export const NOTHING: Arrangement = { name: "", tiles: [], savedAs: null, editing: null };
+
+/** A dashboard as it arrives from the server: saved under its name, nothing being edited. */
+export const opened = (dashboard: Dashboard): Arrangement => ({
+  ...dashboard,
+  savedAs: dashboard.name,
+  editing: null,
+});
+
+/** Which tile is being corrected, as a position, or -1 where it is no longer in the list.
+ * By reference, because that is the only identity a tile has. */
+export const editingIndex = (arrangement: Arrangement): number =>
+  arrangement.editing === null ? -1 : arrangement.tiles.indexOf(arrangement.editing);
+
+/**
+ * The corrected spec, back in the tile it came from, keeping that tile's width and its
+ * place in the order.
+ *
+ * A tile that is no longer there is not appended: the person removed it while they were
+ * correcting it, and adding it back would undo that without being asked. The arrangement
+ * comes back unchanged and the caller says so.
+ */
+export const putBack = (arrangement: Arrangement, spec: Spec | Draft): Arrangement => {
+  const at = editingIndex(arrangement);
+  if (at === -1) return { ...arrangement, editing: null };
+  return {
+    ...arrangement,
+    tiles: arrangement.tiles.map((tile, index) =>
+      index === at ? { ...tile, spec: spec as Spec } : tile,
+    ),
+    editing: null,
+  };
+};
+
 /** What the list endpoint answers: a name and how many tiles are under it, never a spec. */
 export type Saved = { name: string; tiles: number };
 
@@ -72,6 +121,13 @@ export const tileTitle = (tile: Tile, index: number): string =>
  * server's, because a message shown next to a field a person is typing in is not the same
  * message as one returned to a client.
  */
+/** Whether renaming is on offer: something to rename from, and a new name that could be
+ * saved. Typing the same name back is not a rename, and neither is emptying the field. */
+export const renameable = (arrangement: Arrangement): boolean =>
+  arrangement.savedAs !== null &&
+  nameProblem(arrangement.name) === null &&
+  arrangement.name.trim() !== arrangement.savedAs;
+
 export const nameProblem = (name: string): string | null => {
   const trimmed = name.trim();
   if (trimmed === "") return "A dashboard is saved under a name.";

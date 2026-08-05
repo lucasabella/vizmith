@@ -4,13 +4,19 @@ import type { Spec } from "../chart/option";
 import Dashboards from "../views/Dashboards";
 import {
   COLUMNS,
+  NOTHING,
   TILE_LIMIT,
   add,
+  editingIndex,
   move,
   nameProblem,
+  opened,
+  putBack,
   remove,
+  renameable,
   tileTitle,
   widen,
+  type Arrangement,
   type Tile,
 } from "./dashboard";
 
@@ -107,12 +113,13 @@ describe("a dashboard name", () => {
 
 /** A static render, which is what these tests reach: the effects that read the server do
  * not run, so what is asserted is the state before anything came back. */
-const drawn = (current: Spec | null = null, arranged: Tile[] = []) =>
+const drawn = (current: Spec | null = null, arranged: Tile[] = [], over: Partial<Arrangement> = {}) =>
   renderToStaticMarkup(
     <Dashboards
       current={current as never}
-      dashboard={{ name: "", tiles: arranged }}
+      arrangement={{ ...NOTHING, tiles: arranged, ...over }}
       onChange={() => {}}
+      onEdit={() => {}}
     />,
   );
 
@@ -157,5 +164,107 @@ describe("the dashboards view", () => {
     // The tiles come in as a prop and go out through onChange. A view that held them
     // would drop them the moment somebody went back to build the next chart.
     expect(drawn(null, tiles("a"))).toContain("Running the spec");
+  });
+});
+
+describe("correcting a tile", () => {
+  const arrangement = (over: Partial<Arrangement> = {}): Arrangement => ({
+    ...NOTHING,
+    name: "Trade",
+    savedAs: "Trade",
+    tiles: tiles("a", "b", "c"),
+    ...over,
+  });
+
+  it("knows where the tile being corrected sits", () => {
+    const one = arrangement();
+
+    expect(editingIndex({ ...one, editing: one.tiles[1] })).toBe(1);
+    expect(editingIndex(one)).toBe(-1);
+  });
+
+  it("follows the tile rather than the position when the list is reordered", () => {
+    // The failure this exists to prevent: a position would go on pointing at slot 1 after
+    // the tile moved, and the correction would land in a different chart. Both draw, so
+    // nothing would say so.
+    const one = arrangement();
+    const editing = one.tiles[1];
+    const reordered = { ...one, tiles: move(one.tiles, 1, -1), editing };
+
+    expect(editingIndex(reordered)).toBe(0);
+    expect(putBack(reordered, spec("corrected")).tiles.map((tile) => tile.spec.title)).toEqual([
+      "corrected",
+      "a",
+      "c",
+    ]);
+  });
+
+  it("puts the correction back in place, keeping the tile's width", () => {
+    const one = arrangement({ tiles: widen(tiles("a", "b"), 1, COLUMNS) });
+    const put = putBack({ ...one, editing: one.tiles[1] }, spec("corrected"));
+
+    expect(put.tiles.map((tile) => tile.spec.title)).toEqual(["a", "corrected"]);
+    expect(put.tiles[1].width).toBe(COLUMNS);
+    expect(put.editing).toBeNull();
+  });
+
+  it("does not add back a tile that was removed while it was being corrected", () => {
+    const one = arrangement();
+    const editing = one.tiles[1];
+    const without = { ...one, tiles: remove(one.tiles, 1), editing };
+
+    const put = putBack(without, spec("corrected"));
+
+    expect(put.tiles.map((tile) => tile.spec.title)).toEqual(["a", "c"]);
+    expect(put.editing).toBeNull();
+  });
+
+  it("marks the tile being corrected on the grid", () => {
+    const arranged = tiles("a", "b");
+
+    expect(drawn(null, arranged, { editing: arranged[1] })).toContain("being corrected");
+    expect(drawn(null, arranged)).not.toContain("being corrected");
+  });
+
+  it("offers to correct every tile", () => {
+    expect(drawn(null, tiles("a"))).toContain("Correct a");
+  });
+});
+
+describe("renaming a dashboard", () => {
+  const saved = (over: Partial<Arrangement>): Arrangement => ({
+    ...NOTHING,
+    name: "Trade",
+    savedAs: "Trade",
+    tiles: tiles("a"),
+    ...over,
+  });
+
+  it("is offered once the name in the field is another saveable one", () => {
+    expect(renameable(saved({ name: "Trade, 2026" }))).toBe(true);
+  });
+
+  it("is not offered for the name it already has, or for one that cannot be saved", () => {
+    expect(renameable(saved({}))).toBe(false);
+    expect(renameable(saved({ name: "  Trade  " }))).toBe(false);
+    expect(renameable(saved({ name: "" }))).toBe(false);
+    expect(renameable(saved({ name: "Trade/2026" }))).toBe(false);
+  });
+
+  it("is not offered for a dashboard that was never saved, since there is nothing to rename", () => {
+    expect(renameable({ ...NOTHING, name: "Trade", tiles: tiles("a") })).toBe(false);
+  });
+
+  it("names what it is renaming from, so the button is not a guess", () => {
+    expect(drawn(null, tiles("a"), { name: "Trade, 2026", savedAs: "Trade" })).toContain(
+      "Rename Trade",
+    );
+  });
+
+  it("takes a dashboard off the server as the name it was opened under", () => {
+    expect(opened({ name: "Trade", tiles: tiles("a") })).toMatchObject({
+      savedAs: "Trade",
+      editing: null,
+    });
   });
 });
