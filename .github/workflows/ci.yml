@@ -57,6 +57,20 @@ jobs:
         working-directory: web
         run: npm run build
 
+      # The wheel carries the built interface, because an installed Vizmith has no checkout
+      # to serve web/dist out of. A build hook that quietly stopped doing that would only be
+      # noticed by whoever released next, so it is checked here, where Node already is.
+      - name: Build the wheel and check the interface is inside it
+        run: |
+          pip install build
+          python -m build --wheel
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          inside = zipfile.ZipFile(wheel).namelist()
+          sys.exit(0 if "vizmith/web/index.html" in inside else f"{wheel} carries no interface")
+          PY
+
   # A separate job rather than a step in the one above, because a browser can fail for
   # reasons that belong to the runner rather than to the change under review, and a flake
   # inside the suite would read as the suite failing. It is here at all because the class

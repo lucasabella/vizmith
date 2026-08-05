@@ -1495,3 +1495,12 @@ button:focus-visible {
   font-size: 11.5px;
   color: var(--ink-2);
 }
+
+/* The escape hatch under the setup lines: where a value can also come from. Quieter than
+   the lines above it, because it answers a question the first run does not have yet. */
+.setup__note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}

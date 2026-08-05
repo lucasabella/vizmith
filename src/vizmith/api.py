@@ -34,13 +34,24 @@ from pydantic import BaseModel
 from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Relationship
+from vizmith.config import state_dir
 from vizmith.dashboards import Dashboards, Refused
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
 from vizmith.relationships import Confirmations, graph, resolve, suggest
 from vizmith.spec import validate_spec
 
-WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
+
+def _web() -> Path:
+    """The built interface. Inside a wheel it sits in the package, put there at build time;
+    in a checkout it is `web/dist`, where `npm run build` leaves it. The packaged copy wins,
+    because an installed Vizmith run from a checkout's directory should serve what it
+    shipped rather than whatever happens to be built there."""
+    packaged = Path(__file__).resolve().parent / "web"
+    return packaged if packaged.is_dir() else Path(__file__).resolve().parents[2] / "web" / "dist"
+
+
+WEB_DIST = _web()
 
 CONFIGURATION = (
     "VIZMITH_DATABRICKS_PROFILE",
@@ -113,13 +124,6 @@ def profile(catalog: Catalog, name: str) -> TableProfile:
     whole schema to answer for one table would pay for fifteen freshness checks to serve
     one, which is what a panel drawing a tree of tables does per table."""
     return Profiles(state_dir() / "profiles.json").read(catalog, name)
-
-
-def state_dir() -> Path:
-    """Where the server keeps what it has to remember between runs: what a person answered
-    about a suggested relationship, the profiles it has already paid for, and the
-    dashboards they saved. Nothing else, and no key ever. `VIZMITH_STATE_DIR` moves it."""
-    return Path(os.environ.get("VIZMITH_STATE_DIR") or Path.home() / ".vizmith")
 
 
 def saved() -> Dashboards:

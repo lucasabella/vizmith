@@ -601,14 +601,17 @@ function Canvas({
  * What is missing and what to do about it, in one place.
  *
  * Configuration is server side and stays that way: a request that cannot name a database
- * is a request that cannot be pointed at one, which is a sentence worth keeping. That
- * decision costs this, a screen telling a person to edit a file and restart a process, so
- * it is said once, here, rather than in two panels with different wording. See ROADMAP.md.
+ * is a request that cannot be pointed at one, which is a sentence worth keeping. What that
+ * costs is this screen, and what makes it bearable is that the thing it names is a command
+ * rather than a file somebody has to find. Said once, here, rather than in two panels with
+ * different wording. See ROADMAP.md.
  */
 function Setup({ source, model }: { source: boolean; model: boolean }) {
   return (
     <div className="setup">
-      <p className="setup__head">Set these in <code>.env</code>, then restart the server</p>
+      <p className="setup__head">
+        Run <code>vizmith configure</code>, then restart the server
+      </p>
       {source ? null : (
         <p className="setup__line">
           <span className="setup__what">The source</span>
@@ -627,6 +630,14 @@ function Setup({ source, model }: { source: boolean; model: boolean }) {
           </span>
         </p>
       )}
+      {/* The command asks for these and writes them where only you can read them. An
+          environment variable and a .env in the working directory both win over that
+          file, which is what keeps a checkout working the way it always did. */}
+      <p className="setup__note">
+        <code>vizmith configure --show</code> says where each one is coming from. A real
+        environment variable, or a <code>.env</code> where you started the server, wins over
+        what the command wrote.
+      </p>
     </div>
   );
 }
