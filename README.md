@@ -67,14 +67,28 @@ Vizmith runs on your machine and serves a browser. The frontend talks to the bac
 ## Running it
 
 ```
+uvx vizmith configure
+uvx vizmith serve
+```
+
+Or `pipx install vizmith` for the same two commands without the `uvx`. The wheel carries the built interface, so that is the whole of it: `serve` starts the API on port 8000 and opens a browser.
+
+There is no release on PyPI yet, so until there is, those two commands need a wheel you built: `python -m build` in a checkout, which needs Node because the interface is built into the wheel, then `pipx install dist/vizmith-*.whl`. Everything after that is the same.
+
+`configure` asks for the seven values and writes them to `config.env` in the state directory, readable by you and nobody else, because one of them is a key. The four `VIZMITH_DATABRICKS_` values are the source, without which a spec has nothing to run against. The three `VIZMITH_MODEL_` values are the endpoint that writes a spec from a question, and without them the question field stays disabled while a spec pasted by hand still runs. Pass them as flags instead where there is no terminal to ask in, and run `vizmith configure --show` to see where each one is coming from — it prints that and never the values.
+
+Configuration is read from three places, nearest first: a real environment variable, a `.env` found from the working directory upwards, then the file `configure` wrote. Nothing over HTTP writes any of it, so a request cannot point Vizmith at a database and the model key has no path into a browser at all.
+
+### From a checkout
+
+```
 python -m venv .venv
 .venv/bin/pip install -e ".[dev]"
+cp .env.example .env      # and fill it in
 .venv/bin/vizmith serve
 ```
 
-That starts the API on port 8000 and opens a browser. Running a spec needs a source, which is server configuration rather than something a request carries. Copy `.env.example` to `.env` and fill it in; `vizmith serve` reads it, and a real environment variable wins over it. The four `VIZMITH_DATABRICKS_` values are the source. The three `VIZMITH_MODEL_` values are the endpoint that writes a spec, and without them the question field stays disabled while a spec pasted by hand still runs.
-
-For frontend work, run Vite alongside it:
+An editable install serves `web/dist`, so build the frontend once with `npm run build` in `web/`, or run Vite alongside it:
 
 ```
 cd web
@@ -82,7 +96,7 @@ npm install
 npm run dev
 ```
 
-Vite proxies `/api` to port 8000. To run everything from one process instead, build the frontend once with `npm run build`; the backend serves `web/dist` when it exists.
+Vite proxies `/api` to port 8000. Building a wheel runs that build itself and puts the result inside the package, which is why `python -m build` needs Node and installing does not.
 
 Tests and lint:
 
