@@ -141,7 +141,12 @@ class Dashboards:
     request and a copy kept between them is one more thing that can serve a stale answer.
     A file that cannot be read raises instead of starting empty: an unreadable cache costs
     one more profile, and an unreadable dashboard file that quietly became an empty one
-    would be answered by a save that overwrites everything in it."""
+    would be answered by a save that overwrites everything in it.
+
+    Two saves that overlap can still lose one of the two, since each of these read the file
+    when it was built. Vizmith serves one person's own browser, so the two saves are that
+    person's, and the fix for it is a lock across processes for a race a local application
+    does not have."""
 
     def __init__(self, path: Path):
         self._path = path
