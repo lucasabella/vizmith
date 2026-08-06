@@ -8,6 +8,7 @@ and a key that lands in a file lands in one nobody else can read.
 
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -141,3 +142,50 @@ def test_the_interface_is_served_from_the_package_where_one_was_built_into_it(tm
 
     assert _web() == packaged
     assert WEB_DIST.name == "dist"
+
+
+def test_the_key_is_never_on_disk_at_a_wider_mode_than_the_file_keeps(elsewhere, monkeypatch):
+    """The narrowing happens before the content, not after it. Writing the file and then
+    restricting it leaves a window, one chmod long, where a key sits at whatever the umask
+    gave it, and on a shared machine that window is the whole of the exposure."""
+    seen = []
+    replace = os.replace
+
+    def watched(beside, target):
+        seen.append((stat.S_IMODE(os.stat(beside).st_mode), Path(beside).read_text()))
+        replace(beside, target)
+
+    monkeypatch.setattr(os, "replace", watched)
+    config.write({KEY: "sekrit"})
+
+    assert len(seen) == 1
+    mode, held = seen[0]
+    assert "sekrit" in held, "the temporary file is where the key first lands"
+    assert mode == 0o600
+
+
+def test_two_writes_cannot_share_one_temporary_path(elsewhere, monkeypatch):
+    """A fixed name means the second `configure` writes into the first one's file. The
+    other three state writers use mkstemp for this, so this is the fourth doing what they
+    do rather than a fourth way of doing it."""
+    beside = []
+    replace = os.replace
+
+    def watched(source, target):
+        beside.append(str(source))
+        replace(source, target)
+
+    monkeypatch.setattr(os, "replace", watched)
+    config.write({KEY: "first"})
+    config.write({PROFILE: "second"})
+
+    assert beside[0] != beside[1]
+    assert list(config.state_dir().iterdir()) == [config.config_path()]
+
+
+def test_re_writing_keeps_what_was_not_mentioned(elsewhere):
+    config.write({PROFILE: "work", KEY: "sekrit"})
+    config.write({PROFILE: "other"})
+
+    assert config.read() == {PROFILE: "other", KEY: "sekrit"}
+    assert stat.S_IMODE(config.config_path().stat().st_mode) == 0o600

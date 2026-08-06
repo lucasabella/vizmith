@@ -833,3 +833,53 @@ def test_every_tile_of_a_saved_dashboard_still_runs_through_execute(keeping):
         response = keeping.post("/api/execute", json={"spec": tile["spec"]})
         assert response.status_code == 200
         assert response.json()["rows"]
+
+
+DAMAGED = "{ not json at all"
+
+
+@pytest.fixture
+def unreadable(catalog, tmp_path):
+    """The API over state files that hold damage. Both stores are built per request, so
+    what this pins down is the shape of the answer rather than the shape of the failure:
+    a person gets a sentence naming the file, not a stack trace and a status."""
+    (tmp_path / "dashboards.json").write_text(DAMAGED)
+    (tmp_path / "relationships.json").write_text(DAMAGED)
+    app.dependency_overrides[source] = lambda: catalog
+    app.dependency_overrides[saved] = lambda: Dashboards(tmp_path / "dashboards.json")
+    app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
+    yield TestClient(app, raise_server_exceptions=False), tmp_path
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    ("method", "endpoint", "file"),
+    [
+        ("get", "/api/dashboards", "dashboards.json"),
+        ("get", "/api/dashboards/Revenue", "dashboards.json"),
+        ("delete", "/api/dashboards/Revenue", "dashboards.json"),
+        ("get", "/api/relationships", "relationships.json"),
+        ("get", f"/api/join-path?left={ORDERS}&right={CUSTOMERS}", "relationships.json"),
+    ],
+)
+def test_a_state_file_that_cannot_be_read_is_refused_in_words(unreadable, method, endpoint, file):
+    client, state = unreadable
+
+    response = getattr(client, method)(endpoint)
+
+    assert response.status_code == 503
+    assert str(state / file) in response.json()["errors"][0]
+    assert (state / file).read_text() == DAMAGED, "the damaged file was left where it is"
+
+
+def test_a_save_against_a_damaged_file_writes_nothing_over_it(unreadable):
+    """The refusal the reading endpoints give is worth little if the next save empties the
+    file anyway, and that is the failure the store refuses to read for."""
+    client, state = unreadable
+
+    response = client.put(
+        "/api/dashboards/Revenue", json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}]}
+    )
+
+    assert response.status_code == 503
+    assert (state / "dashboards.json").read_text() == DAMAGED

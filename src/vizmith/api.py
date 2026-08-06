@@ -26,7 +26,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -40,6 +40,7 @@ from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
 from vizmith.relationships import Confirmations, graph, resolve, suggest
 from vizmith.spec import validate_spec
+from vizmith.state import Damaged
 
 
 def _web() -> Path:
@@ -67,6 +68,17 @@ MODEL_CONFIGURATION = (
 )
 
 app = FastAPI(title="Vizmith")
+
+
+@app.exception_handler(Damaged)
+def damaged(request: Request, failure: Damaged) -> JSONResponse:
+    """A state file the server cannot read, in the shape every other refusal arrives in.
+
+    It is registered here rather than caught in each endpoint because the stores are built
+    as dependencies, so the failure happens before any endpoint body runs. 503 rather than
+    500: the request was well formed, nothing is wrong with what was asked, and the endpoint
+    can answer again as soon as the file named in the message is moved aside."""
+    return JSONResponse(status_code=503, content={"errors": [str(failure)]})
 
 
 @lru_cache

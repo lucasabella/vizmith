@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from vizmith.catalog import DECLARED, SUGGESTED, Relationship
+from vizmith.state import stored, write
 
 # What a foreign key column is called, everywhere this looks. `customer_id` names
 # `customers`, and nothing without this suffix is guessed at.
@@ -123,13 +124,16 @@ class Confirmations:
     Beside the profile it belongs to rather than in the source, because a person's answer
     about a source they read is not something they can necessarily write back to it. It
     survives a re-profile by construction: nothing here is derived from a profile, and a
-    relationship is keyed by the columns it joins rather than by where it sat in a list."""
+    relationship is keyed by the columns it joins rather than by where it sat in a list.
+
+    Written whole and moved into place, like the dashboards and the profile cache: an
+    interrupted write here would truncate answers a person gave by hand, and the cost of
+    losing them is being asked the same questions again. A file that cannot be read is
+    refused rather than started empty, naming itself so it can be moved aside."""
 
     def __init__(self, path: Path):
         self._path = path
-        self._answers: dict[str, str] = {}
-        if path.is_file():
-            self._answers = json.loads(path.read_text()).get("answers", {})
+        self._answers: dict[str, str] = stored(path, "answers")
 
     def state(self, relationship: Relationship) -> str:
         """A declared relationship is confirmed by the source itself, and a person is not
@@ -160,8 +164,7 @@ class Confirmations:
         return [r for r in relationships if self.state(r) == CONFIRMED]
 
     def _write(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps({"answers": self._answers}, indent=2, sort_keys=True))
+        write(self._path, json.dumps({"answers": self._answers}, indent=2, sort_keys=True))
 
 
 def _stem(table: str) -> str:
