@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -21,7 +22,7 @@ from vizmith.api import (
     source,
 )
 from vizmith.ask import ATTEMPTS, SCHEMA
-from vizmith.catalog import WAIT_LIMIT
+from vizmith.catalog import UNSUPPORTED, WAIT_LIMIT
 from vizmith.dashboards import Dashboards
 from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
@@ -883,3 +884,52 @@ def test_a_save_against_a_damaged_file_writes_nothing_over_it(unreadable):
 
     assert response.status_code == 503
     assert (state / "dashboards.json").read_text() == DAMAGED
+
+
+def test_browsing_the_relationships_costs_no_statement_and_no_freshness_check(browsing, catalog):
+    """`suggest` reads a column's name and its type, which is what `describe` answers with.
+    Building the graph from the profiles instead paid a freshness check per table — a
+    DESCRIBE DETAIL the warehouse bills for — and two passes over every table on a cold
+    cache, for figures nothing in the graph looks at. Dragging a column across tables asks
+    for a join path, so that was the price of a drag."""
+    relationships = browsing.get("/api/relationships")
+    resolved = browsing.get("/api/join-path", params={"left": SHIPMENTS, "right": CARRIERS})
+
+    assert relationships.status_code == 200
+    assert resolved.status_code in (200, 400), resolved.text
+    assert catalog.statements == [], "a question about two tables profiled the schema"
+    assert catalog.freshness_checks == [], "a question about two tables asked what changed"
+
+
+def test_a_key_of_an_unsupported_type_is_still_offered_as_a_join(catalog, tmp_path):
+    """A profile leaves out a column whose type the catalog calls unsupported, so a graph
+    built from the profiles silently dropped those pairs. A key of a type nothing can chart
+    still joins perfectly well, and `describe` is where the full column list lives."""
+    described = catalog.describe
+
+    def unchartable_keys(name):
+        """The same schema with the carrier key, and the id it points at, of a type this
+        cannot draw. Nothing else about them changes."""
+        table = described(name)
+        columns = tuple(
+            replace(column, type=UNSUPPORTED)
+            if column.name in ("carrier_id", "id") and table.name.endswith(("carriers", "shipments"))
+            else column
+            for column in table.columns
+        )
+        return replace(table, columns=columns)
+
+    catalog.describe = unchartable_keys
+    app.dependency_overrides[source] = lambda: catalog
+    app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
+    try:
+        body = TestClient(app).get("/api/relationships").json()
+    finally:
+        app.dependency_overrides.clear()
+        catalog.describe = described
+
+    suggested = {
+        (entry["left_table"], entry["left_column"], entry["right_table"], entry["right_column"])
+        for entry in body["relationships"]
+    }
+    assert (SHIPMENTS, "carrier_id", CARRIERS, "id") in suggested

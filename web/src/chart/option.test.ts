@@ -197,6 +197,19 @@ describe("colour channel", () => {
 
     expect(series[0].data).toEqual([1, null]);
   });
+
+  it("takes the first row for a category, which is what the scan it replaced took", () => {
+    // The scan per category became one pass that indexes the rows. A query grouped by the
+    // axis returns one row per category, so a second one is a spec that did not, and what
+    // it drew before was the first of them.
+    const series = coloured([
+      { country: "A", category: "one", revenue: 1 },
+      { country: "A", category: "one", revenue: 99 },
+      { country: "B", category: "one", revenue: 2 },
+    ]);
+
+    expect(series[0].data).toEqual([1, 2]);
+  });
 });
 
 describe("series colours", () => {

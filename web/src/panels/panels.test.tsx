@@ -119,6 +119,24 @@ describe("the table view", () => {
   it("gives a column of figures tabular numerals and the right edge", () => {
     expect(drawn(<Table rows={rows} />)).toContain("table__td--figure");
   });
+
+  it("judges a column once for the result set, and judges it the same way", () => {
+    // Decided per cell before this, which was a walk of every row for every cell drawn.
+    // What has to survive that: a column of numbers and nulls is figures, a column with
+    // anything else in it is not, and a column of nothing but nulls is not either.
+    const mixed: Row[] = [
+      { country: "Netherlands", revenue: 1, note: null, code: "A1" },
+      { country: null, revenue: null, note: null, code: 2 },
+    ];
+    const markup = drawn(<Table rows={mixed} />);
+    const figure = (column: string) =>
+      markup.includes(`<th class="table__th--figure">${column}</th>`);
+
+    expect(figure("revenue")).toBe(true);
+    expect(figure("country")).toBe(false);
+    expect(figure("note")).toBe(false);
+    expect(figure("code")).toBe(false);
+  });
 });
 
 const COUNTRY: Field = { table: "vizmith.shop.customers", column: "country", type: "string" };

@@ -32,6 +32,16 @@ type Outcome =
   | { kind: "chart"; spec: Spec; rows: Row[] }
   | { kind: "refused"; heading: string; lines: string[]; plain: string; spoke?: Spoke };
 
+/**
+ * How many drills the way back holds.
+ *
+ * Every entry keeps the result set it replaced, so an unbounded history is one held copy
+ * of every chart a person drilled through for as long as the tab is open, to support one
+ * button. Ten is more steps than a drill path has and bounds what is kept; the oldest is
+ * dropped, because the way back is walked from the newest end.
+ */
+const DRILLS_KEPT = 10;
+
 const REJECTED =
   "The spec did not pass validation, so nothing ran against the source. Correct what is named above and run it again.";
 
@@ -221,7 +231,7 @@ export default function App() {
 
   /** A drill replaces the chart, and keeps the one it replaced. */
   const drilled = (next: Draft) => {
-    setBefore([...before, { text, outcome }]);
+    setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
     setText(JSON.stringify(next, null, 2));
     send("/api/execute", { spec: next });
   };

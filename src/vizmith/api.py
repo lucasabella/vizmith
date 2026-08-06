@@ -154,12 +154,20 @@ def answers() -> Confirmations:
 
 def relationship_graph(catalog: Catalog) -> list[Relationship]:
     """Everything known about how the tables relate: what the source declares, plus what
-    the profiles suggest. The suggestions are inferred from the profiles rather than from
-    a second read of the schema, so the columns this reasons about are the ones the panel
-    shows and the model was given."""
+    the column names and types suggest.
+
+    Built from `describe` rather than from the profiles, because a name and a type is all
+    `suggest` reads and a profile costs a freshness statement per table to produce the rest.
+    Dragging a column onto another table asks for a join path, so that was a bill in
+    statements on every drag, for figures nothing here looked at.
+
+    It also stops dropping join keys: a profile leaves out a column whose type the catalog
+    calls unsupported, and a key of an unsupported type still joins perfectly well. What the
+    interface shows is unchanged — the Data view is drawn from the profiles as before, and
+    nothing here is a row."""
     columns = {
-        table.table: {column.name: column.type for column in table.columns}
-        for table in profiles(catalog)
+        described.name: {column.name: column.type for column in described.columns}
+        for described in (catalog.describe(name) for name in catalog.tables())
     }
     return graph(catalog.relationships(), suggest(columns))
 

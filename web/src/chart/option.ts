@@ -414,8 +414,16 @@ function seriesData(
   if (categories === null) {
     return rows.map((row) => [plotted(x, row[x.field]), plotted(y, row[y.field])]);
   }
+  // One pass to index the rows this series holds, rather than a scan per category: with a
+  // colour channel the scan was groups × rows × categories for a chart of a few hundred
+  // points. The first row for a category wins, which is what `find` did.
+  const byCategory = new Map<string, Row>();
+  for (const row of rows) {
+    const category = label(row[x.field]);
+    if (!byCategory.has(category)) byCategory.set(category, row);
+  }
   return categories.map((category) => {
-    const match = rows.find((row) => label(row[x.field]) === category);
+    const match = byCategory.get(category);
     return match ? plotted(y, match[y.field]) : null;
   });
 }
