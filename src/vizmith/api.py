@@ -491,19 +491,31 @@ def question(
     request: QuestionRequest,
     catalog: Annotated[Catalog, Depends(source)],
     writer: Annotated[Model, Depends(model)],
+    confirmations: Annotated[Confirmations, Depends(answers)],
 ):
     """A question, answered as the spec it produced and the rows that spec returned. The
-    model sees the profiles and the question. The rows it caused to be fetched go to the
-    caller, never back to it.
+    model sees the profiles of the tables the question is about, and the question. The rows
+    it caused to be fetched go to the caller, never back to it.
 
     Profiling reaches the source before the model is asked anything, so the first thing a
     question can fail on is the source rather than the model."""
     try:
         tables = profiles(catalog)
+        # What a join may be resolved through, so a table the answer has to join through is
+        # readable even where the question never names it. Declared and confirmed only,
+        # which is the same rule the resolver applies: a suggestion nobody confirmed is not
+        # a join, so a table only a suggestion reaches is not one this makes room for.
+        confirmed = confirmations.usable(relationship_graph(catalog))
     except RuntimeError as failure:
         return refused("source", failure)
     try:
-        answer = ask(request.question, tables, writer, constrained=constrains(writer))
+        answer = ask(
+            request.question,
+            tables,
+            writer,
+            constrained=constrains(writer),
+            relationships=confirmed,
+        )
     except ModelError as failure:
         return refused("model", failure)
     if answer.spec is None:

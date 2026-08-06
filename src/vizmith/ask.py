@@ -14,8 +14,10 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from vizmith.catalog import Relationship
 from vizmith.model import Model
 from vizmith.profiler import TableProfile
+from vizmith.relevance import select
 from vizmith.spec import SCHEMA_PATH, validate_spec
 
 # Enough for the model to read its own mistake and fix it, few enough that a hopeless
@@ -64,8 +66,14 @@ def prompt(
     tables: Sequence[TableProfile],
     errors: Sequence[str] = (),
     constrained: bool = False,
+    withheld: int = 0,
 ) -> str:
     """The question, what the tables look like, and what went wrong last time.
+
+    `tables` is what the model is to read, which on a schema larger than a prompt can hold
+    is a selection rather than all of it (`relevance.py`). `withheld` is how many were left
+    out, and the heading says so: a model handed four tables and told nothing would read
+    them as the whole source and answer a question about a fifth by inventing it.
 
     `constrained` says the schema is going with the request as the response format, in
     which case it is left out of the text: the endpoint is enforcing the schema it was
@@ -87,8 +95,19 @@ def prompt(
             "The specification must validate against this JSON Schema:",
             json.dumps(SCHEMA, indent=None),
         ]
+    # A subset says so. A model told these are the tables would otherwise read a schema of
+    # four tables as the whole source and answer a question about a fifth by inventing it.
+    heading = (
+        "Tables:"
+        if not withheld
+        else (
+            f"Tables, the ones this question appears to be about. The schema holds "
+            f"{withheld} more, which are not here. Use only what is below, and if the "
+            f"question needs a table that is not, say so rather than inventing one:"
+        )
+    )
     parts += [
-        "Tables:",
+        heading,
         "\n\n".join(_table(table) for table in tables),
         f"Question: {question}",
     ]
@@ -107,16 +126,30 @@ def ask(
     model: Model,
     attempts: int = ATTEMPTS,
     constrained: bool = False,
+    relationships: Sequence[Relationship] = (),
 ) -> Answer:
     """Ask until the validator is satisfied or the attempts run out.
 
     `constrained` says whether the endpoint honours a JSON Schema, which the adapter
     reports and this does not check, because checking costs a request of its own. Where it
     is false the loop below is the fallback and it runs more often.
+
+    The tables the model reads are chosen here rather than by the caller, so that every
+    caller asks the same way: the API, the eval harness and a test all send the selection
+    `relevance.select` makes and not whatever they happened to have. `relationships` is what
+    a join may be resolved through, and it is what keeps a table a correct answer has to
+    join through readable even where the question never names it.
     """
+    chosen = select(question, tables, relationships)
     errors: list[str] = []
     for attempt in range(1, attempts + 1):
-        written = prompt(question, tables, errors, constrained=constrained)
+        written = prompt(
+            question,
+            chosen.tables,
+            errors,
+            constrained=constrained,
+            withheld=chosen.withheld,
+        )
         text = model.complete(written, SCHEMA if constrained else None).text
         try:
             spec = json.loads(text)
