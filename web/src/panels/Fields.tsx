@@ -121,7 +121,16 @@ function ColumnNode({
         onClick={() => setOpen(!open)}
         role="button"
         tabIndex={0}
-        onKeyDown={(event) => event.key === "Enter" && setOpen(!open)}
+        // A control that says it is a button answers Space as well as Enter, which is what
+        // the role promises and what the table row above gets for free by being one. This
+        // is a div because it is also the drag source, and `draggable` on a button is
+        // awkward — that is a reason for the shape and not for answering one key. Space
+        // scrolls the page unless something says otherwise, and a real button says so.
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          setOpen(!open);
+        }}
         aria-expanded={open}
       >
         <span className="tree__grip" aria-hidden="true">

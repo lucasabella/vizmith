@@ -426,6 +426,9 @@ export default function App() {
                     value={text}
                     onChange={(event) => setText(event.target.value)}
                     placeholder="Paste a spec, then run it."
+                    // A placeholder is not a name: it is gone the moment there is text in
+                    // the field, which is the whole time somebody is working in it.
+                    aria-label="Chart specification, as JSON"
                     spellCheck={false}
                   />
                   <div className="spec__foot">

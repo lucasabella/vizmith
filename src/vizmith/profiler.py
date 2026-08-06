@@ -105,6 +105,71 @@ def profile_table(catalog: Catalog, name: str, threshold: int = SAMPLE_THRESHOLD
     return TableProfile(table=table.name, row_count=row_count, columns=tuple(profiles))
 
 
+class _File:
+    """One cache file, parsed once and held under the stamp of the file it was parsed from.
+
+    The stamp is the modified time and the size, which is what says the file on disk is
+    still the file that was read: another process replacing it moves both, and this picks
+    the new one up on the next construction rather than at a restart."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.lock = threading.Lock()
+        self.profiles: dict[str, dict] = {}
+        self.stamp: tuple[int, int] | None = None
+
+    def refresh(self) -> None:
+        """Parse the file where it is not the one already parsed, and nothing otherwise."""
+        with self.lock:
+            stamp = _stamp(self.path)
+            if stamp == self.stamp:
+                return
+            self.stamp = stamp
+            self.profiles = {} if stamp is None else _parse(self.path)
+
+    def wrote(self) -> None:
+        """Called under the lock after this process wrote the file, so the write it just
+        made is not read back as somebody else's."""
+        self.stamp = _stamp(self.path)
+
+
+_FILES: dict[Path, _File] = {}
+_FILES_LOCK = threading.Lock()
+
+
+def _file(path: Path) -> _File:
+    """The held copy of one cache file. Keyed by the absolute path, because two callers
+    naming the same file by different paths are talking about one file."""
+    resolved = path.absolute()
+    with _FILES_LOCK:
+        held = _FILES.get(resolved)
+        if held is None:
+            held = _File(resolved)
+            _FILES[resolved] = held
+        return held
+
+
+def _stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        status = path.stat()
+    except OSError:
+        return None
+    return (status.st_mtime_ns, status.st_size)
+
+
+def _parse(path: Path) -> dict[str, dict]:
+    """What the file holds, or nothing where it holds something this cannot read.
+
+    A file that cannot be read is dropped exactly like one written under another version.
+    Refusing to serve because a cache is unreadable would turn the cheapest possible
+    failure, one more profile, into a server that answers nothing."""
+    with suppress(OSError, ValueError):
+        written = json.loads(path.read_text())
+        if written.get("version") == CACHE_VERSION:
+            return written.get("profiles", {})
+    return {}
+
+
 class Profiles:
     """Profiles kept in a file the server owns, under the source's own modified time.
 
@@ -121,19 +186,29 @@ class Profiles:
     lock, and the file is written whole and moved into place rather than edited. Two of
     these storing at the same moment can still lose one of the two entries, since each
     read the file when it was built. That costs a profile rather than producing a wrong
-    one, which is the trade a cache is allowed to make."""
+    one, which is the trade a cache is allowed to make.
+
+    The parsed file is held per path for the life of the process rather than parsed again
+    per instance. The API builds one of these per request, and the file holds every table's
+    profile including its sample values, so a panel load of N single-table requests parsed
+    an N-table file N times: on a 150 table schema that was seconds of server CPU for
+    nothing. What makes holding it safe is the key that was already there — a stored profile
+    is served only where the source's modified token still matches — so a held copy cannot
+    answer with a profile a fresh read would have refused. A file replaced by another
+    process is still picked up, because its stamp is checked on every construction."""
 
     def __init__(self, path: Path):
         self._path = path
-        self._lock = threading.Lock()
-        self._stored: dict[str, dict] = {}
-        # A file that cannot be read is dropped exactly like one written under another
-        # version. Refusing to serve because a cache is unreadable would turn the cheapest
-        # possible failure, one more profile, into a server that answers nothing.
-        with suppress(OSError, ValueError):
-            written = json.loads(path.read_text())
-            if written.get("version") == CACHE_VERSION:
-                self._stored = written.get("profiles", {})
+        self._file = _file(path)
+        self._file.refresh()
+
+    @property
+    def _lock(self) -> threading.Lock:
+        return self._file.lock
+
+    @property
+    def _stored(self) -> dict[str, dict]:
+        return self._file.profiles
 
     def read(self, catalog: Catalog, name: str, threshold: int = SAMPLE_THRESHOLD) -> TableProfile:
         """The table's profile, from the file where it is still current and from the
@@ -171,6 +246,7 @@ class Profiles:
             with os.fdopen(handle, "w") as writing:
                 writing.write(written)
             os.replace(beside, self._path)
+            self._file.wrote()
 
 
 class _Statistics(NamedTuple):
