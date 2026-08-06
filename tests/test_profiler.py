@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from conftest import DUCKDB, FixtureCatalog, needs_warehouse
 
+from vizmith import profiler
 from vizmith.catalog import TIMESTAMP, Dialect
 from vizmith.profiler import CACHE_VERSION, SAMPLE_THRESHOLD, Profiles, TableProfile, profile_table
 
@@ -245,3 +246,55 @@ def test_a_profile_from_the_workspace_carries_a_timestamp_and_its_samples(live_c
     status = column(profile, "status")
     assert 1 < len(status.samples) <= SAMPLE_THRESHOLD
     assert all(value.isalpha() or "_" in value for value in status.samples), status.samples
+
+
+def test_a_run_of_requests_parses_the_stored_cache_once(catalog, tmp_path, monkeypatch):
+    """The API builds a Profiles per request, and the file holds every table's profile
+    including its samples. Parsed per request, a panel load of N single-table requests
+    parsed an N-table file N times, which is seconds of server CPU on a large schema."""
+    path = tmp_path / "profiles.json"
+    Profiles(path).read(catalog, "orders")
+
+    parses = 0
+    parse = profiler._parse
+
+    def counted(reading):
+        nonlocal parses
+        parses += 1
+        return parse(reading)
+
+    monkeypatch.setattr(profiler, "_parse", counted)
+    # A cache this process did not write, which is what a server finds on its first
+    # request after a restart.
+    profiler._FILES.clear()
+    for _ in range(5):
+        assert Profiles(path).read(catalog, "orders")
+
+    assert parses == 1, "the file was parsed once per request rather than once"
+
+
+def test_a_cache_replaced_by_another_process_is_picked_up_without_a_restart(catalog, tmp_path):
+    """The held copy is not a copy that goes stale: the file's own stamp says whether it is
+    still the file that was parsed, and a replaced one is parsed again."""
+    path = tmp_path / "profiles.json"
+    Profiles(path).read(catalog, "orders")
+    statements = list(catalog.statements)
+
+    # What another process would leave behind: a cache holding no profiles at all.
+    path.write_text(json.dumps({"version": CACHE_VERSION, "profiles": {}}))
+    Profiles(path).read(catalog, "orders")
+
+    assert len(catalog.statements) > len(statements), "the replaced file was not picked up"
+
+
+def test_a_held_cache_is_still_refused_where_the_source_says_the_table_changed(catalog, tmp_path):
+    """What makes holding the parsed file safe is the key that was already there. This is
+    that key, asked of the held copy rather than of a fresh read."""
+    path = tmp_path / "profiles.json"
+    Profiles(path).read(catalog, "orders")
+    statements = list(catalog.statements)
+
+    catalog.modified_times["orders"] = "2"
+    Profiles(path).read(catalog, "orders")
+
+    assert len(catalog.statements) > len(statements)

@@ -328,3 +328,37 @@ def test_arranging_a_dashboard_runs_no_query(page):
 
     assert page.locator(".grid__title").all_inner_texts() == ["Orders per month"]
     assert ran == []
+
+
+@needs_built_frontend
+def test_a_column_row_opens_from_the_keyboard_the_way_it_says_it_does(page):
+    """The row carries role="button", and a button answers Space as well as Enter. The
+    difference is invisible until somebody uses the keyboard, which is why it is asserted
+    here rather than in a static render."""
+    page.locator(".tree__row--table", has_text="customers").click()
+    row = page.locator(".tree__row--column").first
+    row.focus()
+
+    row.press(" ")
+    page.wait_for_selector(".tree__row--column[aria-expanded=true]", timeout=DRAWN)
+    assert page.locator(".profile").count() == 1
+
+    row.press(" ")
+    page.wait_for_selector(".tree__row--column[aria-expanded=false]", timeout=DRAWN)
+    assert page.locator(".profile").count() == 0
+
+    row.press("Enter")
+    page.wait_for_selector(".tree__row--column[aria-expanded=true]", timeout=DRAWN)
+
+    # Space on a control that says it is a button opens it rather than scrolling the page.
+    assert page.evaluate("window.scrollY") == 0
+
+
+@needs_built_frontend
+def test_the_spec_editor_has_a_name_that_survives_being_typed_in(page):
+    """A placeholder is not a name: it is gone the moment there is text in the field."""
+    page.get_by_role("button", name="{ } JSON").click()
+    editor = page.get_by_label("Chart specification, as JSON")
+    editor.fill(spec(REVENUE_BY_COUNTRY))
+
+    assert editor.input_value() != ""
