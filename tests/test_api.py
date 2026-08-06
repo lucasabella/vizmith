@@ -22,7 +22,7 @@ from vizmith.api import (
     source,
 )
 from vizmith.ask import ATTEMPTS, SCHEMA
-from vizmith.catalog import UNSUPPORTED, WAIT_LIMIT
+from vizmith.catalog import UNSUPPORTED, WAIT_LIMIT, Held
 from vizmith.dashboards import Dashboards
 from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
@@ -1019,6 +1019,40 @@ def test_a_panel_load_asks_when_a_table_changed_once_per_table(client, catalog):
     assert [table["table"] for table in body["tables"]] == names
     assert catalog.freshness_checks == names, "a warm panel load asked twice per table"
     assert catalog.statements == [], "a warm panel load re-profiled something"
+
+
+def test_a_burst_of_requests_asks_when_a_table_changed_once_per_table(catalog):
+    """The floor the entry above left behind, taken lower. One request already asks once
+    per table; a person produces several requests seconds apart — the panel, then a
+    question, then a drag of a field into a well — and each of those used to pay a
+    DESCRIBE DETAIL per table again. The source holds that answer for a window, so a burst
+    asks once per table rather than once per table per request.
+
+    Through the configured source rather than the bare fixture, because the hold is what
+    `source` wraps the catalog in and this is the saving it exists for."""
+    held = Held(catalog, hold=30.0, clock=lambda: 0.0)
+    app.dependency_overrides[source] = lambda: held
+    try:
+        browser = TestClient(app)
+        for _ in range(4):
+            browser.get("/api/tables")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert sorted(catalog.freshness_checks) == catalog.tables(), "a burst asked once per request"
+
+
+def test_the_configured_source_holds_what_it_was_asked_about_freshness(monkeypatch):
+    """The wiring, not the wrapper: a source built without it pays the burst above in
+    billed statements, and nothing else in the suite would notice, since every test here
+    puts its own catalog in the source's place."""
+    for name in CONFIGURATION:
+        monkeypatch.setenv(name, "configured")
+    source.cache_clear()
+    try:
+        assert isinstance(source(), Held)
+    finally:
+        source.cache_clear()
 
 
 def test_the_panel_is_filled_by_one_request(client, catalog):

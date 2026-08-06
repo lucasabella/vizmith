@@ -8,6 +8,7 @@ one shape the result set contract fixes, and nothing else.
 import dataclasses
 import datetime as dt
 import json
+import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -162,6 +163,83 @@ class Catalog(Protocol):
         Callable from several threads at once, because profiling a schema runs several
         tables in parallel and a warehouse round trip is nearly all waiting. A source whose
         client is not safe to share serialises here rather than making the caller ask."""
+
+
+# How long one of the source's freshness answers is held before it is asked for again. A
+# burst is a page load and what the person does immediately after it — expand a table, ask
+# a question, drag a field into a well — and each of those reads the profiles and pays a
+# freshness statement per table to do it. Thirty seconds is about how long that burst is,
+# and it is a guess bounded by the harm it can do: a table rewritten while somebody has the
+# interface open is described as it was for at most this long, where holding the answer for
+# the life of the process would describe it that way until a restart. What would tune this
+# rather than reason about it is the measurement in tests/test_profiling_cost.py, which
+# needs a warehouse.
+FRESHNESS_HOLD = 30.0
+
+
+class Held:
+    """A source whose answers about when a table last changed are held for a few seconds.
+
+    The freshness check is what a warm read costs. A stored profile is served only where
+    the source's modified token still matches, so every read of the schema asks the source
+    that question once per table, and on Unity Catalog the answer is a `DESCRIBE DETAIL`
+    the warehouse runs and bills for rather than a free metastore read. One request already
+    asks it once per table; what this removes is the next request asking the same thing
+    about the same tables a second later, which is what a person browsing produces.
+
+    What it costs is that a table rewritten under a running server is described as it was
+    for up to the hold. That is the same trade as caching the profiles at all, made
+    smaller: the check still runs, just not several times inside one burst. Holding it for
+    the life of the process is what the file cache exists to refuse, and this is not that,
+    because the window has a number on it.
+
+    Everything else is passed through untouched. This is not a cache of the source, it is
+    a cache of one question, and a listing or a statement is a different question with a
+    different answer every time.
+
+    `None` is held like any other answer. A source object that has no modified time to
+    give — a view, which `DESCRIBE DETAIL` will not describe — costs a failed statement to
+    find that out, and finding it out repeatedly inside one burst is the same waste.
+    """
+
+    def __init__(self, catalog: "Catalog", hold: float = FRESHNESS_HOLD, clock=time.monotonic):
+        self.dialect = catalog.dialect
+        self._catalog = catalog
+        self._hold = hold
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._held: dict[str, tuple[float, str | None]] = {}
+
+    def tables(self) -> list[str]:
+        return self._catalog.tables()
+
+    def describe(self, name: str) -> "Table":
+        return self._catalog.describe(name)
+
+    def relationships(self) -> list["Relationship"]:
+        return self._catalog.relationships()
+
+    def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
+        return self._catalog.run(sql, parameters)
+
+    def modified(self, name: str) -> str | None:
+        """The held answer where it is still inside the window, and the source's otherwise.
+
+        Two threads asking about the same table at the same moment both ask the source,
+        which is what they did before this existed. Collapsing them would mean holding a
+        lock across a warehouse round trip, and the profiling that produces those threads
+        asks each table once anyway: what arrives at the same moment is several tables,
+        not several copies of one."""
+        asked = self._clock()
+        with self._lock:
+            held = self._held.get(name)
+            if held is not None and asked - held[0] < self._hold:
+                return held[1]
+
+        answer = self._catalog.modified(name)
+        with self._lock:
+            self._held[name] = (asked, answer)
+        return answer
 
 
 def conform(value):

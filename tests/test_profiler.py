@@ -2,9 +2,10 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 
 from conftest import DUCKDB, FixtureCatalog, needs_warehouse
+from test_catalog import Ticks
 
 from vizmith import profiler
-from vizmith.catalog import TIMESTAMP, Dialect
+from vizmith.catalog import TIMESTAMP, Dialect, Held
 from vizmith.profiler import CACHE_VERSION, SAMPLE_THRESHOLD, Profiles, TableProfile, profile_table
 
 # A source that offers no approximate count, so the exact branch is covered without a
@@ -298,3 +299,26 @@ def test_a_held_cache_is_still_refused_where_the_source_says_the_table_changed(c
     Profiles(path).read(catalog, "orders")
 
     assert len(catalog.statements) > len(statements)
+
+
+def test_a_source_holding_its_freshness_answers_still_reprofiles_once_the_window_passes(
+    catalog, tmp_path
+):
+    """The two caches meet here. A source that holds when it was last asked about a table
+    is what keeps a burst of requests from paying a statement per table each; what it must
+    not do is turn the profile cache into the one it replaced, which never noticed a write
+    at all. Inside the window the stored profile stands, and after it the table is profiled
+    again."""
+    clock = Ticks()
+    source = Held(catalog, hold=30.0, clock=clock)
+    path = tmp_path / "profiles.json"
+    Profiles(path).read(source, "orders")
+    catalog.modified_times["orders"] = "2"
+    statements = list(catalog.statements)
+
+    Profiles(path).read(source, "orders")
+    assert catalog.statements == statements, "the held window did not hold"
+
+    clock.now += 30.0
+    Profiles(path).read(source, "orders")
+    assert len(catalog.statements) > len(statements), "a table written to was never noticed"
