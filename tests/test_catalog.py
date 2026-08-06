@@ -17,6 +17,7 @@ from vizmith.catalog import (
     WAIT_LIMIT,
     Column,
     DatabricksCatalog,
+    Held,
     Table,
     _parameter,
     _parameter_type,
@@ -334,6 +335,89 @@ def test_a_source_object_that_cannot_be_described_has_no_modified_time():
 
     assert refusing.modified("a_view") is None
     assert empty.modified("orders") is None
+
+
+class Ticks:
+    """A clock a test moves by hand, so the window is tested rather than waited out.
+    Not the `Clock` above, which stands in for the whole time module."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def held(catalog, hold=10.0):
+    clock = Ticks()
+    return Held(catalog, hold=hold, clock=clock), clock
+
+
+def test_a_freshness_answer_inside_the_window_is_asked_of_the_source_once(catalog):
+    """What the hold is for. A page load, then a question, then a drag of a field into a
+    well each read the profiles, and each used to pay a DESCRIBE DETAIL per table to do
+    it. Inside one burst that is the same question with the same answer."""
+    source, _ = held(catalog)
+
+    answers = [source.modified("vizmith.shop.orders") for _ in range(3)]
+
+    assert answers == ["1", "1", "1"]
+    assert catalog.freshness_checks == ["vizmith.shop.orders"]
+
+
+def test_a_freshness_answer_is_asked_again_once_the_window_has_passed(catalog):
+    """The window is what keeps this from being the cache the profile file exists to
+    refuse. A table rewritten under a running server is still noticed, late by the hold
+    rather than not at all."""
+    source, clock = held(catalog)
+    source.modified("vizmith.shop.orders")
+
+    clock.now += 10.0
+    catalog.modified_times["orders"] = "2"
+
+    assert source.modified("vizmith.shop.orders") == "2"
+    assert catalog.freshness_checks == ["vizmith.shop.orders"] * 2
+
+
+def test_holding_one_tables_answer_says_nothing_about_another(catalog):
+    """Held per table, because a schema is read a table at a time and one of them being
+    current is not an answer about the rest."""
+    source, _ = held(catalog)
+
+    source.modified("vizmith.shop.orders")
+    source.modified("vizmith.shop.customers")
+
+    assert catalog.freshness_checks == ["vizmith.shop.orders", "vizmith.shop.customers"]
+
+
+def test_a_source_with_no_modified_time_to_give_is_held_like_any_other_answer(catalog):
+    """A view costs a failed statement to find that out, and finding it out three times
+    inside one burst is the same waste as asking three times about a table. What it must
+    not do is turn into a cached profile: `Profiles` never stores one against None."""
+    catalog._modified = None
+    source, _ = held(catalog)
+
+    answers = [source.modified("vizmith.shop.a_view") for _ in range(3)]
+
+    assert answers == [None, None, None]
+    assert catalog.freshness_checks == ["vizmith.shop.a_view"]
+
+
+def test_everything_that_is_not_a_freshness_check_reaches_the_source(catalog):
+    """This holds one question, not the source. A listing, a description and a statement
+    all have answers that can differ between two calls a second apart, and the whole point
+    of the profile cache is that a statement is what is expensive."""
+    source, _ = held(catalog)
+
+    assert source.dialect is catalog.dialect
+    assert source.tables() == catalog.tables()
+    assert source.describe("vizmith.shop.orders") == catalog.describe("vizmith.shop.orders")
+    assert source.relationships() == catalog.relationships()
+
+    catalog.statements.clear()
+    source.run("SELECT 1")
+    source.run("SELECT 1")
+    assert catalog.statements == ["SELECT 1", "SELECT 1"]
 
 
 def states(pending, final):

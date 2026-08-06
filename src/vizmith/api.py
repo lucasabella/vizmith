@@ -35,7 +35,7 @@ from pydantic import BaseModel
 
 from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
-from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Relationship
+from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Held, Relationship
 from vizmith.config import state_dir
 from vizmith.critique import critique
 from vizmith.dashboards import Dashboards, Refused
@@ -87,9 +87,16 @@ def damaged(request: Request, failure: Damaged) -> JSONResponse:
 @lru_cache
 def source() -> Catalog:
     """The configured source, built once and on first use rather than at import, so that
-    health answers on a server that has none and a test can put its own in its place."""
+    health answers on a server that has none and a test can put its own in its place.
+
+    Built once is also what lets `Held` mean anything: the window it holds a freshness
+    answer for belongs to the source object, so a source rebuilt per request would hold
+    nothing. What is held is bounded by a number in `catalog.py` rather than by the life of
+    the process, which is what the profile cache on disk exists to refuse."""
     profile, catalog, schema, warehouse = (os.environ[name] for name in CONFIGURATION)
-    return DatabricksCatalog(profile=profile, catalog=catalog, schema=schema, warehouse=warehouse)
+    return Held(
+        DatabricksCatalog(profile=profile, catalog=catalog, schema=schema, warehouse=warehouse)
+    )
 
 
 @lru_cache
@@ -122,7 +129,8 @@ def profiles(catalog: Catalog) -> tuple[TableProfile, ...]:
     a table that has not changed since the last one is answered out of the file instead.
     What is paid on every call is one metadata read per table asking the source when the
     table last changed, which is what lets a schema that moved under a running server be
-    noticed without restarting it.
+    noticed without restarting it — once per table per burst rather than per call, since
+    the configured source holds that answer for a few seconds. See `Held` in `catalog.py`.
 
     `tables` runs first and on this thread, which is also what builds the source's client
     before anything shares it."""
