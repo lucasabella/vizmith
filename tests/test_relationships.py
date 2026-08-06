@@ -259,3 +259,21 @@ def test_an_answer_is_written_beside_the_file_and_moved_onto_it(tmp_path, monkey
     assert moved[0][0] != moved[1][0], "a fixed temporary name is one two writes share"
     assert list(tmp_path.iterdir()) == [path], "nothing was left beside the file"
     assert Confirmations(path).state(carriers) == REJECTED
+
+
+def test_a_key_naming_its_own_table_suggests_nothing():
+    """`order_id` on `orders` names the table it is already on, which is a column called
+    what a key is called and not a join. Offering it would be a relationship from a table
+    to itself, which resolves to no joins and reads as noise in the list."""
+    columns = {
+        "vizmith.shop.orders": {"id": "integer", "order_id": "integer"},
+        "vizmith.shop.order_items": {"id": "integer", "order_id": "integer"},
+    }
+
+    assert [r.left_table for r in suggest(columns)] == ["vizmith.shop.order_items"]
+
+
+def test_a_path_from_a_table_to_itself_is_no_joins_rather_than_a_refusal():
+    """A field dropped from the table the query already reads. Nothing has to be joined for
+    it, so the answer is an empty path and not a message about there being no relationship."""
+    assert resolve(graph(declared(), suggest(shop())), "vizmith.shop.orders", "vizmith.shop.orders") == []
