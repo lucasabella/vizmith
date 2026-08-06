@@ -933,3 +933,67 @@ def test_a_key_of_an_unsupported_type_is_still_offered_as_a_join(catalog, tmp_pa
         for entry in body["relationships"]
     }
     assert (SHIPMENTS, "carrier_id", CARRIERS, "id") in suggested
+
+
+class UnreachableCatalog:
+    """A source whose metadata reads fail: a metastore that cannot be reached, or a
+    workspace that refused the credential. `RefusingCatalog` above fails statements and
+    answers metadata, which is a warehouse that is down behind a metastore that is up. This
+    is the other half, and it is what every endpoint that reads the schema meets."""
+
+    dialect = None
+
+    def __init__(self, message: str):
+        self._message = message
+
+    def tables(self):
+        raise RuntimeError(self._message)
+
+    def describe(self, name):
+        raise RuntimeError(self._message)
+
+    def relationships(self):
+        raise RuntimeError(self._message)
+
+    def modified(self, name):
+        raise RuntimeError(self._message)
+
+    def run(self, sql, parameters=None):
+        raise RuntimeError(self._message)
+
+
+UNREACHABLE = "the metastore did not answer"
+
+
+@pytest.fixture
+def unreachable_source(tmp_path):
+    app.dependency_overrides[source] = lambda: UnreachableCatalog(UNREACHABLE)
+    app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_a_source_that_cannot_be_read_is_named_as_the_source_on_every_endpoint(unreachable_source):
+    """A failure after validation reaches the person as what failed and says which part
+    failed, which is the branch that runs on the day the warehouse is down. It exists on
+    five endpoints and was tested on one."""
+    requests = [
+        unreachable_source.get("/api/tables"),
+        unreachable_source.get(f"/api/tables/{ORDERS}"),
+        unreachable_source.get("/api/relationships"),
+        unreachable_source.post("/api/relationships", json={**CARRIER_ID, "answer": CONFIRMED}),
+        unreachable_source.get("/api/join-path", params={"left": SHIPMENTS, "right": CARRIERS}),
+    ]
+
+    for response in requests:
+        assert response.status_code == 502, response.text
+        assert response.json() == {"errors": [UNREACHABLE], "spoke": "source"}
+
+
+def test_an_answer_that_is_not_one_is_refused_in_the_stores_words(browsing):
+    """Confirm, not a match, or take it back. Anything else is a client that invented an
+    answer, and what it gets back is the sentence the store refused it with."""
+    response = browsing.post("/api/relationships", json={**CARRIER_ID, "answer": "probably"})
+
+    assert response.status_code == 400
+    assert "is not an answer" in response.json()["errors"][0]
