@@ -26,6 +26,7 @@ The file holds a model key, so it is written readable by its owner and nobody el
 
 import os
 import stat
+import tempfile
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
@@ -97,7 +98,12 @@ def write(values: dict[str, str]) -> Path:
 
     Written whole and moved into place, and readable by its owner only, because one of
     these values is a key. An empty string clears a setting rather than storing emptiness,
-    so `configure` can take one back out."""
+    so `configure` can take one back out.
+
+    `mkstemp` creates the file at owner read and write before anything is written into it,
+    so there is no moment where a key is on disk at whatever the umask gave it. It also
+    gives a unique name, so two `configure` runs at once cannot write to one temporary
+    path and hand each other half a file."""
     path = config_path()
     stored = read()
     for name, value in values.items():
@@ -107,16 +113,23 @@ def write(values: dict[str, str]) -> Path:
             stored[name] = value
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    beside = path.with_name(path.name + ".writing")
     lines = [
         "# Written by `vizmith configure`. A real environment variable and a .env in the",
         "# working directory both win over this file.",
         *(f"{name}={stored[name]}" for name, _ in SETTINGS if name in stored),
         "",
     ]
-    beside.write_text("\n".join(lines))
-    beside.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    os.replace(beside, path)
+    handle, beside = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+    try:
+        with os.fdopen(handle, "w") as writing:
+            writing.write("\n".join(lines))
+        # mkstemp already creates at 0600. Said again here because it is the mode the file
+        # keeps after the move, and that is the promise the docstring above makes.
+        os.chmod(beside, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(beside, path)
+    except BaseException:
+        Path(beside).unlink(missing_ok=True)
+        raise
     return path
 
 

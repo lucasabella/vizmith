@@ -18,6 +18,7 @@ from vizmith.dashboards import (
     review,
 )
 from vizmith.spec import validate_spec
+from vizmith.state import Damaged
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
 REVENUE_BY_COUNTRY = FIXTURES / "valid" / "revenue_by_country.json"
@@ -178,12 +179,16 @@ def test_a_store_holds_no_rows(store):
     assert set(written["dashboards"]["Revenue"]["tiles"][0]) == {"spec", "width"}
 
 
-def test_a_file_that_cannot_be_read_raises_rather_than_reading_as_empty(tmp_path):
+@pytest.mark.parametrize("damage", ["{ not json", '{"dashboards": "Revenue"}', "[]"])
+def test_a_file_that_cannot_be_read_raises_rather_than_reading_as_empty(tmp_path, damage):
     """The profile cache drops a file it cannot read, because that costs one more profile.
     This one is work a person did, and starting empty would mean the next save overwrites
-    what was in it."""
+    what was in it. The refusal names the file, because moving it aside is the remedy."""
     path = tmp_path / "dashboards.json"
-    path.write_text("{ not json")
+    path.write_text(damage)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Damaged) as refusal:
         Dashboards(path)
+
+    assert str(path) in str(refusal.value)
+    assert path.read_text() == damage, "the file a person would look at was left alone"

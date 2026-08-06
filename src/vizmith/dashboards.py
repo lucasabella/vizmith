@@ -20,14 +20,13 @@ dashboard may not.
 """
 
 import json
-import os
-import tempfile
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from vizmith.spec import validate_spec
+from vizmith.state import stored, write
 
 # The grid a dashboard is arranged on. A tile is one column or the whole width, which is
 # the whole of the arrangement: two sizes and an order. A free canvas of pixel positions
@@ -151,10 +150,7 @@ class Dashboards:
     def __init__(self, path: Path):
         self._path = path
         self._lock = threading.Lock()
-        self._stored: dict[str, dict] = {}
-        if path.is_file():
-            written = json.loads(path.read_text())
-            self._stored = written["dashboards"]
+        self._stored: dict[str, dict] = stored(path, "dashboards")
 
     def names(self) -> list[str]:
         """Every saved name, sorted, so a list of them is in the same order twice running
@@ -204,9 +200,4 @@ class Dashboards:
         return True
 
     def _write(self) -> None:
-        written = json.dumps({"dashboards": self._stored}, indent=2, sort_keys=True)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        handle, beside = tempfile.mkstemp(dir=self._path.parent, prefix=self._path.name + ".")
-        with os.fdopen(handle, "w") as writing:
-            writing.write(written)
-        os.replace(beside, self._path)
+        write(self._path, json.dumps({"dashboards": self._stored}, indent=2, sort_keys=True))

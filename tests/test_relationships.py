@@ -4,6 +4,8 @@ Every test here is offline. Inference and resolution are pure functions over nam
 types, which is the point of putting them outside the catalog.
 """
 
+import os
+
 import pytest
 from generate_data import COLUMNS, FOREIGN_KEYS
 
@@ -17,6 +19,7 @@ from vizmith.relationships import (
     resolve,
     suggest,
 )
+from vizmith.state import Damaged
 
 TYPES = {"INTEGER": "integer", "VARCHAR": "string", "DATE": "date", "TIMESTAMP": "timestamp"}
 
@@ -216,3 +219,43 @@ def test_an_answer_that_is_not_one_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match="is not an answer"):
         confirmations.record(declared()[0], "probably")
+
+
+@pytest.mark.parametrize("damage", ["{ not js", '{"answers": []}', "7"])
+def test_answers_that_cannot_be_read_are_refused_rather_than_started_empty(tmp_path, damage):
+    """These are answers a person gave by hand. Reading a damaged file as no answers at all
+    would ask them the same questions again and then write over what was there."""
+    path = tmp_path / "relationships.json"
+    path.write_text(damage)
+
+    with pytest.raises(Damaged) as refusal:
+        Confirmations(path)
+
+    assert str(path) in str(refusal.value)
+    assert path.read_text() == damage, "the file a person would look at was left alone"
+
+
+def test_an_answer_is_written_beside_the_file_and_moved_onto_it(tmp_path, monkeypatch):
+    """An interrupted write must leave the last whole file rather than half of the next
+    one, which is what writing in place could not promise. What is asserted is that the
+    path a person reads is only ever reached by a move, and under a unique name, so two
+    writes cannot hand each other half a file."""
+    path = tmp_path / "relationships.json"
+    known = graph(declared(), suggest(shop()))
+    carriers = next(r for r in known if r.right_table == "vizmith.shop.carriers")
+    moved: list[tuple[str, str]] = []
+    replace = os.replace
+
+    def watched(beside, target):
+        moved.append((str(beside), str(target)))
+        replace(beside, target)
+
+    monkeypatch.setattr(os, "replace", watched)
+    confirmations = Confirmations(path)
+    confirmations.record(carriers, CONFIRMED)
+    confirmations.record(carriers, REJECTED)
+
+    assert [target for _, target in moved] == [str(path), str(path)]
+    assert moved[0][0] != moved[1][0], "a fixed temporary name is one two writes share"
+    assert list(tmp_path.iterdir()) == [path], "nothing was left beside the file"
+    assert Confirmations(path).state(carriers) == REJECTED
