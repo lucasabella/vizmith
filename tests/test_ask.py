@@ -144,10 +144,11 @@ def test_the_prompt_builder_takes_nothing_a_result_set_could_arrive_in():
     signature = inspect.signature(prompt)
     hints = typing.get_type_hints(prompt)
 
-    assert list(signature.parameters) == ["question", "tables", "errors"]
+    assert list(signature.parameters) == ["question", "tables", "errors", "constrained"]
     assert hints["question"] is str
     assert hints["tables"] == Sequence[TableProfile]
     assert hints["errors"] == Sequence[str]
+    assert hints["constrained"] is bool
     assert not any(
         parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
         for parameter in signature.parameters.values()
@@ -161,3 +162,51 @@ def test_nothing_in_this_module_reads_a_result_set():
 
     assert "catalog" not in inspect.signature(ask).parameters
     assert hints["tables"] == Sequence[TableProfile]
+
+
+def test_a_constrained_endpoint_is_not_sent_the_schema_twice(tables):
+    """The endpoint enforcing the schema was also handed a copy of it in the prose, about
+    1,350 tokens per attempt and up to six times per question, buying nothing."""
+    constrained = prompt("revenue by country", tables, constrained=True)
+    unconstrained = prompt("revenue by country", tables)
+
+    assert "must validate against this JSON Schema" in unconstrained
+    assert "$defs" in unconstrained
+    assert "$defs" not in constrained
+    assert len(constrained) < len(unconstrained)
+
+
+def test_the_instructions_are_sent_whether_the_schema_is_attached_or_not(tables):
+    """They say what a schema cannot, and they are why the retry loop converges."""
+    for written in (prompt("q", tables), prompt("q", tables, constrained=True)):
+        assert "group_by" in written
+        assert "limit_by" in written
+        assert "one figure" in written
+
+
+def test_everything_before_the_question_is_the_same_for_two_questions(tables):
+    """The prefix a provider's prompt cache can hit. Nothing else would fail if somebody
+    moved the question above the tables, so this is what makes the order structural."""
+    for constrained in (False, True):
+        first = prompt("revenue by country", tables, constrained=constrained)
+        second = prompt("orders per month", tables, constrained=constrained)
+        shared = first[: len(_common(first, second))]
+
+        assert shared.endswith("Question: ")
+        assert "Tables:" in shared
+        assert "vizmith.shop.orders" in shared
+
+
+def test_the_errors_of_a_retry_come_after_the_question(tables):
+    """So an attempt shares its prefix with the one before it as well."""
+    first = prompt("revenue by country", tables)
+    retried = prompt("revenue by country", tables, ["query: 'limit' is a required property"])
+
+    assert retried.startswith(first)
+
+
+def _common(left: str, right: str) -> str:
+    for at, (one, two) in enumerate(zip(left, right, strict=False)):
+        if one != two:
+            return left[:at]
+    return left[: min(len(left), len(right))]

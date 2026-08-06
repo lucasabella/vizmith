@@ -169,5 +169,12 @@ export const nameProblem = (name: string): string | null => {
   if (trimmed === "") return "A dashboard is saved under a name.";
   if (trimmed.length > NAME_LIMIT) return `A name is at most ${NAME_LIMIT} characters.`;
   if (trimmed.includes("/")) return "A name cannot hold a slash, because it is what addresses the dashboard.";
+  // The store refuses a control character too, and a check that stops short of the judge's
+  // rules is a check that lets somebody press Save to find out. `tests/fixtures/mirrors`
+  // holds the cases both sides are asked.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    return "A name cannot hold a control character, because it is not something a heading can show.";
+  }
   return null;
 };

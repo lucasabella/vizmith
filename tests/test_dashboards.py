@@ -192,3 +192,21 @@ def test_a_file_that_cannot_be_read_raises_rather_than_reading_as_empty(tmp_path
 
     assert str(path) in str(refusal.value)
     assert path.read_text() == damage, "the file a person would look at was left alone"
+
+
+MIRRORS = Path(__file__).parent / "fixtures" / "mirrors"
+NAMES = json.loads((MIRRORS / "names.json").read_text())["cases"]
+
+
+@pytest.mark.parametrize("case", NAMES, ids=lambda case: case["why"])
+def test_a_name_is_judged_the_way_the_interface_says_it_will_be(case):
+    """The browser holds a second copy of this rule so nobody presses Save to find out what
+    it is. The copy was free to drift and had: a name with a control character in it passed
+    the browser's check and was refused here. Both sides read this table now.
+
+    Trimmed first, because that is what the interface sends: it judges what was typed and
+    saves it without the surrounding space, and the store refuses an untrimmed name so that
+    nothing else can store one either."""
+    errors = review(case["name"].strip(), [tile()])
+
+    assert (errors == []) is case["saveable"], errors

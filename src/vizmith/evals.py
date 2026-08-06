@@ -250,7 +250,10 @@ def _score(
     constrained: bool,
     attempts: int,
 ) -> Score:
-    written = prompt(question.question, tables)
+    # Keyed on the prompt that is actually sent, which now depends on whether the endpoint
+    # takes the schema as a response format: an answer to a prompt carrying the schema is
+    # not an answer to one that left it out.
+    written = prompt(question.question, tables, constrained=constrained)
     name, endpoint = model.described
     key = Cache.key(written, name, endpoint)
     stored = cache.read(key) if cache else None
