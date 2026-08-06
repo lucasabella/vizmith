@@ -50,10 +50,13 @@ async function json<T>(url: string, options?: RequestInit): Promise<T> {
   return body as T;
 }
 
-/** The qualified name of every table. A row count is not here: it is one of the figures a
- * profile holds, and the panel reads the profiles anyway. */
-export const getTables = (): Promise<{ tables: string[] }> => json("/api/tables");
+/** Every table, as the profile the model was given. One request rather than a listing and
+ * a fan-out of one request per table: the server built these to answer the listing anyway,
+ * and asking for them back paid a second freshness check per table, each of which is a
+ * statement the warehouse bills for. */
+export const getTables = (): Promise<{ tables: TableProfile[] }> => json("/api/tables");
 
+/** One table, for a caller that wants one. The panel is filled by the request above. */
 export const getProfile = (name: string): Promise<TableProfile> =>
   json(`/api/tables/${encodeURIComponent(name)}`);
 

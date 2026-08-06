@@ -221,14 +221,22 @@ def health() -> dict[str, str | bool]:
 
 @app.get("/api/tables")
 def tables(catalog: Annotated[Catalog, Depends(source)]):
-    """The qualified name of every table in the configured schema.
+    """Every table in the configured schema, as the profile the prompt path was given.
 
-    The names come out of the profiles rather than out of a second listing, so a name here
-    is one the endpoint below can answer for. Profiling a schema nobody has profiled is the
-    wait the first question pays, and the two read the same cache, so it is paid once
-    however it is reached and not again until a table changes."""
+    The profiles rather than the names, because this endpoint built them either way and
+    threw them away, and the panel then asked for each one back: a page load was one
+    freshness check per table here and a second one per table there, plus a schema listing
+    per table for the 404 check below. On a fifty table schema that is about 150 source
+    calls, 100 of them statements a warehouse bills for, before anybody has asked anything.
+    One request, one freshness check per table.
+
+    Profiling a schema nobody has profiled is the wait the first question pays, and every
+    path reads the same cache, so it is paid once however it is reached and not again until
+    a table changes. `as_dict` is the serialisation here as below, and a column above the
+    profiler's sample threshold carries no sample values: this answers with profiles and
+    never with a row."""
     try:
-        return {"tables": [table.table for table in profiles(catalog)]}
+        return {"tables": [table.as_dict() for table in profiles(catalog)]}
     except RuntimeError as failure:
         return refused("source", failure)
 
