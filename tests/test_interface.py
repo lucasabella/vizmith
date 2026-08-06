@@ -298,3 +298,33 @@ def test_a_dashboard_is_renamed_in_one_gesture(page):
 
     names = page.locator(".dash__name").all_inner_texts()
     assert names == ["Trade, 2026"]
+
+
+@needs_built_frontend
+def test_arranging_a_dashboard_runs_no_query(page):
+    """The bug this exists for: tiles keyed by position meant swapping two of them handed
+    each component the other's spec, and both ran their query again. Arranging a dashboard
+    was more expensive than opening it, for a gesture that changed no data."""
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.get_by_role("button", name="Chart", exact=True).first.click()
+    run_spec(page, ORDERS_PER_MONTH)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.wait_for_selector(".grid__cell:nth-child(2) canvas", timeout=DRAWN)
+
+    ran: list[str] = []
+    page.on("request", lambda request: ran.append(request.url) if "/api/execute" in request.url else None)
+
+    page.locator(".grid__cell").first.get_by_title("Move later").click()
+    page.locator(".grid__cell").first.get_by_title("Half width or full width").click()
+    page.locator(".grid__cell").last.get_by_title("Remove").click()
+    # The order changed on screen, so the moves landed, and the canvas that was already
+    # drawn is still the one drawn: nothing was thrown away and re-run.
+    page.wait_for_timeout(500)
+
+    assert page.locator(".grid__title").all_inner_texts() == ["Orders per month"]
+    assert ran == []

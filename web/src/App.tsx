@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getProfile, getTables, type TableProfile } from "./api";
 import Visual from "./chart/Visual";
 import type { Row, Spec } from "./chart/option";
@@ -7,6 +7,7 @@ import Wells from "./panels/Wells";
 import Data from "./views/Data";
 import Dashboards from "./views/Dashboards";
 import { drawable, type Draft, type Field } from "./spec/spec";
+import { sequence } from "./runs";
 import {
   NOTHING,
   editingIndex,
@@ -68,6 +69,9 @@ export default function App() {
   // What is in flight. Not an Outcome: running is the absence of one so far.
   const [working, setWorking] = useState<"question" | "spec" | null>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "nothing" });
+  // Which run is the one being waited for. A ref rather than state: nothing drawn depends
+  // on it, so a render for each change would be a render for nothing.
+  const runs = useRef(sequence());
   // Where a drill came from. A drill that cannot be undone is a trap, so the spec that was
   // replaced stays reachable, as the text and the chart it drew.
   const [before, setBefore] = useState<{ text: string; outcome: Outcome }[]>([]);
@@ -141,6 +145,9 @@ export default function App() {
    * is in the editor. A spec that was typed passes none, and keeps its own text.
    */
   const send = async (endpoint: string, payload: object, question: string | null = null) => {
+    // Which run this is. Only the one still being waited for writes: see `runs.ts` for the
+    // answer that would otherwise be drawn under the wrong spec.
+    const latest = runs.current.start();
     setWorking(question === null ? "spec" : "question");
     try {
       const response = await fetch(endpoint, {
@@ -149,6 +156,7 @@ export default function App() {
         body: JSON.stringify(payload),
       });
       const body = await response.json();
+      if (!latest()) return;
       if (response.ok) {
         setOutcome({ kind: "chart", spec: body.spec, rows: body.rows });
         if (question !== null) setText(JSON.stringify(body.spec, null, 2));
@@ -165,6 +173,7 @@ export default function App() {
         });
       }
     } catch (error) {
+      if (!latest()) return;
       setOutcome({
         kind: "refused",
         heading: "What the browser said",
@@ -172,7 +181,9 @@ export default function App() {
         plain: "The request never reached the server.",
       });
     } finally {
-      setWorking(null);
+      // Only the latest run clears it, so a superseded answer arriving first does not take
+      // the canvas off "Running the spec" while the run being waited for is still in flight.
+      if (latest()) setWorking(null);
     }
   };
 
