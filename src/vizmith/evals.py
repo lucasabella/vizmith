@@ -30,6 +30,7 @@ from vizmith.ask import ATTEMPTS, ask, prompt
 from vizmith.catalog import Catalog
 from vizmith.model import Model, ModelError
 from vizmith.profiler import TableProfile
+from vizmith.relevance import select
 from vizmith.spec import output_columns
 
 VALIDATES = "validates"
@@ -250,10 +251,17 @@ def _score(
     constrained: bool,
     attempts: int,
 ) -> Score:
-    # Keyed on the prompt that is actually sent, which now depends on whether the endpoint
-    # takes the schema as a response format: an answer to a prompt carrying the schema is
-    # not an answer to one that left it out.
-    written = prompt(question.question, tables, constrained=constrained)
+    # Keyed on the prompt that is actually sent. That depends on whether the endpoint takes
+    # the schema as a response format, and on which tables the question selected: an answer
+    # to a prompt carrying six tables is not an answer to one carrying three.
+    relationships = catalog.relationships()
+    chosen = select(question.question, tables, relationships)
+    written = prompt(
+        question.question,
+        chosen.tables,
+        constrained=constrained,
+        withheld=chosen.withheld,
+    )
     name, endpoint = model.described
     key = Cache.key(written, name, endpoint)
     stored = cache.read(key) if cache else None
@@ -263,7 +271,14 @@ def _score(
     else:
         asked = True
         try:
-            answer = ask(question.question, tables, model, attempts=attempts, constrained=constrained)
+            answer = ask(
+                question.question,
+                tables,
+                model,
+                attempts=attempts,
+                constrained=constrained,
+                relationships=relationships,
+            )
         except ModelError as failure:
             return Score(question.name, (), VALIDATES, str(failure), attempts=0, asked=True)
         spec, errors, taken = answer.spec, answer.errors, answer.attempts

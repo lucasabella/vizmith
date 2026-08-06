@@ -144,11 +144,12 @@ def test_the_prompt_builder_takes_nothing_a_result_set_could_arrive_in():
     signature = inspect.signature(prompt)
     hints = typing.get_type_hints(prompt)
 
-    assert list(signature.parameters) == ["question", "tables", "errors", "constrained"]
+    assert list(signature.parameters) == ["question", "tables", "errors", "constrained", "withheld"]
     assert hints["question"] is str
     assert hints["tables"] == Sequence[TableProfile]
     assert hints["errors"] == Sequence[str]
     assert hints["constrained"] is bool
+    assert hints["withheld"] is int
     assert not any(
         parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
         for parameter in signature.parameters.values()
