@@ -1,4 +1,37 @@
-import type { EChartsOption, SeriesOption } from "echarts";
+import type {
+  BarSeriesOption,
+  LineSeriesOption,
+  PieSeriesOption,
+  ScatterSeriesOption,
+} from "echarts/charts";
+import type {
+  GridComponentOption,
+  LegendComponentOption,
+  TitleComponentOption,
+  TooltipComponentOption,
+} from "echarts/components";
+import type { ComposeOption } from "echarts/core";
+
+/**
+ * The option this file builds, composed of the four series types the grammar's marks
+ * compile to and the four components the options carry. It mirrors what `Chart.tsx`
+ * registers, and it is written out rather than taken from the `echarts` barrel so that the
+ * types and the runtime import say the same thing: a component present in one and missing
+ * from the other is a chart that draws nothing rather than one that fails.
+ */
+export type SeriesOption =
+  | BarSeriesOption
+  | LineSeriesOption
+  | ScatterSeriesOption
+  | PieSeriesOption;
+
+export type EChartsOption = ComposeOption<
+  | SeriesOption
+  | TitleComponentOption
+  | TooltipComponentOption
+  | LegendComponentOption
+  | GridComponentOption
+>;
 
 export type ChannelType = "nominal" | "ordinal" | "quantitative" | "temporal";
 
