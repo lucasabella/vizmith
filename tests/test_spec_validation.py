@@ -40,6 +40,14 @@ EXPECTED_ERROR = {
     "limit_by_column_not_in_output.json": (
         "query.limit_by.column: 'brand' is not an output column of the query"
     ),
+    "limit_by_ranked_by_a_dimension.json": (
+        "query.limit_by.by: 'status' is not one of the query's aggregate aliases, and "
+        "ranking 'country' needs a measure to rank it by"
+    ),
+    "value_axis_bound_to_a_dimension.json": (
+        "chart.encoding.y: 'country' is bound to the value axis as 'nominal', but the value "
+        "axis carries a measure, so its type is 'quantitative'"
+    ),
     "limit_by_ranked_by_itself.json": (
         "query.limit_by: 'column' and 'by' must differ, ranking needs a measure"
     ),

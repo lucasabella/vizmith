@@ -1,0 +1,19 @@
+{
+  "spec_version": "1",
+  "title": "Orders per country by status",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [{ "column": "country" }, { "column": "status" }],
+    "aggregates": [{ "fn": "count", "as": "orders" }],
+    "limit_by": { "column": "country", "by": "status", "limit": 5 },
+    "limit": 500
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "country", "type": "nominal" },
+      "y": { "field": "orders", "type": "quantitative" },
+      "color": { "field": "status", "type": "nominal" }
+    }
+  }
+}

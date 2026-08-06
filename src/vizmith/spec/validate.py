@@ -97,10 +97,19 @@ def _semantic_errors(spec: dict) -> list[str]:
 
     limit_by = query.get("limit_by")
     if limit_by:
-        for key in ("column", "by"):
-            if limit_by[key] not in known:
-                errors.append(f"query.limit_by.{key}: '{limit_by[key]}' is not an output column of the query")
-        if limit_by["column"] == limit_by["by"]:
+        if limit_by["column"] not in known:
+            errors.append(
+                f"query.limit_by.column: '{limit_by['column']}' is not an output column of the query"
+            )
+        # 'by' is what the ranking sorts on, so it is a measure and not merely an output
+        # column. A dimension there passes 'is an output column' and then leaves the builder
+        # with no aggregate to re-aggregate.
+        if limit_by["by"] not in {aggregate["as"] for aggregate in aggregates}:
+            errors.append(
+                f"query.limit_by.by: '{limit_by['by']}' is not one of the query's aggregate "
+                f"aliases, and ranking '{limit_by['column']}' needs a measure to rank it by"
+            )
+        elif limit_by["column"] == limit_by["by"]:
             errors.append("query.limit_by: 'column' and 'by' must differ, ranking needs a measure")
 
     encoding = spec["chart"]["encoding"]
@@ -108,6 +117,15 @@ def _semantic_errors(spec: dict) -> list[str]:
         field = spec_channel["field"]
         if field not in known:
             errors.append(f"chart.encoding.{channel}: '{field}' is not an output column of the query")
+
+    # The value axis is what a chart is read against, so it carries a measure. A nominal 'y'
+    # draws categories up the side and produces a picture with no quantity anywhere in it.
+    if encoding["y"]["type"] != "quantitative":
+        errors.append(
+            f"chart.encoding.y: '{encoding['y']['field']}' is bound to the value axis as "
+            f"'{encoding['y']['type']}', but the value axis carries a measure, so its type "
+            "is 'quantitative'"
+        )
 
     # An absent 'x' is the answer to a question with no dimension, and it draws the measure as
     # one figure. That only holds where the query returns one row, which is a query that
