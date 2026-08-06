@@ -1496,6 +1496,27 @@ button:focus-visible {
   color: var(--ink-2);
 }
 
+/* The second opinion on the chart, beside the way back from a drill. It is asked for
+   rather than offered, so most of the time this is one quiet button. */
+.pages__second {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  min-width: 0;
+  border-left: 1px solid var(--rule);
+}
+
+/* A finding is a sentence, and this strip is one line high. It is cut with the whole of it
+   in the tooltip rather than wrapped, because the row under a chart is not where a
+   paragraph goes and the sentence is the rule's own. */
+.pages__note--said {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 62ch;
+}
+
 /* The escape hatch under the setup lines: where a value can also come from. Quieter than
    the lines above it, because it answers a question the first run does not have yet. */
 .setup__note {

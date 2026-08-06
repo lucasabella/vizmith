@@ -3,7 +3,9 @@
 What a client can also ask for is metadata: the tables in the configured schema and the
 profile of one of them, which is the figures the model was given and never a row out of a
 table. The profiler's sample threshold is the boundary that keeps that true, and nothing
-here widens it.
+here widens it. And a second opinion on a spec, which comes back as findings and a spec
+beside the one that was sent: nothing here applies one, so a suggestion nobody took has
+changed nothing and cost no query.
 
 A request carries a spec and nothing else. The data source is server configuration, so a
 client cannot name a database. The artefact a client holds is the spec, which is the point
@@ -35,6 +37,7 @@ from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Relationship
 from vizmith.config import state_dir
+from vizmith.critique import critique
 from vizmith.dashboards import Dashboards, Refused
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
@@ -521,6 +524,44 @@ def question(
     if answer.spec is None:
         return JSONResponse(status_code=400, content={"errors": answer.errors})
     return execute_spec(answer.spec, catalog)
+
+
+@app.post("/api/critique")
+def suggestion(
+    request: SpecRequest,
+    catalog: Annotated[Catalog, Depends(source)],
+    writer: Annotated[Model, Depends(model)],
+):
+    """What a rule refuses about a spec, and the spec suggested in its place.
+
+    A second opinion on rules that already exist, which is deliberately all it is: what it
+    may say is what is refusable, and the model's part is naming a replacement the rule does
+    not name. See `critique.py` and ROADMAP.md.
+
+    Nothing is applied. The suggestion comes back beside the findings and the caller decides,
+    which is why this answers with a spec and never with rows: running one is `/api/execute`,
+    the same endpoint every other spec goes through, and a suggestion nobody accepted has
+    then cost no query.
+
+    A spec that does not validate is refused with the validator's own words rather than
+    critiqued. The findings are about a chart, and a spec that is not one yet has a shorter
+    list of things wrong with it that the person should read first.
+
+    An empty `findings` means there was nothing to say, and no request was made of the model:
+    a model asked to improve a chart that is fine will improve it, and what comes back is
+    somebody's taste with a bill attached.
+    """
+    errors = validate_spec(request.spec)
+    if errors:
+        return JSONResponse(status_code=400, content={"errors": errors})
+    try:
+        tables = profiles(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    try:
+        return critique(request.spec, tables, writer, constrained=constrains(writer)).as_dict()
+    except ModelError as failure:
+        return refused("model", failure)
 
 
 if WEB_DIST.is_dir():

@@ -89,6 +89,21 @@ export const execute = (spec: Spec): Promise<{ spec: Spec; rows: Row[] }> =>
     body: JSON.stringify({ spec }),
   });
 
+/** What a rule refuses about a spec, and the spec suggested in its place.
+ *
+ * `findings` empty means there is nothing to say and no model was asked. `spec` null with
+ * findings present means a rule refused something and nothing survived the rules as a
+ * replacement, which `errors` says. Nothing is applied here: the suggestion is a second
+ * spec beside the one on screen, and running it is `execute` like any other. */
+export type Suggestion = { findings: string[]; spec: Spec | null; errors: string[] };
+
+export const critique = (spec: Spec): Promise<Suggestion> =>
+  json("/api/critique", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spec }),
+  });
+
 /** Every saved dashboard, as a name and a tile count. No spec comes back here: this is
  * what a menu is drawn from. */
 export const getDashboards = (): Promise<{ dashboards: Saved[] }> => json("/api/dashboards");

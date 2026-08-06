@@ -231,6 +231,53 @@ def test_a_mark_the_shape_does_not_support_fails_the_last_layer(asked, tables, c
     assert "10 slices" in score.reason
 
 
+def test_a_refused_mark_is_left_alone_unless_a_repair_was_asked_for(asked, tables, catalog):
+    """A critique is a billed request, so the harness does not make one to fill in a field
+    nobody asked for."""
+    question = next(question for question in asked if question.name == "scans_per_location")
+    answer = spec("scans_per_location")
+    answer["chart"]["mark"] = "arc"
+
+    score = evals.run([question], tables, StubModel({question.question: answer}), catalog).scores[0]
+
+    assert score.failed == MARK
+    assert score.repaired is None and score.suggestion == ""
+    assert score.as_dict()["repaired"] is None
+
+
+def test_a_repair_records_whether_the_same_rule_accepts_the_suggestion(asked, tables, catalog):
+    """The measurement the critique exists to be judged by: the layer that refused the mark,
+    asked again about what was suggested, on the rows it already fetched."""
+    question = next(question for question in asked if question.name == "scans_per_location")
+    answer = spec("scans_per_location")
+    answer["chart"]["mark"] = "arc"
+    # The stub answers on the question in the prompt, and a critique's prompt carries the
+    # spec rather than the question, so the suggestion is keyed on what only it says.
+    model = StubModel({question.question: answer, "What the rule said": spec("scans_per_location")})
+
+    record = evals.run([question], tables, model, catalog, repair=True)
+    score = record.scores[0]
+
+    assert score.failed == MARK, "the repair does not undo the failure it measures"
+    assert score.repaired is True
+    assert score.suggestion == "bar instead"
+    assert record.totals["critiqued"] == 1 and record.totals["repaired"] == 1
+
+
+def test_a_repair_that_does_not_get_past_the_rule_is_recorded_as_one_that_did_not(
+    asked, tables, catalog
+):
+    question = next(question for question in asked if question.name == "scans_per_location")
+    answer = spec("scans_per_location")
+    answer["chart"]["mark"] = "arc"
+    model = StubModel({question.question: answer})
+
+    record = evals.run([question], tables, model, catalog, repair=True)
+
+    assert record.scores[0].repaired is False
+    assert record.totals["critiqued"] == 1 and record.totals["repaired"] == 0
+
+
 def test_a_cached_question_is_not_asked_a_second_time(tmp_path, asked, tables, correct, catalog):
     cache = Cache(tmp_path / "answers.json")
     subset = ["total_revenue"]
@@ -335,7 +382,11 @@ def test_the_command_scores_the_set_and_says_where_it_wrote_the_run(
 
     code = cli._eval(
         argparse.Namespace(
-            questions=QUESTIONS, only=["total_revenue", "orders_per_month"], out=tmp_path, no_cache=True
+            questions=QUESTIONS,
+            only=["total_revenue", "orders_per_month"],
+            out=tmp_path,
+            no_cache=True,
+            repair=False,
         )
     )
 
@@ -356,7 +407,9 @@ def test_the_command_refuses_a_name_the_set_does_not_hold(tmp_path, monkeypatch,
     monkeypatch.setattr(api, "constrains", lambda writer: False)
 
     code = cli._eval(
-        argparse.Namespace(questions=QUESTIONS, only=["revene_by_country"], out=tmp_path, no_cache=True)
+        argparse.Namespace(
+            questions=QUESTIONS, only=["revene_by_country"], out=tmp_path, no_cache=True, repair=False
+        )
     )
 
     assert code == 2

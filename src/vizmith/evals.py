@@ -11,8 +11,10 @@ Layer 4 reads the rows layer 3 already fetched. A question that fails a layer st
 because the layers below it answer a question that no longer means anything: whether the
 right rows came back from a spec that names the wrong table is not information.
 
-Nothing here reaches a model except through `ask`, and nothing here shows the model a row.
-The result sets it compares are read after the answer is written and never go back.
+Nothing here reaches a model except through `ask` and `critique`, and nothing here shows the
+model a row. The result sets it compares are read after the answer is written and never go
+back, and the critique the last layer can ask for is handed the profiles and the spec the
+same way a question is.
 """
 
 import dataclasses
@@ -28,6 +30,7 @@ from pathlib import Path
 from vizmith import query
 from vizmith.ask import ATTEMPTS, ask, prompt
 from vizmith.catalog import Catalog
+from vizmith.critique import critique, misreads
 from vizmith.model import Model, ModelError
 from vizmith.profiler import TableProfile
 from vizmith.relevance import select
@@ -44,11 +47,6 @@ LAYERS = (VALIDATES, REFERENCES, RESULT, MARK)
 # The shape of the cache file. A file written under another one is dropped rather than
 # migrated: what it holds is answers that can be bought again.
 CACHE_VERSION = 1
-
-# More slices than this and a reader is matching them to a legend rather than comparing
-# them. The same figure as the colour order the renderer refuses to go past, and for the
-# same reason: past it the chart is drawn and cannot be read.
-ARC_SLICES = 8
 
 
 @dataclass(frozen=True)
@@ -75,6 +73,12 @@ class Score:
     `passed` holds the layers that ran and passed, in order. `failed` is the layer that
     stopped it, or None where every layer passed. `reason` is in the words of whatever
     refused, because a score of three out of four says nothing a prompt can be changed on.
+
+    `repaired` is whether the critique's suggestion passes the rule that refused the mark,
+    and None where no critique was asked for. It is the measurement that says whether a
+    suggestion helps rather than asserting it, and it is scored on the rows this question
+    already fetched, because a critique may not change the query, so the rows cannot have
+    moved. `suggestion` is what it proposed, or why there was nothing.
     """
 
     name: str
@@ -84,6 +88,8 @@ class Score:
     attempts: int = 0
     asked: bool = True
     note: str = ""
+    repaired: bool | None = None
+    suggestion: str = ""
 
     @property
     def complete(self) -> bool:
@@ -118,6 +124,11 @@ class Run:
             **totals,
             "complete": sum(score.complete for score in self.scores),
             "asked": sum(score.asked for score in self.scores),
+            # Out of the marks the last layer refused, how many the critique's suggestion
+            # gets past it. Counted rather than left in the per question rows, because
+            # whether the assistant helps is a number a run is compared on.
+            "critiqued": sum(score.repaired is not None for score in self.scores),
+            "repaired": sum(score.repaired is True for score in self.scores),
         }
 
     def as_dict(self) -> dict:
@@ -208,6 +219,7 @@ def run(
     only: Sequence[str] = (),
     constrained: bool = False,
     attempts: int = ATTEMPTS,
+    repair: bool = False,
 ) -> Run:
     """Every question, or the named subset, scored.
 
@@ -215,9 +227,17 @@ def run(
     thing a person re-runs is the question that failed, which they know by name. A name the
     set does not hold raises rather than scoring nothing, since a typo that quietly runs an
     empty harness reports a perfect run.
+
+    `repair` asks the critique for a better mark wherever the last layer refused one, and
+    records whether the same rule accepts what came back. It is off by default because it
+    is a billed request per refused question, and it is the only thing here that measures
+    the assistant rather than the prompt.
     """
     chosen = _chosen(asked, only)
-    scores = [_score(question, tables, model, catalog, cache, constrained, attempts) for question in chosen]
+    scores = [
+        _score(question, tables, model, catalog, cache, constrained, attempts, repair)
+        for question in chosen
+    ]
     name, endpoint = model.described
     return Run(at=_now(), model=name, endpoint=endpoint, scores=tuple(scores))
 
@@ -250,6 +270,7 @@ def _score(
     cache: Cache | None,
     constrained: bool,
     attempts: int,
+    repair: bool = False,
 ) -> Score:
     # Keyed on the prompt that is actually sent. That depends on whether the endpoint takes
     # the schema as a response format, and on which tables the question selected: an answer
@@ -309,10 +330,49 @@ def _score(
 
     refused = indefensible(spec, rows)
     if refused:
-        return Score(question.name, tuple(passed), MARK, refused, attempts=taken, asked=asked, note=extra)
+        suggested, said = _repaired(spec, tables, model, rows, constrained, attempts) if repair else (None, "")
+        return Score(
+            question.name,
+            tuple(passed),
+            MARK,
+            refused,
+            attempts=taken,
+            asked=asked,
+            note=extra,
+            repaired=suggested,
+            suggestion=said,
+        )
     passed.append(MARK)
 
     return Score(question.name, tuple(passed), None, attempts=taken, asked=asked, note=extra)
+
+
+def _repaired(
+    spec: dict,
+    tables: Sequence[TableProfile],
+    model: Model,
+    rows: list[dict],
+    constrained: bool,
+    attempts: int,
+) -> tuple[bool | None, str]:
+    """Whether the critique's suggestion gets past the layer that refused this mark.
+
+    Judged on the rows this question already fetched rather than on the profiles the
+    critique reasoned from, because those rows are what the last layer refused and a
+    critique may not change the query, so they are still the suggestion's rows. That makes
+    the measurement free: one billed request for the suggestion and no second query.
+
+    A model that cannot be reached is not a suggestion that failed, so it says so and
+    scores neither.
+    """
+    try:
+        suggestion = critique(spec, tables, model, attempts=attempts, constrained=constrained)
+    except ModelError as failure:
+        return None, str(failure)
+    if suggestion.spec is None:
+        return False, "; ".join(suggestion.errors) or "the critique found nothing to say"
+    still = indefensible(suggestion.spec, rows)
+    return not still, still or f"{suggestion.spec['chart']['mark']} instead"
 
 
 def _difference(question: Question, spec: dict) -> tuple[str, str]:
@@ -384,32 +444,12 @@ def _comparable(rows: list[dict], spec: dict) -> list[tuple[str, ...]]:
 def indefensible(spec: dict, rows: list[dict]) -> str:
     """Why this mark does not suit the shape of this result, or an empty string.
 
-    A rule rather than a list per question, because "defensible" is a property of the
-    result and there is one implementation of every rule in this project. It refuses
-    rather than ranks: several marks suit most shapes and picking a favourite among them
-    would score a preference.
+    The rule lives in `critique.py` and this is it applied to the rows this layer already
+    fetched, because the critique judges the same thing before a query runs and two
+    implementations would be a harness that refuses what an assistant approves of. What
+    this layer adds is a counted number of slices where the critique has a bound.
     """
-    chart = spec["chart"]
-    mark = chart["mark"]
-    encoding = chart["encoding"]
-    x = encoding.get("x")
-
-    if x is None:
-        # A figure. `mark` says nothing on one, the same way `stack` says nothing on an arc.
-        return ""
-    if "color" in encoding and mark == "arc":
-        return "an arc has one ring of slices and cannot carry a colour channel as a second series"
-    if mark == "arc" and len(rows) > ARC_SLICES:
-        return f"an arc of {len(rows)} slices cannot be read; {ARC_SLICES} is the most that can"
-
-    kind = x["type"]
-    if kind == "temporal" and mark == "arc":
-        return "an arc has no order, and a time axis is nothing but order"
-    if kind == "quantitative" and mark in ("bar", "arc"):
-        return f"a {mark} treats a quantitative axis as categories, and this one is a measure"
-    if kind in ("nominal", "ordinal") and mark in ("line", "area"):
-        return f"a {mark} draws a category axis as if the gaps between its values meant something"
-    return ""
+    return misreads(spec["chart"], len(rows))
 
 
 def _now() -> str:

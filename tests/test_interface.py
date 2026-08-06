@@ -31,7 +31,8 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-from vizmith.api import CONFIGURATION, WEB_DIST, app, source
+from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, WEB_DIST, app, constrains, model, source
+from vizmith.model import Completion
 
 pytest.importorskip("playwright", reason="pip install playwright to drive the interface")
 
@@ -42,6 +43,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "specs"
 REVENUE_BY_COUNTRY = FIXTURES / "valid" / "revenue_by_country.json"
 ORDERS_PER_MONTH = FIXTURES / "valid" / "orders_per_month.json"
 MISSING_LIMIT = FIXTURES / "invalid" / "missing_limit.json"
+RETURNS_BY_REASON = FIXTURES / "valid" / "returns_share_by_reason.json"
 
 # A chart is drawn onto a canvas and a first paint is not instant. Long enough for a query
 # against the fixture database and a render, short enough that a hang is a failure rather
@@ -81,11 +83,16 @@ def served(fixture_db):
     from conftest import FixtureCatalog
 
     app.dependency_overrides[source] = lambda: FixtureCatalog(fixture_db)
+    # A model that answers without a network, so the flows that need one are driven here
+    # rather than skipped. It always answers the same spec: what these tests are about is
+    # what the interface does with an answer, not which answer a model gives.
+    app.dependency_overrides[model] = lambda: Answering(json.loads(RETURNS_BY_REASON.read_text()))
     # `/api/health` reports what is configured rather than what is injected, and the
     # interface reads it: without this the controls are disabled and every flow below
-    # would be testing the Setup screen. The source itself is still the override above.
+    # would be testing the Setup screen. The source and the model are still the overrides
+    # above, so nothing here reaches a warehouse or an endpoint.
     patch = pytest.MonkeyPatch()
-    for name in CONFIGURATION:
+    for name in (*CONFIGURATION, *MODEL_CONFIGURATION):
         patch.setenv(name, "fixture")
 
     sock = socket.socket()
@@ -107,6 +114,7 @@ def served(fixture_db):
     server.should_exit = True
     thread.join(timeout=10)
     app.dependency_overrides.clear()
+    constrains.cache_clear()
     patch.undo()
 
 
@@ -127,13 +135,33 @@ def page(browser, served, tmp_path, monkeypatch):
     assert failures == []
 
 
+class Answering:
+    """A model that answers with one spec, however it is asked. The adapter is covered by
+    its own tests and a network is what this suite exists without, so what is behind the
+    endpoint here is a constant."""
+
+    def __init__(self, answer: dict):
+        self._answer = json.dumps(answer)
+
+    def complete(self, prompt: str, schema: dict | None = None) -> Completion:
+        return Completion(text=self._answer, model="scripted", finish_reason="stop", usage={})
+
+    def constrains_output(self, schema: dict) -> bool:
+        return False
+
+
 def run_spec(page: Page, path: Path) -> None:
     """Paste a spec and run it, which is the one way into a chart that needs no model and
-    no dragging. `{ } JSON` is a toggle, so it is opened rather than clicked."""
+    no dragging."""
+    paste_spec(page, spec(path))
+
+
+def paste_spec(page: Page, body: str) -> None:
+    """`{ } JSON` is a toggle, so it is opened rather than clicked."""
     editor = page.get_by_role("button", name="{ } JSON")
     if editor.get_attribute("aria-pressed") != "true":
         editor.click()
-    page.locator("textarea.spec__text").fill(spec(path))
+    page.locator("textarea.spec__text").fill(body)
     page.get_by_role("button", name="Run spec").click()
 
 
@@ -481,3 +509,51 @@ def test_a_click_reads_the_chart_that_is_on_screen_rather_than_the_one_before_it
     asked = page.locator(".drill__head").inner_text()
     assert asked.startswith("Ask about")
     assert "Netherlands" in asked, asked
+
+
+@needs_built_frontend
+def test_a_suggestion_changes_nothing_until_it_is_taken(page):
+    """The whole of what a critique is allowed to do, driven. A rule refuses the mark, the
+    finding says so in the rule's own words, Never mind leaves the spec exactly as it was,
+    and taking it replaces the chart while leaving the one it replaced a control away."""
+    drawn = json.loads(spec(RETURNS_BY_REASON))
+    drawn["chart"]["mark"] = "line"
+    paste_spec(page, json.dumps(drawn))
+    chart_drawn(page)
+
+    page.get_by_role("button", name="Suggest an improvement").click()
+    page.wait_for_selector(".pages__note--said", timeout=DRAWN)
+    said = page.locator(".pages__note--said").inner_text()
+
+    assert "gaps between its values" in said
+    assert json.loads(page.locator("textarea.spec__text").input_value()) == drawn
+
+    page.get_by_role("button", name="Never mind").click()
+    assert page.locator(".pages__note--said").count() == 0
+    assert json.loads(page.locator("textarea.spec__text").input_value()) == drawn
+    assert page.locator(".pages__back").count() == 0, "nothing was replaced, so there is no way back"
+
+    page.get_by_role("button", name="Suggest an improvement").click()
+    page.wait_for_selector(".pages__note--said", timeout=DRAWN)
+    page.get_by_role("button", name="Use it").click()
+    chart_drawn(page)
+
+    assert json.loads(page.locator("textarea.spec__text").input_value())["chart"]["mark"] == "arc"
+    assert page.locator(".pages__back").is_visible(), "the chart it replaced is one control away"
+
+    page.locator(".pages__back").click()
+    assert json.loads(page.locator("textarea.spec__text").input_value()) == drawn
+
+
+@needs_built_frontend
+def test_a_chart_no_rule_refuses_is_told_so_rather_than_improved(page):
+    """The common answer, and the line the whole feature sits on: what a critique may say
+    is what is refusable, so a chart nothing refuses gets nothing said about it."""
+    run_spec(page, RETURNS_BY_REASON)
+    chart_drawn(page)
+
+    page.get_by_role("button", name="Suggest an improvement").click()
+    page.wait_for_selector(".pages__note--said", timeout=DRAWN)
+
+    assert "Nothing to suggest" in page.locator(".pages__note--said").inner_text()
+    assert page.get_by_role("button", name="Use it").count() == 0

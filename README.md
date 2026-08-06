@@ -4,7 +4,7 @@ Ask a question in plain language, get a chart back.
 
 Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees your raw rows.
 
-**Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so does the eval harness that scores one.
+**Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one.
 
 ## Why metadata and not the data
 
@@ -27,6 +27,8 @@ The spec is versioned JSON, validated against a schema, diffable in git. Every f
 - Save a set of specs as a dashboard.
 
 Nothing generated is executed as code. A spec the interface writes goes through the same validator a model's answer does, because the validator is the only judge of what is legal.
+
+Suggest an improvement, under the chart, is a second opinion on the spec on screen. What it may say is what a rule refuses — today, a mark the shape of the result contradicts, judged from the profiles so an unreadable chart is named before the query is paid for — and a chart nothing refuses is told so rather than improved, because an assistant that always finds something is finding somebody's taste. The rule refuses without naming a replacement, so the replacement is what the model is asked for; it arrives as a spec beside yours, it may differ only in the chart, and it changes nothing until you press Use it. The chart it replaces stays one control away.
 
 A chart built by dragging needs to know how two tables relate, and that comes from the catalog rather than from a prompt. Foreign keys the source declares are facts; everything else is suggested from column names and types and is not used for a join until somebody confirms it in the Data view. A wrong join produces a plausible number rather than an error, which is the failure the whole design exists to prevent, so a column with no confirmed path between its table and the query's is refused with both table names rather than joined on a guess.
 
@@ -125,6 +127,8 @@ Scoring the model on a fixed question set:
 ```
 
 Every question is asked of the synthetic fixture dataset, so this needs the source in `.env` pointed at it, and it needs the model endpoint. Each question is scored in four layers — does the answer validate, does it reference the tables and columns the question needs, does it return the expected rows, is the mark defensible for their shape — and a question stops at the first layer it fails. The run is written to `eval-runs/`, so two runs can be diffed; what makes that worth doing is that the record names the model and the endpoint that produced it. Answers are cached against the prompt that produced them, in the state directory beside the profiles, so re-running a set costs nothing until a prompt, a profile or an endpoint changes. `--no-cache` asks anyway.
+
+`--repair` measures the critique rather than the prompt: wherever a question fails the mark layer, it asks for a suggestion and records whether the same rule accepts it, on the rows that question already fetched. A critique may only change the chart, so those rows cannot have moved, and the run counts how many refused marks it repaired.
 
 ## Licence
 

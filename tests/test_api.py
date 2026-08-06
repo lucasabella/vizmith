@@ -1042,3 +1042,86 @@ def test_no_row_reaches_the_listing(client, catalog, fixture_db):
     assert scans["row_count"] == fixture_db.execute(
         "SELECT count(*) FROM vizmith.shop.shipment_scans"
     ).fetchone()[0]
+
+
+SCANS_PER_LOCATION = FIXTURES / "valid" / "scans_per_location.json"
+
+
+def as_arc(path: Path) -> dict:
+    spec = load(path)
+    spec["chart"]["mark"] = "arc"
+    return spec
+
+
+def test_a_spec_the_rules_do_not_refuse_comes_back_with_nothing_to_say(asking, catalog):
+    """The common case, and it costs no request: what a critique may say is what is
+    refusable, and a model asked to improve a chart that is fine will improve it."""
+    scripted = ScriptedModel(json.dumps(load(SCANS_PER_LOCATION)))
+    client = asking()
+    app.dependency_overrides[model] = lambda: scripted
+
+    body = client.post("/api/critique", json={"spec": load(SCANS_PER_LOCATION)}).json()
+
+    assert body == {"findings": [], "spec": None, "errors": []}
+    assert scripted.prompts == []
+
+
+def test_a_critique_answers_with_what_a_rule_refused_and_a_spec_beside_it(asking, catalog):
+    """A suggestion, not a change. What comes back sits beside the spec that was sent, and
+    running it is `/api/execute` like every other spec, so a suggestion nobody took has
+    cost no query."""
+    client = asking(json.dumps(load(SCANS_PER_LOCATION)))
+    client.get("/api/tables")  # the cold profile, which every path pays once
+    catalog.statements.clear()
+
+    body = client.post("/api/critique", json={"spec": as_arc(SCANS_PER_LOCATION)})
+
+    assert body.status_code == 200
+    assert body.json()["spec"] == load(SCANS_PER_LOCATION)
+    assert "is the most that can" in body.json()["findings"][0]
+    assert body.json()["errors"] == []
+    assert catalog.statements == [], "a critique ran a query"
+
+
+def test_a_critique_answers_with_no_rows(asking):
+    """The endpoint that runs a spec is the one that returns rows. This one reads profiles
+    and answers with a spec, which is what keeps a suggestion free."""
+    body = asking(json.dumps(load(SCANS_PER_LOCATION))).post(
+        "/api/critique", json={"spec": as_arc(SCANS_PER_LOCATION)}
+    )
+
+    assert "rows" not in body.json()
+
+
+def test_a_spec_that_does_not_validate_is_refused_rather_than_critiqued(asking):
+    """The findings are about a chart. A spec that is not one yet has a shorter list of
+    things wrong with it, and it is the validator's to say."""
+    response = asking().post("/api/critique", json={"spec": load(FIXTURES / "invalid" / "missing_limit.json")})
+
+    assert response.status_code == 400
+    assert any("'limit' is a required property" in error for error in response.json()["errors"])
+
+
+def test_a_critique_the_model_never_answers_says_which_part_failed(asking, catalog):
+    app.dependency_overrides[source] = lambda: catalog
+    app.dependency_overrides[model] = lambda: UnreachableModel()
+
+    response = TestClient(app).post("/api/critique", json={"spec": as_arc(SCANS_PER_LOCATION)})
+
+    assert response.status_code == 502
+    assert response.json()["spoke"] == "model"
+
+
+def test_a_suggestion_that_would_change_the_query_never_reaches_the_caller(asking):
+    """The query is the question. What the model answered is refused here rather than
+    offered, so the interface cannot put a different question under the same chart."""
+    rewritten = load(SCANS_PER_LOCATION)
+    rewritten["query"]["limit"] = 3
+
+    body = asking(*[json.dumps(rewritten)] * ATTEMPTS).post(
+        "/api/critique", json={"spec": as_arc(SCANS_PER_LOCATION)}
+    ).json()
+
+    assert body["spec"] is None
+    assert body["findings"], "what the rule said still stands"
+    assert any("does not change it" in error for error in body["errors"])

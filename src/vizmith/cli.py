@@ -57,6 +57,13 @@ def main() -> None:
         action="store_true",
         help="Ask again even where the same prompt has already been answered.",
     )
+    evaluate.add_argument(
+        "--repair",
+        action="store_true",
+        help="Where a question fails the mark layer, ask the critique for a better mark "
+        "and record whether the same rule accepts it. One billed request per refused "
+        "question, and never answered out of the cache.",
+    )
 
     args = parser.parse_args()
 
@@ -159,6 +166,7 @@ def _eval(args) -> int:
             cache=cache,
             only=args.only,
             constrained=constrains(writer),
+            repair=args.repair,
         )
     except ValueError as failure:
         print(failure, file=sys.stderr)
@@ -168,6 +176,14 @@ def _eval(args) -> int:
         reached = f"{len(score.passed)}/{len(evals.LAYERS)}"
         detail = "" if score.complete else f"  {score.failed}: {score.reason}"
         print(f"{reached}  {score.name}{detail}")
+        if score.repaired is True:
+            print(f"        the critique suggests {score.suggestion}")
+        elif score.repaired is False:
+            print(f"        the critique suggests nothing that passes: {score.suggestion}")
+        elif score.suggestion:
+            # Asked for and never answered, which is neither a suggestion that helped nor
+            # one that did not, and is counted as neither.
+            print(f"        the critique was not answered: {score.suggestion}")
 
     totals = record.totals
     print(
@@ -175,5 +191,7 @@ def _eval(args) -> int:
         + ", ".join(f"{totals[layer]} {layer}" for layer in evals.LAYERS)
         + f", {totals['asked']} asked"
     )
+    if totals["critiqued"]:
+        print(f"{totals['repaired']}/{totals['critiqued']} refused marks the critique repaired")
     print(f"written to {evals.write(record, args.out)}")
     return 0

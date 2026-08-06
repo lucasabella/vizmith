@@ -108,7 +108,7 @@ def prompt(
     )
     parts += [
         heading,
-        "\n\n".join(_table(table) for table in tables),
+        "\n\n".join(block(table) for table in tables),
         f"Question: {question}",
     ]
     if errors:
@@ -162,7 +162,9 @@ def ask(
     return Answer(spec=None, errors=errors, attempts=attempts)
 
 
-def _table(table: TableProfile) -> str:
+def block(table: TableProfile) -> str:
+    """One table as the model reads it. Public because a critique's prompt writes the same
+    block, and two spellings of what a profile looks like is two of them to drift."""
     lines = [f"{table.table}, {table.row_count} rows"]
     lines += [f"  {_column(column)}" for column in table.columns]
     return "\n".join(lines)
