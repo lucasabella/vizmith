@@ -61,6 +61,45 @@ describe("the series colours", () => {
   });
 });
 
+/**
+ * The other half of the same copy. `option.ts` writes out the surface, the three inks, the
+ * two rules and the two font stacks for the same reason it writes out the series order —
+ * ECharts paints onto a canvas and cannot read a custom property — and only the order had
+ * anything holding it. The chrome was free to drift, and drift here is a chart wearing an
+ * ink the rest of the screen stopped using, which no test and no eye catches: the canvas
+ * and the DOM around it are never the same pixel.
+ *
+ * Read as text, the way the dashboard constants below are, because these are module
+ * private and exporting them to be asserted would widen the file's surface for the sake of
+ * this test.
+ */
+describe("the chart chrome, against the tokens it copies", () => {
+  const tokens = read("./styles/tokens.css");
+  const option = read("./chart/option.ts");
+
+  const token = (name: string) =>
+    new RegExp(`--${name}:\\s*([^;]+);`).exec(tokens)?.[1].trim().toLowerCase();
+  const constant = (name: string) =>
+    new RegExp(`^const ${name} = (["'])(.*)\\1;`, "m").exec(option)?.[2].trim().toLowerCase();
+
+  it.each([
+    ["SURF", "surf"],
+    ["INK", "ink"],
+    ["INK_2", "ink-2"],
+    ["INK_3", "ink-3"],
+    ["RULE", "rule"],
+    ["RULE_2", "rule-2"],
+    ["UI", "ui"],
+    ["MONO", "mono"],
+  ])("%s is --%s", (name, custom) => {
+    // Both sides read rather than assumed, so a constant that was renamed away fails here
+    // as a missing mirror rather than passing as two undefineds that agree.
+    expect(constant(name)).toBeDefined();
+    expect(token(custom)).toBeDefined();
+    expect(constant(name)).toBe(token(custom));
+  });
+});
+
 describe("the dashboard constants", () => {
   it("hold what the store holds", () => {
     const python = read("../../src/vizmith/dashboards.py");
