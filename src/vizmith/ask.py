@@ -41,7 +41,8 @@ nothing.
 
 A question with no dimension is answered by one figure, not by a chart. Its query groups by
 nothing and its chart binds y to the measure and omits x. Binding the same column to x and y
-plots a measure against itself and is rejected.
+plots a measure against itself and is rejected. y is the value axis, so it carries a measure
+and its type is quantitative; a dimension belongs on x or on colour.
 
 Every query needs a row limit. A chart that binds a colour channel also needs limit_by,
 whose column is that colour dimension and whose by is an aggregate's alias, so the two are

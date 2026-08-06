@@ -108,7 +108,14 @@ class _Builder:
         cutting a series in half and drawing it as if that were the data."""
         outer = self._quoted(limit_by["column"])
         measure = limit_by["by"]
-        aggregate = next(a for a in self._query["aggregates"] if a["as"] == measure)
+        # The validator refuses a 'by' that is not an aggregate alias, but the builder does not
+        # take that on trust: what it compiles into SQL is never an assumption nobody checked.
+        aggregate = next((a for a in self._query.get("aggregates", []) if a["as"] == measure), None)
+        if aggregate is None:
+            raise ValueError(
+                f"query.limit_by.by: '{measure}' is not one of the query's aggregate aliases, "
+                f"and ranking '{limit_by['column']}' needs a measure to rank it by"
+            )
         if aggregate["fn"] not in RANKING:
             raise ValueError(
                 f"query.limit_by.by: '{measure}' is an {aggregate['fn']}, which cannot be "

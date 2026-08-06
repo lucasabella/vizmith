@@ -88,6 +88,15 @@ def test_ranking_by_an_average_raises_rather_than_approximating(offline):
         build(spec, offline)
 
 
+def test_ranking_by_a_dimension_raises_rather_than_running_out_of_aggregates(offline):
+    """The validator refuses this too, and the builder refuses it on its own: a bare
+    StopIteration here left the endpoint with a 500 and no words in it."""
+    spec = load(MULTI_SERIES)
+    spec["query"]["limit_by"]["by"] = "category"
+    with pytest.raises(ValueError, match="needs a measure to rank it by"):
+        build(spec, offline)
+
+
 def test_limit_by_keeps_the_top_outer_values_whole(catalog, fixture_db):
     spec = load(MULTI_SERIES)
     rows = execute(spec, catalog)

@@ -366,7 +366,10 @@ function pruned(query: Query): Query {
   if (order_by.length > 0) out.order_by = order_by;
   else delete out.order_by;
 
-  if (out.limit_by && !(outputs.includes(out.limit_by.column) && outputs.includes(out.limit_by.by))) {
+  // 'by' is held to the aggregate aliases rather than to the output columns, because that is
+  // the rule the validator applies: ranking a dimension has no measure to rank it by.
+  const measures = (out.aggregates ?? []).map((aggregate) => aggregate.as);
+  if (out.limit_by && !(outputs.includes(out.limit_by.column) && measures.includes(out.limit_by.by))) {
     delete out.limit_by;
   }
   return out;
