@@ -79,6 +79,10 @@ class FixtureCatalog:
         # modified time to give at all, which is the case a profile must not be cached in.
         self._modified = modified
         self.modified_times = {}
+        # Every table this was asked the modified time of. On the shipping catalog that
+        # question is a DESCRIBE DETAIL the warehouse runs and bills for, so a request that
+        # asks it per table has a cost this records and `statements` does not.
+        self.freshness_checks = []
 
     def tables(self):
         return [f"vizmith.shop.{name}" for name in sorted(COLUMNS)]
@@ -106,6 +110,7 @@ class FixtureCatalog:
         """Not recorded as a statement, because on a real source this is a metadata read
         rather than a pass over the table, and what `statements` exists to count is what a
         profile costs to build."""
+        self.freshness_checks.append(name)
         return self.modified_times.get(name.rsplit(".", 1)[-1], self._modified)
 
     def run(self, sql, parameters=None):

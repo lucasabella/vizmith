@@ -1,4 +1,5 @@
-import { label, type Row, type Value } from "./option";
+import { useMemo } from "react";
+import { label, type Row } from "./option";
 
 /**
  * The result set, in the builder's column order.
@@ -18,6 +19,10 @@ import { label, type Row, type Value } from "./option";
  */
 export default function Table({ rows }: { rows: Row[] }) {
   const columns = Object.keys(rows[0] ?? {});
+  // Which columns are figures, decided once for the result set. Per cell it was a walk of
+  // every row for every cell drawn: at the row cap the fixtures use that is two million row
+  // visits to draw one table, on every switch to this tab.
+  const figures = useMemo(() => numericColumns(rows, columns), [rows, columns.join(",")]);
 
   if (columns.length === 0) {
     return (
@@ -36,7 +41,7 @@ export default function Table({ rows }: { rows: Row[] }) {
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column} className={numeric(rows, column) ? "table__th--figure" : undefined}>
+              <th key={column} className={figures.has(column) ? "table__th--figure" : undefined}>
                 {column}
               </th>
             ))}
@@ -46,7 +51,7 @@ export default function Table({ rows }: { rows: Row[] }) {
           {rows.map((row, at) => (
             <tr key={at}>
               {columns.map((column) => (
-                <td key={column} className={numeric(rows, column) ? "table__td--figure" : undefined}>
+                <td key={column} className={figures.has(column) ? "table__td--figure" : undefined}>
                   {label(row[column])}
                 </td>
               ))}
@@ -58,11 +63,21 @@ export default function Table({ rows }: { rows: Row[] }) {
   );
 }
 
-/** Whether a column is a column of figures, which is what gets tabular numerals and the
- * right edge. Read off the values rather than off the channel type, because a table shows
- * every output column and only three of them are in an encoding. */
-const numeric = (rows: Row[], column: string): boolean =>
-  rows.some((row) => typeof row[column] === "number") &&
-  rows.every((row: Row) => isNumberOrNull(row[column]));
+/** Which columns are columns of figures, which is what gets tabular numerals and the right
+ * edge. Read off the values rather than off the channel type, because a table shows every
+ * output column and only three of them are in an encoding. One pass over the rows for all
+ * of the columns, deciding what the per-column walk decided: a column of numbers and nulls
+ * with at least one number in it. */
+const numericColumns = (rows: Row[], columns: string[]): Set<string> => {
+  const numbers = new Set<string>();
+  const others = new Set<string>();
+  for (const row of rows) {
+    for (const column of columns) {
+      const value = row[column];
+      if (typeof value === "number") numbers.add(column);
+      else if (value !== null) others.add(column);
+    }
+  }
+  return new Set([...numbers].filter((column) => !others.has(column)));
+};
 
-const isNumberOrNull = (value: Value): boolean => value === null || typeof value === "number";
