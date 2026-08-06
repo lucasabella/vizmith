@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getTables, type TableProfile } from "./api";
+import { critique, getTables, Refused, type Suggestion, type TableProfile } from "./api";
 import Visual from "./chart/Visual";
 import type { Row, Spec } from "./chart/option";
 import Fields from "./panels/Fields";
@@ -83,8 +83,14 @@ export default function App() {
   // on it, so a render for each change would be a render for nothing.
   const runs = useRef(sequence());
   // Where a drill came from. A drill that cannot be undone is a trap, so the spec that was
-  // replaced stays reachable, as the text and the chart it drew.
+  // replaced stays reachable, as the text and the chart it drew. Taking a suggestion goes
+  // on the same stack, because it replaces a chart the same way a drill does.
   const [before, setBefore] = useState<{ text: string; outcome: Outcome }[]>([]);
+  // The second opinion, once it has been asked for. Null is nobody asked; it is cleared on
+  // every run, because a finding is about the spec that was sent and the next chart is a
+  // different spec.
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
   // The dashboard being arranged. It lives here rather than in the view, because adding
   // the chart on screen to it means going back to the Chart view to build the next one,
   // and a view holding it would throw the arrangement away on the way out. Correcting a
@@ -160,6 +166,9 @@ export default function App() {
     // answer that would otherwise be drawn under the wrong spec.
     const latest = runs.current.start();
     setWorking(question === null ? "spec" : "question");
+    // A finding is about the spec that was sent. Whatever is coming back is a different
+    // one, so the second opinion goes rather than hanging over a chart it is not about.
+    setSuggestion(null);
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -232,6 +241,45 @@ export default function App() {
 
   /** A drill replaces the chart, and keeps the one it replaced. */
   const drilled = (next: Draft) => {
+    setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
+    setText(JSON.stringify(next, null, 2));
+    send("/api/execute", { spec: next });
+  };
+
+  /**
+   * A second opinion on the chart that is on screen. It is asked for rather than offered,
+   * because it is a request to a model and because a chart nothing refuses gets nothing
+   * said about it, which is a control that would sit there doing nothing most of the time.
+   *
+   * The spec that drew the chart is what is sent, not what is in the editor: a finding is
+   * about a chart that exists, and half a typed spec has not drawn one.
+   */
+  const askForASuggestion = async () => {
+    if (outcome.kind !== "chart") return;
+    setSuggesting(true);
+    setSuggestion(null);
+    try {
+      setSuggestion(await critique(outcome.spec));
+    } catch (error) {
+      // In the same shape a suggestion arrives in, so the strip has one thing to draw. The
+      // server's own words where there are any: a message written here would be a second
+      // account of something that already has one.
+      setSuggestion({
+        findings: [],
+        spec: null,
+        errors: error instanceof Refused ? error.errors : [(error as Error).message],
+      });
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  /** A suggestion, taken. It replaces the chart and keeps the one it replaced, which is
+   * what the drill already does and for the same reason: the spec it was about is one
+   * control away. A suggestion nobody takes changes nothing at all. */
+  const takeTheSuggestion = () => {
+    const next = suggestion?.spec;
+    if (!next) return;
     setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
     setText(JSON.stringify(next, null, 2));
     send("/api/execute", { spec: next });
@@ -393,6 +441,18 @@ export default function App() {
                   &larr; the chart this came from
                 </button>
               ) : null}
+              {/* The model reads the chart, so this is only offered where there is one to
+                  read and an endpoint to read it. */}
+              {outcome.kind === "chart" && askable ? (
+                <SecondOpinion
+                  suggestion={suggestion}
+                  asking={suggesting}
+                  disabled={running}
+                  onAsk={askForASuggestion}
+                  onTake={takeTheSuggestion}
+                  onDismiss={() => setSuggestion(null)}
+                />
+              ) : null}
               {arrangement.editing !== null ? (
                 <Correcting
                   arrangement={arrangement}
@@ -506,6 +566,62 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * A second opinion on the chart on screen, and the two ways out of it.
+ *
+ * What it may say is what a rule refuses, which is why "nothing to suggest" is a real
+ * answer and the common one rather than a failure: the alternative is an assistant that
+ * always finds something, and what it finds is somebody's taste. The words are the server's
+ * — the rule wrote them, and rewording them here would be a second account of one thing.
+ *
+ * Never mind sits next to Use it for the same reason it sits next to Put it back: a change
+ * a person did not ask for is not one this makes on their behalf. Taking it keeps the chart
+ * it replaced, so the way back is the one the drill already put there.
+ */
+function SecondOpinion({
+  suggestion,
+  asking,
+  disabled,
+  onAsk,
+  onTake,
+  onDismiss,
+}: {
+  suggestion: Suggestion | null;
+  asking: boolean;
+  disabled: boolean;
+  onAsk: () => void;
+  onTake: () => void;
+  onDismiss: () => void;
+}) {
+  if (suggestion === null) {
+    return (
+      <span className="pages__second">
+        <button className="btn btn--quiet" onClick={onAsk} disabled={asking || disabled}>
+          {asking ? "Reading the chart" : "Suggest an improvement"}
+        </button>
+      </span>
+    );
+  }
+
+  const said = [...suggestion.findings, ...suggestion.errors].join(" ");
+  const nothing = said === "";
+  return (
+    <span className="pages__second">
+      <span className="pages__note pages__note--said" title={said}>
+        {nothing ? "Nothing to suggest: no rule refuses this chart." : said}
+      </span>
+      {suggestion.spec === null ? null : (
+        <button className="btn btn--small" onClick={onTake} disabled={disabled}>
+          Use it
+        </button>
+      )}
+      <button className="btn btn--quiet" onClick={onDismiss}>
+        Never mind
+      </button>
+    </span>
   );
 }
 
