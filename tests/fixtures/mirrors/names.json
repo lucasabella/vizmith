@@ -1,0 +1,55 @@
+{
+  "comment": "Dashboard names, and whether they may be saved. The store is the judge; the browser checks first so nobody presses Save to find out. Both sides read this table, so a rule added to one and not the other fails here.",
+  "cases": [
+    {
+      "name": "Revenue, 2026",
+      "saveable": true,
+      "why": "what a person would type"
+    },
+    {
+      "name": "  Revenue  ",
+      "saveable": true,
+      "why": "a name is trimmed before it is judged"
+    },
+    {
+      "name": "Trade 2026 / Q1",
+      "saveable": false,
+      "why": "a slash is what addresses the dashboard"
+    },
+    {
+      "name": "",
+      "saveable": false,
+      "why": "a dashboard is saved under a name"
+    },
+    {
+      "name": "   ",
+      "saveable": false,
+      "why": "and a name of spaces is none"
+    },
+    {
+      "name": "Revenue\tby country",
+      "saveable": false,
+      "why": "a tab is not something a heading can show"
+    },
+    {
+      "name": "Revenue\u007fby country",
+      "saveable": false,
+      "why": "nor is a delete"
+    },
+    {
+      "name": "Revenue\u0000by country",
+      "saveable": false,
+      "why": "nor is a null"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "saveable": true,
+      "why": "eighty characters is the limit and not past it"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "saveable": false,
+      "why": "eighty one is"
+    }
+  ]
+}

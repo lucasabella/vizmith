@@ -59,12 +59,35 @@ class Answer:
     attempts: int = 0
 
 
-def prompt(question: str, tables: Sequence[TableProfile], errors: Sequence[str] = ()) -> str:
-    """The question, what the tables look like, and what went wrong last time."""
-    parts = [
-        INSTRUCTIONS,
-        "The specification must validate against this JSON Schema:",
-        json.dumps(SCHEMA, indent=None),
+def prompt(
+    question: str,
+    tables: Sequence[TableProfile],
+    errors: Sequence[str] = (),
+    constrained: bool = False,
+) -> str:
+    """The question, what the tables look like, and what went wrong last time.
+
+    `constrained` says the schema is going with the request as the response format, in
+    which case it is left out of the text: the endpoint is enforcing the schema it was
+    handed, and a second copy in the prose buys nothing and costs about 1,350 tokens per
+    attempt. Where the endpoint does not honour one, the text is the only place it can go.
+
+    The instructions are sent either way. They say what a schema cannot: that an aggregated
+    query puts its dimensions in `group_by` and nothing in `select`, that a question with no
+    dimension omits `x`, that a colour channel needs `limit_by`. Those are the semantic
+    validator's rules, and they are why the retry loop converges.
+
+    The order is instructions, schema, tables, question, then the validator's errors, and
+    the question goes second to last on purpose: everything before it is byte-identical
+    between two questions over one schema, which is the prefix a provider's prompt cache
+    can hit. A test asserts that prefix so it stays structural rather than accidental."""
+    parts = [INSTRUCTIONS]
+    if not constrained:
+        parts += [
+            "The specification must validate against this JSON Schema:",
+            json.dumps(SCHEMA, indent=None),
+        ]
+    parts += [
         "Tables:",
         "\n\n".join(_table(table) for table in tables),
         f"Question: {question}",
@@ -93,7 +116,8 @@ def ask(
     """
     errors: list[str] = []
     for attempt in range(1, attempts + 1):
-        text = model.complete(prompt(question, tables, errors), SCHEMA if constrained else None).text
+        written = prompt(question, tables, errors, constrained=constrained)
+        text = model.complete(written, SCHEMA if constrained else None).text
         try:
             spec = json.loads(text)
         except json.JSONDecodeError as failure:

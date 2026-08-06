@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from vizmith.spec import SCHEMA_PATH, validate_spec
+from vizmith.spec.validate import names_table, output_columns
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
 VALID = sorted((FIXTURES / "valid").glob("*.json"))
@@ -203,3 +204,22 @@ def test_a_left_join_fixture_exists_because_the_query_builder_needs_one():
     joins = [join for path in VALID for join in load(path)["query"].get("joins", [])]
 
     assert any(join.get("type") == "left" for join in joins)
+
+
+MIRRORS = Path(__file__).parent / "fixtures" / "mirrors"
+REFERENCES = json.loads((MIRRORS / "references.json").read_text())
+
+
+@pytest.mark.parametrize("case", REFERENCES["names_table"], ids=lambda case: case["reference"])
+def test_a_reference_names_a_table_the_way_the_wells_expect(case):
+    """The wells resolve a reference before they write one into a spec, which is a second
+    copy of this rule. A disagreement is a spec that looks right in the browser and is
+    refused here, so both sides are asked these cases."""
+    assert names_table(case["table"], case["reference"]) is case["names"]
+
+
+@pytest.mark.parametrize("case", REFERENCES["output_columns"], ids=lambda case: case["why"])
+def test_the_output_columns_are_what_the_wells_expect(case):
+    """The result set contract, which the builder compiles and the browser predicts when it
+    names a field in an encoding."""
+    assert output_columns(case["query"]) == case["columns"]

@@ -1,0 +1,54 @@
+{
+  "comment": "The two rules the wells mirror from the validator. names_table decides whether a reference in a spec names a table, and output_columns is the result set contract: the names a query produces, in the order the builder emits them. A spec the browser writes and the validator refuses is what a disagreement here looks like, and both sides read this file.",
+  "names_table": [
+    { "table": "vizmith.shop.orders", "reference": "orders", "names": true },
+    { "table": "vizmith.shop.orders", "reference": "shop.orders", "names": true },
+    { "table": "vizmith.shop.orders", "reference": "vizmith.shop.orders", "names": true },
+    { "table": "vizmith.shop.orders", "reference": "vizmith.archive.orders", "names": false },
+    { "table": "vizmith.shop.orders", "reference": "order", "names": false },
+    { "table": "vizmith.shop.orders", "reference": "warehouse.vizmith.shop.orders", "names": false },
+    { "table": "orders", "reference": "vizmith.shop.orders", "names": false }
+  ],
+  "output_columns": [
+    {
+      "why": "a select names its columns by the last segment of each",
+      "query": {
+        "from": "vizmith.shop.orders",
+        "select": [{ "column": "orders.total" }, { "column": "orders.item_count" }],
+        "limit": 100
+      },
+      "columns": ["total", "item_count"]
+    },
+    {
+      "why": "an alias wins over the column name",
+      "query": {
+        "from": "vizmith.shop.orders",
+        "select": [{ "column": "orders.total", "as": "revenue" }],
+        "limit": 100
+      },
+      "columns": ["revenue"]
+    },
+    {
+      "why": "the dimensions come first, in order, then every aggregate alias",
+      "query": {
+        "from": "vizmith.shop.orders",
+        "group_by": [{ "column": "customers.country" }, { "column": "orders.status", "as": "state" }],
+        "aggregates": [
+          { "fn": "count", "as": "orders" },
+          { "fn": "sum", "column": "orders.total", "as": "revenue" }
+        ],
+        "limit": 500
+      },
+      "columns": ["country", "state", "orders", "revenue"]
+    },
+    {
+      "why": "a query that only aggregates produces one column and no dimension",
+      "query": {
+        "from": "vizmith.shop.orders",
+        "aggregates": [{ "fn": "sum", "column": "orders.total", "as": "revenue" }],
+        "limit": 1
+      },
+      "columns": ["revenue"]
+    }
+  ]
+}
