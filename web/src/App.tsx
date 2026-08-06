@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getProfile, getTables, type TableProfile } from "./api";
+import { getTables, type TableProfile } from "./api";
 import Visual from "./chart/Visual";
 import type { Row, Spec } from "./chart/option";
 import Fields from "./panels/Fields";
@@ -107,13 +107,14 @@ export default function App() {
   // The schema, once, when there is a source to read it from. Every table's profile
   // rather than the list alone: the panel shows a column's profile, the wells need its
   // type to infer anything, and the server profiled all of them on the first request
-  // anyway. The same figures the model is given, from the same endpoint.
+  // anyway. The same figures the model is given, from the same endpoint — in one request,
+  // rather than a listing and one request per table after it, which asked the source when
+  // each table last changed a second time.
   useEffect(() => {
     if (!source) return;
     let live = true;
     getTables()
-      .then((body) => Promise.all(body.tables.map(getProfile)))
-      .then((profiles) => live && setTables(profiles))
+      .then((body) => live && setTables(body.tables))
       .catch((error: Error) => live && setSchemaFailure(error.message));
     return () => {
       live = false;

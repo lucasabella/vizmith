@@ -86,11 +86,15 @@ ORDERS = "vizmith.shop.orders"
 SCANS = "vizmith.shop.shipment_scans"
 
 
-def test_a_get_lists_every_table_in_the_configured_schema(client, catalog):
+def test_a_get_answers_with_the_profile_of_every_table_in_the_configured_schema(client, catalog):
+    """The profiles rather than the names: this endpoint built them either way, and the
+    panel asking for each one back paid a second freshness check per table."""
     response = client.get("/api/tables")
 
     assert response.status_code == 200
-    assert response.json()["tables"] == catalog.tables()
+    tables = response.json()["tables"]
+    assert [table["table"] for table in tables] == catalog.tables()
+    assert all(table["columns"] and table["row_count"] for table in tables)
 
 
 def test_a_get_returns_the_profile_the_prompt_path_was_given(catalog):
@@ -200,7 +204,7 @@ def test_a_restarted_server_does_not_profile_the_schema_again(catalog):
         app.dependency_overrides.clear()
 
     assert profiled
-    assert listed.json()["tables"] == catalog.tables()
+    assert [table["table"] for table in listed.json()["tables"]] == catalog.tables()
     assert catalog.statements == profiled
 
 
@@ -997,3 +1001,44 @@ def test_an_answer_that_is_not_one_is_refused_in_the_stores_words(browsing):
 
     assert response.status_code == 400
     assert "is not an answer" in response.json()["errors"][0]
+
+
+def test_a_panel_load_asks_when_a_table_changed_once_per_table(client, catalog):
+    """What filling the Fields panel costs, on a warm cache. It used to be a listing plus a
+    request per table: one freshness check per table here, a second one there, and a schema
+    listing per table for the 404 check on the single table endpoint. On a fifty table
+    schema that is about 150 source calls, 100 of them statements a warehouse bills for,
+    before anybody has asked a question."""
+    client.get("/api/tables")  # the cold profile, which is a different question
+    catalog.statements.clear()
+    catalog.freshness_checks.clear()
+
+    body = client.get("/api/tables").json()
+
+    names = catalog.tables()
+    assert [table["table"] for table in body["tables"]] == names
+    assert catalog.freshness_checks == names, "a warm panel load asked twice per table"
+    assert catalog.statements == [], "a warm panel load re-profiled something"
+
+
+def test_the_panel_is_filled_by_one_request(client, catalog):
+    """The endpoint answers with what the panel reads, so the browser has nothing left to
+    fan out for. A profile carries its columns and their figures, which is what a column
+    row expands into and what a well needs to infer an aggregate."""
+    table = client.get("/api/tables").json()["tables"][0]
+    alone = client.get(f"/api/tables/{table['table']}").json()
+
+    assert table == alone, "the panel would have to ask again for what it was already given"
+
+
+def test_no_row_reaches_the_listing(client, catalog, fixture_db):
+    """Unchanged, and worth saying again now that the listing carries profiles: a sample
+    value is a value the source holds, and a column above the threshold carries none."""
+    body = client.get("/api/tables").json()
+    scans = next(table for table in body["tables"] if table["table"].endswith("shipment_scans"))
+    columns = {column["name"]: column for column in scans["columns"]}
+
+    assert columns["location_code"]["samples"] == [], "a high cardinality column sampled"
+    assert scans["row_count"] == fixture_db.execute(
+        "SELECT count(*) FROM vizmith.shop.shipment_scans"
+    ).fetchone()[0]
