@@ -169,6 +169,49 @@ def output_columns(query: dict) -> list[str]:
     return names
 
 
+def referenced(query: dict) -> tuple[set[str], set[str]]:
+    """Every table and every column the query names, in short names.
+
+    One definition, because two readers need it and they have to agree: the eval harness
+    scores an answer on what it references, and a critique refuses a suggestion that
+    references something the spec it corrects did not. Two implementations of "what does
+    this query read" would be two answers to that question.
+
+    Aliases are not columns and are left out: `order_by` and `limit_by` name output
+    columns, which the query itself invented, so counting them would measure a spec
+    against its own vocabulary.
+    """
+    default = short(query["from"])
+    tables = {default} | {short(join["table"]) for join in query.get("joins", [])}
+
+    columns = {
+        normalised(item["column"], default)
+        for item in [*query.get("select", []), *query.get("group_by", []), *query.get("filters", [])]
+    }
+    columns |= {
+        normalised(aggregate["column"], default)
+        for aggregate in query.get("aggregates", [])
+        if "column" in aggregate
+    }
+    for join in query.get("joins", []):
+        for pair in join["on"]:
+            columns |= {normalised(pair["left"], default), normalised(pair["right"], default)}
+    return tables, columns
+
+
+def short(reference: str) -> str:
+    """A table under the name a person uses. A spec may name a table with one segment or
+    with three, and a model reading a profile writes the qualified one, so the last
+    segment is the only name the two share."""
+    return reference.rsplit(".", 1)[-1].lower()
+
+
+def normalised(reference: str, default: str) -> str:
+    """A column as table.column, whatever the spec qualified it with."""
+    qualifier, _, column = reference.rpartition(".")
+    return f"{short(qualifier) if qualifier else default}.{column}".lower()
+
+
 def names_table(table: str, qualifier: str) -> bool:
     """Whether a qualifier names a table. Any trailing part of the reference counts, so
     'orders' and 'shop.orders' both name 'warehouse.shop.orders'. A model that had to

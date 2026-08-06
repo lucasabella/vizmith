@@ -335,7 +335,11 @@ def test_the_command_scores_the_set_and_says_where_it_wrote_the_run(
 
     code = cli._eval(
         argparse.Namespace(
-            questions=QUESTIONS, only=["total_revenue", "orders_per_month"], out=tmp_path, no_cache=True
+            questions=QUESTIONS,
+            only=["total_revenue", "orders_per_month"],
+            out=tmp_path,
+            no_cache=True,
+            critique=False,
         )
     )
 
@@ -356,7 +360,13 @@ def test_the_command_refuses_a_name_the_set_does_not_hold(tmp_path, monkeypatch,
     monkeypatch.setattr(api, "constrains", lambda writer: False)
 
     code = cli._eval(
-        argparse.Namespace(questions=QUESTIONS, only=["revene_by_country"], out=tmp_path, no_cache=True)
+        argparse.Namespace(
+            questions=QUESTIONS,
+            only=["revene_by_country"],
+            out=tmp_path,
+            no_cache=True,
+            critique=False,
+        )
     )
 
     assert code == 2
@@ -430,3 +440,82 @@ def test_a_question_set_loads_its_references_from_beside_it(asked):
     assert isinstance(question, Question)
     assert question.reference["query"]["from"] == "orders"
     assert question.notes
+
+
+class Critiquing(StubModel):
+    """A model that answers a question one way and a repair another.
+
+    A critique's prompt carries a spec and a fault rather than the question, so the stub
+    above cannot answer both from one dictionary. The fault sentence is what tells them
+    apart, which is also the sentence a person reads.
+    """
+
+    def __init__(self, answers: dict[str, object], repair: object):
+        super().__init__(answers)
+        self.repair = repair
+
+    def complete(self, prompt: str, schema: dict | None = None) -> Completion:
+        if "What it gets wrong" not in prompt:
+            return super().complete(prompt, schema)
+        self.prompts.append(prompt)
+        return Completion(text=json.dumps(self.repair), model="stub", finish_reason="stop", usage={})
+
+
+def test_a_critique_that_helps_is_recorded_as_having_helped(asked, tables, catalog):
+    """This is what the deferral was waiting for. A suggestion is a spec, and a spec is
+    something this harness already scores, so what a critique does to a score is a
+    measurement rather than an impression."""
+    question = next(one for one in asked if one.name == "revenue_by_country")
+    answer = json.loads(json.dumps(question.reference))
+    answer["chart"]["mark"] = "line"
+    model = Critiquing({question.question: answer}, question.reference)
+
+    record = evals.run(asked, tables, model, catalog, only=[question.name], critiqued=True)
+
+    assert record.scores[0].failed == MARK
+    assert [one.rule for one in record.advice] == ["mark"]
+    assert record.advice[0].before == MARK
+    assert record.advice[0].after == ""
+    assert record.advice[0].moved == evals.HELPED
+    assert record.totals["helped"] == 1
+
+
+def test_a_critique_that_changes_no_layer_is_recorded_as_changing_nothing(asked, tables, catalog):
+    """The common case, and the one worth counting: a suggestion that cost a request and
+    left the score where it was."""
+    question = next(one for one in asked if one.name == "revenue_by_country")
+    answer = json.loads(json.dumps(question.reference))
+    answer["chart"]["mark"] = "line"
+    repair = json.loads(json.dumps(answer))
+    repair["chart"]["mark"] = "area"
+    model = Critiquing({question.question: answer}, repair)
+
+    record = evals.run(asked, tables, model, catalog, only=[question.name], critiqued=True)
+
+    assert record.advice[0].moved == evals.NOTHING
+    assert record.totals["nothing"] == 1
+
+
+def test_a_critique_that_never_writes_a_valid_spec_is_recorded_apart(asked, tables, catalog):
+    """A request that bought nothing is not a suggestion that failed to help, and the two
+    are fixed by different things."""
+    question = next(one for one in asked if one.name == "revenue_by_country")
+    answer = json.loads(json.dumps(question.reference))
+    answer["chart"]["mark"] = "line"
+    model = Critiquing({question.question: answer}, {"chart": "a nicer one"})
+
+    record = evals.run(asked, tables, model, catalog, only=[question.name], critiqued=True)
+
+    assert record.advice[0].moved == evals.REFUSED
+    assert record.advice[0].after == ""
+    assert "is a required property" in record.advice[0].reason
+
+
+def test_a_run_costs_nothing_extra_unless_a_critique_was_asked_for(asked, tables, correct, catalog):
+    """A second round of billed requests is a decision rather than a side effect, the same
+    way asking again rather than reading the cache is."""
+    record = evals.run(asked, tables, correct, catalog, only=["revenue_by_country"])
+
+    assert record.advice == ()
+    assert "helped" not in record.totals
+    assert len(correct.prompts) == 1

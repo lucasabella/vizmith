@@ -57,6 +57,12 @@ def main() -> None:
         action="store_true",
         help="Ask again even where the same prompt has already been answered.",
     )
+    evaluate.add_argument(
+        "--critique",
+        action="store_true",
+        help="Critique every answer and score what it suggested, so the suggestions are "
+        "measured rather than admired. A billed request per fault, and never cached.",
+    )
 
     args = parser.parse_args()
 
@@ -159,6 +165,7 @@ def _eval(args) -> int:
             cache=cache,
             only=args.only,
             constrained=constrains(writer),
+            critiqued=args.critique,
         )
     except ValueError as failure:
         print(failure, file=sys.stderr)
@@ -175,5 +182,18 @@ def _eval(args) -> int:
         + ", ".join(f"{totals[layer]} {layer}" for layer in evals.LAYERS)
         + f", {totals['asked']} asked"
     )
+
+    if record.advice:
+        print()
+        for one in record.advice:
+            reached = one.after or "complete"
+            print(f"{one.moved:<8} {one.name}  {one.rule}: {one.before or 'complete'} -> {reached}")
+        print(
+            f"\n{totals['suggestions']} suggestions: "
+            + ", ".join(
+                f"{totals[moved]} {moved}"
+                for moved in (evals.HELPED, evals.HURT, evals.NOTHING, evals.REFUSED)
+            )
+        )
     print(f"written to {evals.write(record, args.out)}")
     return 0

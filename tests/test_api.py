@@ -406,6 +406,45 @@ def test_no_answer_carries_the_model_key(asking, monkeypatch):
     assert "the-key-that-stays-here" not in failed.text
 
 
+def test_a_critique_answers_with_a_fault_and_a_spec_that_validated(asking):
+    """The rules find the fault and the model writes the repair, which is what bounds what
+    a critique can say to what this project has a rule for."""
+    drawn = load(REVENUE_BY_COUNTRY)
+    drawn["chart"]["mark"] = "line"
+    corrected = load(REVENUE_BY_COUNTRY)
+
+    response = asking(json.dumps(corrected)).post("/api/critique", json={"spec": drawn})
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["spec"] == drawn, "the spec that was asked about comes back unchanged"
+    assert [suggestion["rule"] for suggestion in body["suggestions"]] == ["mark"]
+    assert body["suggestions"][0]["spec"] == corrected
+    assert "gaps between its values" in body["suggestions"][0]["says"]
+
+
+def test_a_critique_of_a_chart_nothing_is_wrong_with_asks_no_model(asking):
+    """A person pressing the button on a chart the rules have nothing to say about pays for
+    the statement and not for a request, and is told nothing rather than told something."""
+    client = asking()
+
+    body = client.post("/api/critique", json={"spec": load(REVENUE_BY_COUNTRY)}).json()
+
+    assert body["suggestions"] == []
+    assert body["faults"] == []
+
+
+def test_a_critique_of_an_invalid_spec_is_the_validator_s_refusal(asking):
+    """Nothing is critiqued that would not run. The words are the validator's, as they are
+    everywhere else."""
+    response = asking().post(
+        "/api/critique", json={"spec": load(FIXTURES / "invalid" / "missing_limit.json")}
+    )
+
+    assert response.status_code == 400
+    assert any("'limit' is a required property" in error for error in response.json()["errors"])
+
+
 def test_an_endpoint_that_honours_a_schema_is_sent_the_spec_schema(posting):
     """The probe says the endpoint can be constrained, so the question that follows it
     carries the schema instead of describing it and hoping."""
