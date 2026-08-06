@@ -362,3 +362,122 @@ def test_the_spec_editor_has_a_name_that_survives_being_typed_in(page):
     editor.fill(spec(REVENUE_BY_COUNTRY))
 
     assert editor.input_value() != ""
+
+
+STACKED = FIXTURES / "valid" / "revenue_by_category_stacked.json"
+TOTAL_REVENUE = FIXTURES / "valid" / "total_revenue.json"
+
+# ECharts stamps the element it initialised into, and the stamp is per instance. A second
+# stamp across one flow means the chart was disposed and built again.
+INSTANCE = "() => document.querySelector('.chart')?.getAttribute('_echarts_instance_')"
+
+# Whether the second series colour is anywhere on the canvas. `SERIES[1]` is #eb6834, which
+# a stacked chart wears and a single series chart never does.
+SECOND_COLOUR = """() => {
+  const canvas = document.querySelector('.chart canvas');
+  const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+  for (let at = 0; at < pixels.length; at += 4) {
+    if (Math.abs(pixels[at] - 235) < 12 && Math.abs(pixels[at + 1] - 104) < 12 &&
+        Math.abs(pixels[at + 2] - 52) < 12) return true;
+  }
+  return false;
+}"""
+
+
+def click_a_mark(page) -> None:
+    """Click until a click lands on a mark. A bar's height is the data's business, so where
+    one is depends on the spec, and the drill panel is what says a mark was hit."""
+    box = page.locator(".chart canvas").bounding_box()
+    for across in (0.2, 0.12, 0.3, 0.45):
+        for down in (0.3, 0.5, 0.7, 0.85, 0.93):
+            page.mouse.click(box["x"] + box["width"] * across, box["y"] + box["height"] * down)
+            page.wait_for_timeout(250)
+            if page.locator(".drill").count() > 0:
+                return
+    raise AssertionError("no click landed on a mark")
+
+
+def drill_into(page, column: str) -> None:
+    """Click a mark and ask the same question per another column, which is the one flow that
+    replaces what a mounted chart draws without the canvas leaving the screen."""
+    click_a_mark(page)
+    page.wait_for_selector(".drill__list", timeout=DRAWN)
+    page.locator(".drill__pick", has_text=column).first.click()
+
+
+@needs_built_frontend
+def test_a_new_result_set_draws_into_the_chart_that_is_already_there(page):
+    """Initialising per option threw the canvas, the renderer, the click handler and the
+    resize observer away for what is a data change. Going back to the chart a drill came
+    from is that change with the canvas never leaving the screen, so it is where the
+    instance either survives or does not."""
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.wait_for_timeout(700)
+    drill_into(page, "status")
+    chart_drawn(page)
+    page.wait_for_timeout(700)
+    drilled = page.evaluate(INSTANCE)
+
+    page.get_by_role("button", name="the chart this came from").click()
+    page.wait_for_timeout(700)
+
+    assert drilled is not None
+    assert page.evaluate(INSTANCE) == drilled, "the chart was disposed and built again"
+    assert page.locator(".chart canvas").count() == 1
+
+
+@needs_built_frontend
+def test_a_chart_that_loses_a_series_loses_what_that_series_drew(page):
+    """The option is applied without merging, because what the renderer builds is complete
+    every time and a merge keeps what the previous option had. What this asserts is the
+    visible half of that: after a stacked chart is replaced by a single series one, no
+    colour the stack wore is left on the canvas."""
+    run_spec(page, STACKED)
+    chart_drawn(page)
+    page.wait_for_timeout(900)
+    assert page.evaluate(SECOND_COLOUR), "a stacked chart wears more than one colour"
+
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.wait_for_timeout(900)
+
+    assert not page.evaluate(SECOND_COLOUR), "a series from the previous spec is still drawn"
+
+
+@needs_built_frontend
+def test_going_to_a_single_figure_leaves_no_chart_behind_it(page):
+    """A question with no dimension draws a figure rather than a chart, so the instance
+    that drew the chart before it goes with the canvas it drew on."""
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+
+    run_spec(page, TOTAL_REVENUE)
+    page.wait_for_selector(".figure", timeout=DRAWN)
+
+    assert page.locator(".chart canvas").count() == 0, "a chart stayed behind the figure"
+    assert page.locator(".figure__value").inner_text() != ""
+
+
+@needs_built_frontend
+def test_a_click_reads_the_chart_that_is_on_screen_rather_than_the_one_before_it(page):
+    """The handler is registered once now, so what it reads has to be the spec and the rows
+    that are drawn rather than the ones the instance was mounted with. Going back to the
+    chart a drill came from swaps both under a chart that never left the screen, so a click
+    after it is what tells a live handler from a stale one."""
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.wait_for_timeout(700)
+    drill_into(page, "status")
+    chart_drawn(page)
+    page.wait_for_timeout(700)
+
+    page.get_by_role("button", name="the chart this came from").click()
+    page.wait_for_timeout(700)
+    click_a_mark(page)
+
+    # A country, which is what the restored chart groups by. The drilled chart it was
+    # mounted with grouped by status, and its categories are words like "delivered".
+    asked = page.locator(".drill__head").inner_text()
+    assert asked.startswith("Ask about")
+    assert "Netherlands" in asked, asked
