@@ -7,7 +7,7 @@
  */
 
 import type { Row, Spec } from "./chart/option";
-import type { Dashboard, Saved, Tile } from "./dashboard/dashboard";
+import { asStored, type Dashboard, type Saved, type Tile } from "./dashboard/dashboard";
 import type { Join } from "./spec/spec";
 
 export type ColumnProfile = {
@@ -94,12 +94,15 @@ export const getDashboard = (name: string): Promise<Dashboard> =>
   json(`/api/dashboards/${encodeURIComponent(name)}`);
 
 /** Save under a name, replacing whatever it held. The tiles are refused whole where one of
- * them does not validate, and the refusal carries the validator's own words. */
+ * them does not validate, and the refusal carries the validator's own words.
+ *
+ * `asStored` is what strips the id the interface arranges by, so what the store receives is
+ * a spec and a width and nothing this browser invented. */
 export const saveDashboard = (name: string, tiles: Tile[]): Promise<Dashboard> =>
   json(`/api/dashboards/${encodeURIComponent(name)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tiles }),
+    body: JSON.stringify({ tiles: asStored(tiles) }),
   });
 
 export const deleteDashboard = (name: string): Promise<unknown> =>

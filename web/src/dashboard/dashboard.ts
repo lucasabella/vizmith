@@ -24,9 +24,38 @@ export const TILE_LIMIT = 24;
 /** Mirrors `NAME_LIMIT`. */
 export const NAME_LIMIT = 80;
 
-export type Tile = { spec: Spec; width: number };
+/**
+ * A tile on screen: what the store holds, plus an identity the interface gives it.
+ *
+ * The id is what React keys the grid on. Keyed by position, moving a tile hands each of
+ * the two components the other's spec, and a tile whose spec changed runs its query again
+ * — so arranging a dashboard costs a statement per press, for a gesture that changed no
+ * data. An id moves with the tile, so the component moves and nothing runs.
+ *
+ * It is the only identity a tile has, since a spec is a value and two tiles may hold equal
+ * ones, and it is what `editing` is found by for the same reason.
+ */
+export type Tile = { id: string; spec: Spec; width: number };
 
-export type Dashboard = { name: string; tiles: Tile[] };
+/** A tile as the store holds it. No id: that is interface state, and the store's shape is
+ * a spec and a width and nothing else. */
+export type StoredTile = { spec: Spec; width: number };
+
+export type Dashboard = { name: string; tiles: StoredTile[] };
+
+let minted = 0;
+
+/** A tile with an identity of its own. Minted here rather than derived from the spec,
+ * because two tiles may hold equal specs and they are still two tiles. */
+export const tiled = (spec: Spec | Draft, width = 1): Tile => ({
+  id: `tile-${(minted += 1)}`,
+  spec: spec as Spec,
+  width,
+});
+
+/** What goes to the store: the spec and the width, in that shape and no other. */
+export const asStored = (tiles: Tile[]): StoredTile[] =>
+  tiles.map(({ spec, width }) => ({ spec, width }));
 
 /**
  * The dashboard on screen, which is more than the one on the server.
@@ -41,21 +70,31 @@ export type Dashboard = { name: string; tiles: Tile[] };
  * silently, since both of them draw. A tile that was removed while it was being corrected
  * is then a tile this cannot find, which is a sentence the interface can say.
  */
-export type Arrangement = Dashboard & { savedAs: string | null; editing: Tile | null };
+export type Arrangement = {
+  name: string;
+  tiles: Tile[];
+  savedAs: string | null;
+  editing: Tile | null;
+};
 
 export const NOTHING: Arrangement = { name: "", tiles: [], savedAs: null, editing: null };
 
-/** A dashboard as it arrives from the server: saved under its name, nothing being edited. */
+/** A dashboard as it arrives from the server: saved under its name, nothing being edited,
+ * and every tile given the identity the interface arranges it by. */
 export const opened = (dashboard: Dashboard): Arrangement => ({
-  ...dashboard,
+  name: dashboard.name,
+  tiles: dashboard.tiles.map((tile) => tiled(tile.spec, tile.width)),
   savedAs: dashboard.name,
   editing: null,
 });
 
 /** Which tile is being corrected, as a position, or -1 where it is no longer in the list.
- * By reference, because that is the only identity a tile has. */
+ * By id: a reference would be lost the moment something copied the tile, and a position
+ * would go on pointing somewhere after the list was reordered. */
 export const editingIndex = (arrangement: Arrangement): number =>
-  arrangement.editing === null ? -1 : arrangement.tiles.indexOf(arrangement.editing);
+  arrangement.editing === null
+    ? -1
+    : arrangement.tiles.findIndex((tile) => tile.id === arrangement.editing?.id);
 
 /**
  * The corrected spec, back in the tile it came from, keeping that tile's width and its
@@ -82,10 +121,7 @@ export type Saved = { name: string; tiles: number };
 
 /** A tile added to the end, which is where a chart that was just made belongs: anywhere
  * else would move something a person arranged. */
-export const add = (tiles: Tile[], spec: Spec | Draft): Tile[] => [
-  ...tiles,
-  { spec: spec as Spec, width: 1 },
-];
+export const add = (tiles: Tile[], spec: Spec | Draft): Tile[] => [...tiles, tiled(spec)];
 
 export const remove = (tiles: Tile[], index: number): Tile[] =>
   tiles.filter((_, at) => at !== index);

@@ -101,7 +101,10 @@ export default function Dashboards({
     setWorking(true);
     try {
       const stored = await saveDashboard(name.trim(), tiles);
-      onChange({ ...arrangement, ...stored, savedAs: stored.name });
+      // The name the store settled on, and the tiles that are already on screen. Taking the
+      // stored tiles back would mint new ids for tiles that did not change, and every one of
+      // them would run its query again for a save that drew nothing new.
+      onChange({ ...arrangement, name: stored.name, savedAs: stored.name });
       setRefusal(null);
       setNote(`Saved as ${stored.name}.`);
       read();
@@ -124,7 +127,7 @@ export default function Dashboards({
     try {
       const stored = await saveDashboard(name.trim(), tiles);
       await deleteDashboard(from);
-      onChange({ ...arrangement, ...stored, savedAs: stored.name });
+      onChange({ ...arrangement, name: stored.name, savedAs: stored.name });
       setRefusal(null);
       setNote(`Renamed ${from} to ${stored.name}.`);
       read();
@@ -258,7 +261,7 @@ export default function Dashboards({
             <div className="grid">
               {tiles.map((tile, index) => (
                 <article
-                  key={index}
+                  key={tile.id}
                   className={index === beingEdited ? "grid__cell grid__cell--editing" : "grid__cell"}
                   style={{ gridColumn: `span ${Math.min(tile.width, COLUMNS)}` }}
                 >

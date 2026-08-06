@@ -12,9 +12,11 @@ import {
   nameProblem,
   opened,
   putBack,
+  asStored,
   remove,
   renameable,
   tileTitle,
+  tiled,
   widen,
   type Arrangement,
   type Tile,
@@ -32,7 +34,7 @@ const spec = (title?: string): Spec => ({
 });
 
 const tiles = (...titles: (string | undefined)[]): Tile[] =>
-  titles.map((title) => ({ spec: spec(title), width: 1 }));
+  titles.map((title) => tiled(spec(title)));
 
 describe("arranging a dashboard", () => {
   it("adds a tile at the end, where a chart that was just made belongs", () => {
@@ -83,6 +85,55 @@ describe("arranging a dashboard", () => {
 
     expect(widen(arranged, 0, 0)).toBe(arranged);
     expect(widen(arranged, 0, COLUMNS + 1)).toBe(arranged);
+  });
+
+  it("keeps a tile's identity when it moves, so the tile moves and no query runs", () => {
+    // Keyed by position, React hands the two components each other's spec and both run
+    // their query again for a gesture that changed no data. The id is what moves with the
+    // tile, and what the grid keys on.
+    const arranged = tiles("a", "b", "c");
+    const moved = move(arranged, 1, -1);
+
+    expect(moved.map((tile) => tile.id)).toEqual([
+      arranged[1].id,
+      arranged[0].id,
+      arranged[2].id,
+    ]);
+    expect(moved[0].spec).toBe(arranged[1].spec);
+  });
+
+  it("keeps the same spec object through a width change and a removal", () => {
+    // The effect that runs a tile's query is keyed on its spec, so an equal-but-new spec
+    // would be a statement on the warehouse for a layout gesture.
+    const arranged = tiles("a", "b");
+    const wide = widen(arranged, 0, COLUMNS);
+
+    expect(wide[0].spec).toBe(arranged[0].spec);
+    expect(wide[0].id).toBe(arranged[0].id);
+    expect(remove(arranged, 0)[0].spec).toBe(arranged[1].spec);
+    expect(remove(arranged, 0)[0].id).toBe(arranged[1].id);
+  });
+
+  it("gives every tile an identity of its own, equal specs included", () => {
+    const two = [tiled(spec("same")), tiled(spec("same"))];
+
+    expect(two[0].id).not.toBe(two[1].id);
+  });
+
+  it("sends the store a spec and a width and nothing this browser invented", () => {
+    expect(asStored(tiles("a", "b"))).toEqual([
+      { spec: spec("a"), width: 1 },
+      { spec: spec("b"), width: 1 },
+    ]);
+    expect(asStored(tiles("a"))[0]).not.toHaveProperty("id");
+  });
+
+  it("gives the tiles of a dashboard it opened an identity each", () => {
+    const arrangement = opened({ name: "Trade", tiles: [{ spec: spec("a"), width: 1 }] });
+
+    expect(arrangement.tiles[0].id).toBeTruthy();
+    expect(arrangement.tiles[0].spec.title).toBe("a");
+    expect(arrangement.savedAs).toBe("Trade");
   });
 
   it("calls a tile by its spec's title, and by where it sits where it has none", () => {
