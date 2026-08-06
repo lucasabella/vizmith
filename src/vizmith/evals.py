@@ -28,10 +28,11 @@ from pathlib import Path
 from vizmith import query
 from vizmith.ask import ATTEMPTS, ask, prompt
 from vizmith.catalog import Catalog
+from vizmith.critique import Suggestion, critique, indefensible
 from vizmith.model import Model, ModelError
 from vizmith.profiler import TableProfile
 from vizmith.relevance import select
-from vizmith.spec import output_columns
+from vizmith.spec import normalised, output_columns, referenced
 
 VALIDATES = "validates"
 REFERENCES = "references"
@@ -45,10 +46,16 @@ LAYERS = (VALIDATES, REFERENCES, RESULT, MARK)
 # migrated: what it holds is answers that can be bought again.
 CACHE_VERSION = 1
 
-# More slices than this and a reader is matching them to a legend rather than comparing
-# them. The same figure as the colour order the renderer refuses to go past, and for the
-# same reason: past it the chart is drawn and cannot be read.
-ARC_SLICES = 8
+# What a critique did to a score, in the three words a record needs. "Nothing" is the
+# common case and the one worth counting: a suggestion that changes no layer cost a request
+# and bought a person a decision they did not have to make.
+HELPED = "helped"
+HURT = "hurt"
+NOTHING = "nothing"
+# A critique that was asked and produced no spec that validated. Counted apart from the
+# three above, because it is not a suggestion that failed to help, it is a request that
+# bought nothing, and the two are fixed by different things.
+REFUSED = "refused"
 
 
 @dataclass(frozen=True)
@@ -94,6 +101,34 @@ class Score:
 
 
 @dataclass(frozen=True)
+class Advice:
+    """What one suggestion did to one question's score.
+
+    This is how a critique is measured rather than admired. A suggestion is a spec, and a
+    spec is something this harness already knows how to judge, so the suggestion is scored
+    by the same four layers the answer was and the two results are compared. `before` and
+    `after` are the layer that stopped each of them, or an empty string where nothing did.
+    `moved` is the comparison: further through the layers is `helped`, less far is `hurt`,
+    the same distance is `nothing`, and a critique that produced no spec that validated is
+    `refused`.
+
+    `rule` is the fault the suggestion was written for, because "the critique helps" is not
+    a fact about the critique, it is a fact about each rule in it, and a rule that never
+    helps anything is a rule to delete.
+    """
+
+    name: str
+    rule: str
+    before: str
+    after: str
+    moved: str
+    reason: str = ""
+
+    def as_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
 class Run:
     """One run of the harness: what produced it, and what it scored.
 
@@ -106,6 +141,7 @@ class Run:
     model: str
     endpoint: str
     scores: tuple[Score, ...] = ()
+    advice: tuple[Advice, ...] = ()
 
     @property
     def totals(self) -> dict[str, int]:
@@ -113,12 +149,19 @@ class Run:
         Counted rather than averaged: a mean over four layers of different worth reads
         like a grade and hides which layer moved."""
         totals = {layer: sum(layer in score.passed for score in self.scores) for layer in LAYERS}
-        return {
+        counted = {
             "questions": len(self.scores),
             **totals,
             "complete": sum(score.complete for score in self.scores),
             "asked": sum(score.asked for score in self.scores),
         }
+        if self.advice:
+            counted["suggestions"] = len(self.advice)
+            counted |= {
+                moved: sum(one.moved == moved for one in self.advice)
+                for moved in (HELPED, HURT, NOTHING, REFUSED)
+            }
+        return counted
 
     def as_dict(self) -> dict:
         return {
@@ -127,6 +170,7 @@ class Run:
             "endpoint": self.endpoint,
             "totals": self.totals,
             "scores": [score.as_dict() for score in sorted(self.scores, key=lambda s: s.name)],
+            "advice": [one.as_dict() for one in sorted(self.advice, key=lambda a: (a.name, a.rule))],
         }
 
 
@@ -208,6 +252,7 @@ def run(
     only: Sequence[str] = (),
     constrained: bool = False,
     attempts: int = ATTEMPTS,
+    critiqued: bool = False,
 ) -> Run:
     """Every question, or the named subset, scored.
 
@@ -215,11 +260,31 @@ def run(
     thing a person re-runs is the question that failed, which they know by name. A name the
     set does not hold raises rather than scoring nothing, since a typo that quietly runs an
     empty harness reports a perfect run.
+
+    `critiqued` asks for a critique of every answer that produced rows, and scores what it
+    suggested the same way the answer was scored. Off by default because it is a second
+    round of billed requests and is never cached: a suggestion is asked for about a spec
+    that a cache key cannot name.
     """
     chosen = _chosen(asked, only)
-    scores = [_score(question, tables, model, catalog, cache, constrained, attempts) for question in chosen]
+    judged = [
+        _score(question, tables, model, catalog, cache, constrained, attempts)
+        for question in chosen
+    ]
+    advice: list[Advice] = []
+    if critiqued:
+        for question, (score, spec, rows) in zip(chosen, judged, strict=True):
+            advice += _advice(
+                question, score, spec, rows, tables, model, catalog, constrained, attempts
+            )
     name, endpoint = model.described
-    return Run(at=_now(), model=name, endpoint=endpoint, scores=tuple(scores))
+    return Run(
+        at=_now(),
+        model=name,
+        endpoint=endpoint,
+        scores=tuple(score for score, _, _ in judged),
+        advice=tuple(advice),
+    )
 
 
 def write(record: Run, directory: Path) -> Path:
@@ -250,7 +315,13 @@ def _score(
     cache: Cache | None,
     constrained: bool,
     attempts: int,
-) -> Score:
+) -> tuple[Score, dict | None, list[dict]]:
+    """The score, and the answer it was scored from.
+
+    The spec and its rows come back with the score because a critique is asked about them,
+    and asking the source for them a second time would be a statement bought twice for
+    figures this call already has.
+    """
     # Keyed on the prompt that is actually sent. That depends on whether the endpoint takes
     # the schema as a response format, and on which tables the question selected: an answer
     # to a prompt carrying six tables is not an answer to one carrying three.
@@ -280,39 +351,115 @@ def _score(
                 relationships=relationships,
             )
         except ModelError as failure:
-            return Score(question.name, (), VALIDATES, str(failure), attempts=0, asked=True)
+            return Score(question.name, (), VALIDATES, str(failure), attempts=0, asked=True), None, []
         spec, errors, taken = answer.spec, answer.errors, answer.attempts
         if cache:
             cache.write(key, {"spec": spec, "errors": errors, "attempts": taken})
 
     if spec is None:
-        return Score(question.name, (), VALIDATES, "; ".join(errors), attempts=taken, asked=asked)
+        stopped = Score(question.name, (), VALIDATES, "; ".join(errors), attempts=taken, asked=asked)
+        return stopped, None, []
 
+    return _judge(question, spec, catalog, taken, asked)
+
+
+def _judge(
+    question: Question, spec: dict, catalog: Catalog, taken: int, asked: bool
+) -> tuple[Score, dict, list[dict]]:
+    """Layers two to four, over a spec that has already validated.
+
+    Split from the asking above so that a suggestion is scored by the same code the answer
+    was. A critique measured against a second implementation of the layers would be
+    measuring the difference between the two implementations.
+    """
     passed = [VALIDATES]
 
     missing, extra = _difference(question, spec)
     if missing:
-        return Score(question.name, tuple(passed), REFERENCES, missing, attempts=taken, asked=asked)
+        stopped = Score(question.name, tuple(passed), REFERENCES, missing, attempts=taken, asked=asked)
+        return stopped, spec, []
     passed.append(REFERENCES)
 
     try:
         rows = query.execute(spec, catalog)
         expected = query.execute(question.reference, catalog)
     except (ValueError, RuntimeError) as failure:
-        return Score(question.name, tuple(passed), RESULT, str(failure), attempts=taken, asked=asked, note=extra)
+        stopped = Score(question.name, tuple(passed), RESULT, str(failure), attempts=taken, asked=asked, note=extra)
+        return stopped, spec, []
     if _comparable(rows, spec) != _comparable(expected, question.reference):
         reason = f"{len(rows)} rows, expected {len(expected)}"
         if len(rows) == len(expected):
             reason = f"{len(rows)} rows that are not the expected ones"
-        return Score(question.name, tuple(passed), RESULT, reason, attempts=taken, asked=asked, note=extra)
+        stopped = Score(question.name, tuple(passed), RESULT, reason, attempts=taken, asked=asked, note=extra)
+        return stopped, spec, rows
     passed.append(RESULT)
 
     refused = indefensible(spec, rows)
     if refused:
-        return Score(question.name, tuple(passed), MARK, refused, attempts=taken, asked=asked, note=extra)
+        stopped = Score(question.name, tuple(passed), MARK, refused, attempts=taken, asked=asked, note=extra)
+        return stopped, spec, rows
     passed.append(MARK)
 
-    return Score(question.name, tuple(passed), None, attempts=taken, asked=asked, note=extra)
+    return Score(question.name, tuple(passed), None, attempts=taken, asked=asked, note=extra), spec, rows
+
+
+def _advice(
+    question: Question,
+    before: Score,
+    spec: dict | None,
+    rows: list[dict],
+    tables: Sequence[TableProfile],
+    model: Model,
+    catalog: Catalog,
+    constrained: bool,
+    attempts: int,
+) -> list[Advice]:
+    """What a critique of this answer did to its score.
+
+    Nothing is critiqued where there is no spec or no result: the rules read the shape of
+    a result set, and asking about a spec that never ran would be asking about a chart
+    nobody has seen. A suggestion is scored from `VALIDATES` on, because it validated on
+    its way out of `improve` — that is what `improve` refuses to return without.
+    """
+    if spec is None or not rows:
+        return []
+    found = []
+    try:
+        suggested = critique(spec, rows, tables, model, attempts=attempts, constrained=constrained)
+    except ModelError as failure:
+        return [
+            Advice(question.name, "", before.failed or "", "", REFUSED, str(failure))
+        ]
+    for suggestion in suggested.suggestions:
+        found.append(_moved(question, before, suggestion, catalog))
+    return found
+
+
+def _moved(question: Question, before: Score, suggestion: Suggestion, catalog: Catalog) -> Advice:
+    if suggestion.spec is None:
+        return Advice(
+            question.name,
+            suggestion.fault.rule,
+            before.failed or "",
+            "",
+            REFUSED,
+            "; ".join(suggestion.errors),
+        )
+    after, *_ = _judge(question, suggestion.spec, catalog, suggestion.attempts, True)
+    if len(after.passed) > len(before.passed):
+        moved = HELPED
+    elif len(after.passed) < len(before.passed):
+        moved = HURT
+    else:
+        moved = NOTHING
+    return Advice(
+        question.name,
+        suggestion.fault.rule,
+        before.failed or "",
+        after.failed or "",
+        moved,
+        after.reason,
+    )
 
 
 def _difference(question: Question, spec: dict) -> tuple[str, str]:
@@ -320,53 +467,14 @@ def _difference(question: Question, spec: dict) -> tuple[str, str]:
     for. Only the first is a failure: a spec that joins a table it did not need produces
     the wrong rows or the right ones, and layer 3 is what says which. Recording the extras
     keeps that visible in the record rather than invisible in the score."""
-    tables, columns = _referenced(spec)
+    tables, columns = referenced(spec["query"])
     missing = [name for name in question.tables if name not in tables]
-    missing += [name for name in question.columns if _normalised(name, "") not in columns]
+    missing += [name for name in question.columns if normalised(name, "") not in columns]
     extra = sorted(tables - set(question.tables))
     return (
         ", ".join(f"does not reference {name}" for name in missing),
         ("also reads " + ", ".join(extra)) if extra else "",
     )
-
-
-def _referenced(spec: dict) -> tuple[set[str], set[str]]:
-    """Every table and column the query names, in short names.
-
-    Aliases are not columns and are left out: `order_by` and `limit_by` name output
-    columns, which the spec itself invented, so counting them would score the answer
-    against its own vocabulary.
-    """
-    asked = spec["query"]
-    default = _short(asked["from"])
-    tables = {default} | {_short(join["table"]) for join in asked.get("joins", [])}
-
-    columns = {
-        _normalised(item["column"], default)
-        for item in [*asked.get("select", []), *asked.get("group_by", []), *asked.get("filters", [])]
-    }
-    columns |= {
-        _normalised(aggregate["column"], default)
-        for aggregate in asked.get("aggregates", [])
-        if "column" in aggregate
-    }
-    for join in asked.get("joins", []):
-        for pair in join["on"]:
-            columns |= {_normalised(pair["left"], default), _normalised(pair["right"], default)}
-    return tables, columns
-
-
-def _short(reference: str) -> str:
-    """A table under the name a person uses. A spec may name a table with one segment or
-    with three, and a model reading a profile writes the qualified one, so the last
-    segment is the only name the two share."""
-    return reference.rsplit(".", 1)[-1].lower()
-
-
-def _normalised(reference: str, default: str) -> str:
-    """A column as table.column, whatever the spec qualified it with."""
-    qualifier, _, column = reference.rpartition(".")
-    return f"{_short(qualifier) if qualifier else default}.{column}".lower()
 
 
 def _comparable(rows: list[dict], spec: dict) -> list[tuple[str, ...]]:
@@ -379,37 +487,6 @@ def _comparable(rows: list[dict], spec: dict) -> list[tuple[str, ...]]:
     """
     names = output_columns(spec["query"])
     return sorted(tuple("" if row[name] is None else str(row[name]) for name in names) for row in rows)
-
-
-def indefensible(spec: dict, rows: list[dict]) -> str:
-    """Why this mark does not suit the shape of this result, or an empty string.
-
-    A rule rather than a list per question, because "defensible" is a property of the
-    result and there is one implementation of every rule in this project. It refuses
-    rather than ranks: several marks suit most shapes and picking a favourite among them
-    would score a preference.
-    """
-    chart = spec["chart"]
-    mark = chart["mark"]
-    encoding = chart["encoding"]
-    x = encoding.get("x")
-
-    if x is None:
-        # A figure. `mark` says nothing on one, the same way `stack` says nothing on an arc.
-        return ""
-    if "color" in encoding and mark == "arc":
-        return "an arc has one ring of slices and cannot carry a colour channel as a second series"
-    if mark == "arc" and len(rows) > ARC_SLICES:
-        return f"an arc of {len(rows)} slices cannot be read; {ARC_SLICES} is the most that can"
-
-    kind = x["type"]
-    if kind == "temporal" and mark == "arc":
-        return "an arc has no order, and a time axis is nothing but order"
-    if kind == "quantitative" and mark in ("bar", "arc"):
-        return f"a {mark} treats a quantitative axis as categories, and this one is a measure"
-    if kind in ("nominal", "ordinal") and mark in ("line", "area"):
-        return f"a {mark} draws a category axis as if the gaps between its values meant something"
-    return ""
 
 
 def _now() -> str:

@@ -126,6 +126,18 @@ Scoring the model on a fixed question set:
 
 Every question is asked of the synthetic fixture dataset, so this needs the source in `.env` pointed at it, and it needs the model endpoint. Each question is scored in four layers — does the answer validate, does it reference the tables and columns the question needs, does it return the expected rows, is the mark defensible for their shape — and a question stops at the first layer it fails. The run is written to `eval-runs/`, so two runs can be diffed; what makes that worth doing is that the record names the model and the endpoint that produced it. Answers are cached against the prompt that produced them, in the state directory beside the profiles, so re-running a set costs nothing until a prompt, a profile or an endpoint changes. `--no-cache` asks anyway.
 
+## Asking what is wrong with a chart
+
+A chart on screen has a **What is wrong with this chart?** button under it. Rules in `critique.py` read the spec, the profiles and the shape of the result, and each one names something the chart gets wrong: a mark the result contradicts, a limit that cut the rows with nothing ordering them, more categories than an axis can be read at, a total of key values, a dimension most of the rows have no value for. The model is never asked what is wrong — only to write the corrected spec for a fault a rule found, which the validator then judges like any other answer. A suggestion that reads a table or a column the original did not is refused, because that is a different question rather than a correction.
+
+Nothing is applied. Taking a suggestion runs it like any other spec, and the chart it was about is one control back, next to the way back from a drill. It costs a statement and a request per fault, so it happens when the button is pressed and not before.
+
+```
+.venv/bin/vizmith eval --critique
+```
+
+scores every answer, critiques it, scores what the critique suggested through the same four layers, and records per rule whether it helped, hurt, changed nothing, or produced nothing that validated.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).

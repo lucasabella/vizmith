@@ -31,7 +31,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-from vizmith.api import CONFIGURATION, WEB_DIST, app, source
+from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, WEB_DIST, app, constrains, model, source
 
 pytest.importorskip("playwright", reason="pip install playwright to drive the interface")
 
@@ -58,6 +58,26 @@ def spec(path: Path) -> str:
     return json.dumps(json.loads(path.read_text()))
 
 
+class Repairing:
+    """The model behind the served application: it answers every request with the fixture
+    spec drawn as bars.
+
+    A browser suite that reached an endpoint would need a key and would be a different
+    thing to keep working. What is being driven here is the flow — press the button, read
+    what came back, take one and go back from it — and the sentence a real model would
+    write into the repair is not what a browser can check anyway."""
+
+    def complete(self, prompt: str, schema: dict | None = None):
+        from vizmith.model import Completion
+
+        return Completion(
+            text=spec(REVENUE_BY_COUNTRY), model="fixture", finish_reason="stop", usage={}
+        )
+
+    def constrains_output(self, schema: dict) -> bool:
+        return False
+
+
 @pytest.fixture(scope="module")
 def browser():
     """One browser for the suite. Launching one is the expensive part, and a page per test
@@ -81,11 +101,13 @@ def served(fixture_db):
     from conftest import FixtureCatalog
 
     app.dependency_overrides[source] = lambda: FixtureCatalog(fixture_db)
+    app.dependency_overrides[model] = lambda: Repairing()
     # `/api/health` reports what is configured rather than what is injected, and the
     # interface reads it: without this the controls are disabled and every flow below
-    # would be testing the Setup screen. The source itself is still the override above.
+    # would be testing the Setup screen. The source itself is still the override above,
+    # and so is the model: nothing here reaches an endpoint.
     patch = pytest.MonkeyPatch()
-    for name in CONFIGURATION:
+    for name in (*CONFIGURATION, *MODEL_CONFIGURATION):
         patch.setenv(name, "fixture")
 
     sock = socket.socket()
@@ -107,6 +129,7 @@ def served(fixture_db):
     server.should_exit = True
     thread.join(timeout=10)
     app.dependency_overrides.clear()
+    constrains.cache_clear()
     patch.undo()
 
 
@@ -481,3 +504,33 @@ def test_a_click_reads_the_chart_that_is_on_screen_rather_than_the_one_before_it
     asked = page.locator(".drill__head").inner_text()
     assert asked.startswith("Ask about")
     assert "Netherlands" in asked, asked
+
+
+@needs_built_frontend
+def test_a_suggestion_is_taken_or_left_and_the_chart_it_was_about_stays_reachable(page):
+    """The flow the critique exists for, and the rule it is built against: nothing is
+    applied. Ask what is wrong, read what came back, leave it — the chart is untouched.
+    Take it, and the one it was about is the same control a drill goes back through."""
+    drawn = json.loads(REVENUE_BY_COUNTRY.read_text())
+    drawn["chart"]["mark"] = "line"
+    page.get_by_role("button", name="{ } JSON").click()
+    page.locator("textarea.spec__text").fill(json.dumps(drawn))
+    page.get_by_role("button", name="Run spec").click()
+    chart_drawn(page)
+
+    page.get_by_role("button", name="What is wrong with this chart?").click()
+    page.wait_for_selector(".advice__item", timeout=DRAWN)
+
+    assert "category axis" in page.locator(".advice__says").inner_text()
+    # Left alone, it changed nothing: the spec in the editor is still the one that drew.
+    assert json.loads(page.locator("textarea.spec__text").input_value()) == drawn
+
+    page.get_by_role("button", name="Use this one").click()
+    chart_drawn(page)
+
+    assert json.loads(page.locator("textarea.spec__text").input_value())["chart"]["mark"] == "bar"
+
+    page.get_by_role("button", name="the chart this came from").click()
+    page.wait_for_timeout(500)
+
+    assert json.loads(page.locator("textarea.spec__text").input_value()) == drawn

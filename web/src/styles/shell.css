@@ -567,6 +567,76 @@ button:focus-visible {
   max-width: 60ch;
 }
 
+/* What a critique found, between the chart and the strip under it. It sits where a person
+   is already looking rather than in a panel, because it is about the chart on screen and
+   goes away with it. Bounded height: a list that pushed the chart off the canvas would be
+   advice that hid the thing it is advice about. */
+.advice {
+  flex: none;
+  max-height: 34%;
+  overflow: auto;
+  padding: 10px 14px 12px;
+  background: var(--surf-2);
+  border-top: 1px solid var(--rule-2);
+}
+
+.advice__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.advice__title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin-right: auto;
+}
+
+.advice__empty {
+  margin: 0;
+  max-width: 68ch;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.advice__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.advice__item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--rule-2);
+}
+
+.advice__item:first-child {
+  border-top: none;
+}
+
+.advice__rule {
+  flex: none;
+  width: 9ch;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.advice__says {
+  flex: 1;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
 .pages {
   height: var(--h-pages);
   flex: none;

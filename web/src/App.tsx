@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getTables, type TableProfile } from "./api";
+import { critique, getTables, Refused, type Suggestion, type TableProfile } from "./api";
 import Visual from "./chart/Visual";
 import type { Row, Spec } from "./chart/option";
 import Fields from "./panels/Fields";
@@ -83,8 +83,15 @@ export default function App() {
   // on it, so a render for each change would be a render for nothing.
   const runs = useRef(sequence());
   // Where a drill came from. A drill that cannot be undone is a trap, so the spec that was
-  // replaced stays reachable, as the text and the chart it drew.
+  // replaced stays reachable, as the text and the chart it drew. Taking a suggestion goes
+  // on the same stack, so the spec a critique was about is the one control back.
   const [before, setBefore] = useState<{ text: string; outcome: Outcome }[]>([]);
+  // What a critique said about the chart on screen, once it has been asked for. Null is
+  // "not asked", an empty list is "asked, and the rules found nothing", and the two are
+  // different sentences to a person who pressed the button.
+  const [advice, setAdvice] = useState<Suggestion[] | null>(null);
+  const [advising, setAdvising] = useState(false);
+  const [adviceFailure, setAdviceFailure] = useState<string | null>(null);
   // The dashboard being arranged. It lives here rather than in the view, because adding
   // the chart on screen to it means going back to the Chart view to build the next one,
   // and a view holding it would throw the arrangement away on the way out. Correcting a
@@ -160,6 +167,10 @@ export default function App() {
     // answer that would otherwise be drawn under the wrong spec.
     const latest = runs.current.start();
     setWorking(question === null ? "spec" : "question");
+    // Advice about the chart that is being replaced is advice about a chart nobody is
+    // looking at any more, and a suggestion for it would apply to the wrong spec.
+    setAdvice(null);
+    setAdviceFailure(null);
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -235,6 +246,43 @@ export default function App() {
     setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
     setText(JSON.stringify(next, null, 2));
     send("/api/execute", { spec: next });
+  };
+
+  /**
+   * Ask what is wrong with the chart on screen. The spec that produced the rows is what is
+   * sent, not the text in the editor: a spec somebody has half edited since is not the one
+   * they are looking at.
+   *
+   * This is a button rather than something that happens on its own, because it runs the
+   * spec again and pays for a request per fault. What comes back changes nothing until a
+   * suggestion is taken.
+   */
+  const check = async () => {
+    if (outcome.kind !== "chart" || advising) return;
+    setAdvising(true);
+    setAdviceFailure(null);
+    try {
+      const body = await critique(outcome.spec);
+      setAdvice(body.suggestions);
+    } catch (error) {
+      setAdvice(null);
+      setAdviceFailure(
+        error instanceof Refused ? error.errors.join(" ") : (error as Error).message,
+      );
+    } finally {
+      setAdvising(false);
+    }
+  };
+
+  /**
+   * A suggestion the person took. It runs like any other spec and goes on the way back, so
+   * the chart it was about is one control away — a suggestion that could not be undone
+   * would be the interface changing somebody's spec for them.
+   */
+  const took = (suggested: Spec) => {
+    setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
+    setText(JSON.stringify(suggested, null, 2));
+    send("/api/execute", { spec: suggested });
   };
 
   /**
@@ -387,10 +435,33 @@ export default function App() {
             {/* The page tabs that used to sit here were markup and did nothing. Several
                 charts at once is the Dashboards view now, and a control that looks like it
                 does that and does not is worse than not having one. */}
+            {advice !== null || adviceFailure !== null ? (
+              <Advice
+                suggestions={advice}
+                failure={adviceFailure}
+                disabled={running}
+                onTake={took}
+                onDismiss={() => {
+                  setAdvice(null);
+                  setAdviceFailure(null);
+                }}
+              />
+            ) : null}
+
             <div className="pages">
               {before.length > 0 ? (
                 <button className="pages__back" onClick={back}>
                   &larr; the chart this came from
+                </button>
+              ) : null}
+              {outcome.kind === "chart" && model ? (
+                <button
+                  className="pages__back"
+                  onClick={check}
+                  disabled={advising || running}
+                  title="Run the rules over this chart and ask the model to correct what they find"
+                >
+                  {advising ? "Checking this chart" : "What is wrong with this chart?"}
                 </button>
               ) : null}
               {arrangement.editing !== null ? (
@@ -506,6 +577,73 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * What a critique found, and the one control that takes each of it.
+ *
+ * The sentence is the server's, because the rule that found the fault is the only thing
+ * that can say what it is. Nothing here judges a suggestion or ranks them: what is shown
+ * is what the rules named, in the order they named it.
+ *
+ * An empty list is a sentence rather than an empty box. A person who pressed a button and
+ * got nothing back cannot tell "the rules found nothing" from "the request went nowhere",
+ * and those are different things to do next about.
+ */
+function Advice({
+  suggestions,
+  failure,
+  disabled,
+  onTake,
+  onDismiss,
+}: {
+  suggestions: Suggestion[] | null;
+  failure: string | null;
+  disabled: boolean;
+  onTake: (spec: Spec) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <section className="advice">
+      <div className="advice__head">
+        <span className="advice__title">
+          {failure !== null
+            ? "The check did not finish"
+            : suggestions === null || suggestions.length === 0
+              ? "Nothing to correct"
+              : `${suggestions.length} thing${suggestions.length === 1 ? "" : "s"} to correct`}
+        </span>
+        <button className="btn btn--quiet" onClick={onDismiss}>
+          Close
+        </button>
+      </div>
+      {failure !== null ? (
+        <p className="advice__empty">{failure}</p>
+      ) : suggestions === null || suggestions.length === 0 ? (
+        <p className="advice__empty">
+          The rules read the spec, the profiles and the shape of the result, and none of them
+          had anything to say about this chart. They do not have an opinion about which mark
+          is nicest, so a chart nothing is wrong with gets nothing back.
+        </p>
+      ) : (
+        <ul className="advice__list">
+          {suggestions.map((suggestion) => (
+            <li className="advice__item" key={suggestion.rule}>
+              <span className="advice__rule">{suggestion.rule}</span>
+              <span className="advice__says">{suggestion.says}</span>
+              <button
+                className="btn btn--small"
+                onClick={() => onTake(suggestion.spec)}
+                disabled={disabled}
+              >
+                Use this one
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

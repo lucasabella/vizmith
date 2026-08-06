@@ -89,6 +89,23 @@ export const execute = (spec: Spec): Promise<{ spec: Spec; rows: Row[] }> =>
     body: JSON.stringify({ spec }),
   });
 
+/** One thing a spec gets wrong, and the corrected spec that was written for it. The rules
+ * that find a fault are server side and so is the repair; nothing in the browser decides
+ * what is wrong with a chart. */
+export type Suggestion = { rule: string; says: string; spec: Spec };
+
+/** What is wrong with this spec, each with a spec that fixes it. The server runs the spec
+ * to find out — the rules read the shape of the result — so this costs a statement and a
+ * request per fault, which is why it is a button somebody presses rather than something
+ * that happens on every chart. Nothing is applied: taking a suggestion is a control here
+ * and going back is the one next to it. */
+export const critique = (spec: Spec): Promise<{ spec: Spec; suggestions: Suggestion[] }> =>
+  json("/api/critique", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spec }),
+  });
+
 /** Every saved dashboard, as a name and a tile count. No spec comes back here: this is
  * what a menu is drawn from. */
 export const getDashboards = (): Promise<{ dashboards: Saved[] }> => json("/api/dashboards");

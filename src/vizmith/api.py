@@ -35,6 +35,7 @@ from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Relationship
 from vizmith.config import state_dir
+from vizmith.critique import critique
 from vizmith.dashboards import Dashboards, Refused
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
@@ -521,6 +522,46 @@ def question(
     if answer.spec is None:
         return JSONResponse(status_code=400, content={"errors": answer.errors})
     return execute_spec(answer.spec, catalog)
+
+
+@app.post("/api/critique")
+def advise(
+    request: SpecRequest,
+    catalog: Annotated[Catalog, Depends(source)],
+    writer: Annotated[Model, Depends(model)],
+):
+    """What this spec gets wrong, each with a corrected spec that validated.
+
+    The faults are found by rules in `critique.py` and never by the model, so what this can
+    say is bounded by code a person can read rather than by a model's taste. The model
+    writes the repairs, and a repair that does not validate is not offered.
+
+    The spec is run here rather than taken from the caller. The rules read the shape of the
+    result — how many rows, whether a limit was reached — and rows a client sent could say
+    anything, so this asks the source the same way `/api/execute` does. That is one
+    statement per critique, on top of a billed request per fault, which is why nothing calls
+    this on its own: a person asks for it about a chart they are looking at.
+
+    Nothing is applied. What comes back is specs the caller may run, and the one they were
+    written about is the one they already have.
+    """
+    errors = validate_spec(request.spec)
+    if errors:
+        return JSONResponse(status_code=400, content={"errors": errors})
+    # Everything that is not an object was refused above, so this is one.
+    spec = request.spec
+    ran = execute_spec(spec, catalog)
+    if isinstance(ran, JSONResponse):
+        return ran
+    try:
+        tables = profiles(catalog)
+    except RuntimeError as failure:
+        return refused("source", failure)
+    try:
+        found = critique(spec, ran["rows"], tables, writer, constrained=constrains(writer))
+    except ModelError as failure:
+        return refused("model", failure)
+    return {"spec": spec, **found.as_dict()}
 
 
 if WEB_DIST.is_dir():
