@@ -35,7 +35,14 @@ from pydantic import BaseModel
 
 from vizmith import __version__, query
 from vizmith.ask import SCHEMA, ask
-from vizmith.catalog import DECLARED, Catalog, DatabricksCatalog, Held, Relationship
+from vizmith.catalog import (
+    DECLARED,
+    METADATA_WORKERS,
+    Catalog,
+    DatabricksCatalog,
+    Held,
+    Relationship,
+)
 from vizmith.config import state_dir
 from vizmith.critique import critique
 from vizmith.dashboards import Dashboards, Refused
@@ -175,10 +182,22 @@ def relationship_graph(catalog: Catalog) -> list[Relationship]:
     It also stops dropping join keys: a profile leaves out a column whose type the catalog
     calls unsupported, and a key of an unsupported type still joins perfectly well. What the
     interface shows is unchanged — the Data view is drawn from the profiles as before, and
-    nothing here is a row."""
+    nothing here is a row.
+
+    Describing the schema is one round trip per table, and they used to run one after
+    another, which put a schema's worth of latency in front of every drag of a column onto
+    another table: `/api/join-path` is what a drop calls, and it builds this from nothing
+    every time. They overlap now, through a pool wider than the profiler's because these are
+    metadata reads rather than statements a warehouse queues. Nothing here is cached, so a
+    graph is still built per request — see the issue on holding it.
+
+    `tables` runs first and on this thread, which is what builds the source's client before
+    the pool shares it, the same order `profiles` relies on."""
+    names = catalog.tables()
+    with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
+        described = tuple(pool.map(catalog.describe, names))
     columns = {
-        described.name: {column.name: column.type for column in described.columns}
-        for described in (catalog.describe(name) for name in catalog.tables())
+        table.name: {column.name: column.type for column in table.columns} for table in described
     }
     return graph(catalog.relationships(), suggest(columns))
 

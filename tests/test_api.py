@@ -1,5 +1,7 @@
 import json
 import re
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -631,6 +633,72 @@ def test_relationships_report_what_is_declared_and_what_is_suggested(browsing):
 
     assert kinds[f"{ORDERS}.customer_id"] == ("declared", CONFIRMED)
     assert kinds[f"{SHIPMENTS}.carrier_id"] == ("suggested", OPEN)
+
+
+class Overlapping:
+    """A source that records how many descriptions were in flight at once.
+
+    Every call waits, because a metadata read is nearly all waiting and a call that returns
+    instantly cannot show whether two of them overlapped. The wait is short enough that the
+    suite does not notice and long enough that a sequential caller cannot reach the peak a
+    concurrent one does."""
+
+    WAIT = 0.02
+
+    def __init__(self, catalog):
+        self.dialect = catalog.dialect
+        self._catalog = catalog
+        self._lock = threading.Lock()
+        self.described: list[str] = []
+        self.in_flight = 0
+        self.peak = 0
+
+    def tables(self):
+        return self._catalog.tables()
+
+    def describe(self, name):
+        with self._lock:
+            self.described.append(name)
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+        time.sleep(self.WAIT)
+        with self._lock:
+            self.in_flight -= 1
+        return self._catalog.describe(name)
+
+    def relationships(self):
+        return self._catalog.relationships()
+
+    def modified(self, name):
+        return self._catalog.modified(name)
+
+    def run(self, sql, parameters=None):
+        return self._catalog.run(sql, parameters)
+
+
+@pytest.fixture
+def overlapping(catalog, tmp_path):
+    source_ = Overlapping(catalog)
+    app.dependency_overrides[source] = lambda: source_
+    app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
+    yield TestClient(app), source_
+    app.dependency_overrides.clear()
+
+
+def test_a_join_path_describes_the_schema_without_waiting_for_one_table_at_a_time(overlapping):
+    """Resolving a join path builds the relationship graph, and building it is one round
+    trip per table. Those ran one after another, so a drop paid a schema's worth of latency
+    before the well could answer — on a hundred and fifty tables, most of a minute per drag.
+
+    What this asserts is the overlap rather than a duration: a timing assertion goes red on
+    a loaded runner for a reason nobody caused. Each table is still described exactly once,
+    because concurrency is not licence to ask twice."""
+    client, source_ = overlapping
+
+    client.get("/api/join-path", params={"left": ORDERS, "right": CUSTOMERS})
+
+    assert sorted(source_.described) == sorted(source_.tables())
+    assert source_.peak > 1, "the descriptions ran one at a time"
 
 
 def test_confirming_a_suggestion_makes_it_resolve(browsing):

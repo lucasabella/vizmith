@@ -17,6 +17,10 @@ queue, which is what the comment on `PROFILE_WORKERS` guesses at; and what a war
 made of, which is the freshness pass alone and is the floor the request-count work leaves
 behind.
 
+It also times the relationship graph, which is what a drag of a column onto another table
+waits for, in both the shape that ships and the sequential one it replaced. A pool is only
+worth what the source will answer at once, and only a workspace can say what that is.
+
 The cache lives in a directory of its own per run, so a cold measurement is cold rather
 than however the machine happened to be left.
 """
@@ -30,8 +34,9 @@ from pathlib import Path
 import pytest
 from conftest import needs_warehouse
 
-from vizmith.api import PROFILE_WORKERS
+from vizmith.api import PROFILE_WORKERS, relationship_graph
 from vizmith.profiler import Profiles
+from vizmith.relationships import graph, suggest
 
 # The widths the comment on PROFILE_WORKERS is a guess between. Eight is what ships, so it
 # is in the middle of what is measured rather than at one end of it.
@@ -129,3 +134,53 @@ def test_the_width_that_ships_is_one_of_the_widths_measured(live_catalog):
     """So the number in the comment is a row of the table above rather than a fourth
     number nobody timed."""
     assert PROFILE_WORKERS in WIDTHS
+
+
+def sequentially(catalog):
+    """The relationship graph built the way it was before the descriptions overlapped.
+
+    Kept here rather than in the application, because what it is for is the comparison: a
+    number that says the pool helped on this schema, against this workspace, rather than on
+    the model in an issue. It is the only copy of the old shape and nothing imports it."""
+    columns = {
+        described.name: {column.name: column.type for column in described.columns}
+        for described in (catalog.describe(name) for name in catalog.tables())
+    }
+    return graph(catalog.relationships(), suggest(columns))
+
+
+@needs_warehouse
+def test_what_building_the_relationship_graph_costs(live_catalog):
+    """What a drag of a column onto another table waits for.
+
+    `/api/join-path` is what a drop calls and it builds this from nothing every time, so
+    this is paid per gesture rather than once. It is one round trip per table for the
+    columns and, inside the catalog, one more per table for the declared constraints.
+
+    Both shapes are timed so the comparison is against this workspace rather than against a
+    model: the pool is only worth what the source will actually answer at once, and a
+    control plane that serialises them would show up here as two numbers that match.
+
+    Nothing is asserted about the clock. What is asserted is that the concurrent shape asks
+    for each table exactly once and agrees with the sequential one, because a faster answer
+    that differs is not the same answer."""
+    concurrent = Timed(live_catalog)
+    started = time.monotonic()
+    overlapped = relationship_graph(concurrent)
+    with_pool = time.monotonic() - started
+
+    one_at_a_time = Timed(live_catalog)
+    started = time.monotonic()
+    walked = sequentially(one_at_a_time)
+    without_pool = time.monotonic() - started
+
+    tables = len(live_catalog.tables())
+    print(
+        f"\nrelationship graph over {tables} tables: "
+        f"{with_pool:.1f}s overlapped, {without_pool:.1f}s one at a time"
+        f"\n  describe {concurrent.taken['describe']:.1f}s over {concurrent.calls['describe']} calls, "
+        f"relationships {concurrent.taken['relationships']:.1f}s"
+    )
+
+    assert overlapped == walked, "the pool changed the graph, not only how long it took"
+    assert concurrent.calls["describe"] == tables, "a table was described twice or not at all"
