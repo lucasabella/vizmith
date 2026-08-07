@@ -26,5 +26,8 @@ eval-runs/
 .vscode/
 .pytest_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+coverage/
 
 CLAUDE.md

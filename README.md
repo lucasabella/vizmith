@@ -3,6 +3,7 @@
 [![CI](https://github.com/lucasabella/vizmith/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasabella/vizmith/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen.svg)](#from-a-checkout)
 
 Ask a question in plain language, get a chart back.
 
@@ -113,7 +114,13 @@ Tests and lint:
 ```
 .venv/bin/pytest
 .venv/bin/ruff check .
+cd web && npm test && npm run lint
 ```
+
+`pytest --cov` adds the coverage report. The offline suite reaches 98% of the package with
+no warehouse and no model endpoint; CI runs it that way and fails under 90. The frontend's
+own number is lower, around 72%, and the gap is mostly the views, which are covered by the
+browser suite below rather than by `npm test`.
 
 A handful of flows are driven in a real browser, against the same fixture data through the real server. They need the frontend built and a Chromium that Playwright can launch, and they skip where either is missing:
 

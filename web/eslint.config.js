@@ -46,14 +46,11 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },
       ],
 
-      // These three are real observations about working code rather than defects, so they
-      // are visible without being a gate. `set-state-in-effect` in particular is asking
-      // for a restructure of a component that behaves correctly today, and pairing a
-      // linter's arrival with that refactor is how a linter gets reverted. They stay
-      // warnings until somebody takes them on deliberately.
+      // Asking for a restructure of a component that behaves correctly today, which is a
+      // decision rather than a defect. Warned until somebody takes it on deliberately.
+      // `use-memo` and `exhaustive-deps` were downgraded beside it and are errors again:
+      // the only code that tripped them was Table.tsx, and that is fixed.
       "react-hooks/set-state-in-effect": "warn",
-      "react-hooks/use-memo": "warn",
-      "react-hooks/exhaustive-deps": "warn",
 
       // `Chart.tsx` writes a ref during render on purpose, so a new handler or a new
       // result set does not tear the chart down and rebuild it. The rule is right in

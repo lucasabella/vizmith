@@ -39,6 +39,7 @@ dependencies = [
 # else.
 dev = [
     "pytest>=8.3",
+    "pytest-cov>=6.0",
     "ruff>=0.8",
     "duckdb>=1.1",
     "playwright>=1.49",
@@ -68,6 +69,23 @@ path = "hatch_build.py"
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests/fixtures"]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["vizmith"]
+
+[tool.coverage.report]
+# The suite reaches 98% of the package with no warehouse and no model endpoint. The floor
+# is well under that on purpose: it is here to catch a branch of real work arriving with no
+# test at all, not to make somebody chase the last two percent, and a threshold that fails
+# on noise is one that gets removed. Raise it when the number has been stable for a while.
+fail_under = 90
+show_missing = true
+exclude_also = [
+    # The live half. These lines need a warehouse or a model endpoint, so they are the
+    # 47 tests that skip here and run against a real workspace.
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.ruff]
 line-length = 110

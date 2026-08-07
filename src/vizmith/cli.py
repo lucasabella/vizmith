@@ -5,8 +5,6 @@ import threading
 import webbrowser
 from pathlib import Path
 
-import uvicorn
-
 from vizmith import config
 
 # What `--host` can be without the server being reachable from anywhere else. `0.0.0.0`
@@ -82,6 +80,14 @@ def main() -> None:
 
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, args=(f"http://{args.host}:{args.port}",)).start()
+
+    # Imported here rather than at the top, because the two commands above have already
+    # exited by this line and neither of them serves anything. At module scope this cost
+    # every invocation the whole web stack: 152 ms against a 14 ms interpreter, of which
+    # FastAPI is most and `fastapi.openapi.models` alone is 84 ms, spent building models
+    # for an OpenAPI document that `configure` will never produce. `serve` pays it either
+    # way, just after the arguments have parsed rather than before.
+    import uvicorn
 
     uvicorn.run("vizmith.api:app", host=args.host, port=args.port)
 

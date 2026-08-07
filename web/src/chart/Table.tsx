@@ -18,11 +18,13 @@ import { label, type Row } from "./option";
  * encoding names three of the columns and the query may produce more.
  */
 export default function Table({ rows }: { rows: Row[] }) {
-  const columns = Object.keys(rows[0] ?? {});
+  // Memoised for its identity rather than for its cost: reading the keys is nothing, but a
+  // fresh array every render is what made the memo below miss every time.
+  const columns = useMemo(() => Object.keys(rows[0] ?? {}), [rows]);
   // Which columns are figures, decided once for the result set. Per cell it was a walk of
   // every row for every cell drawn: at the row cap the fixtures use that is two million row
   // visits to draw one table, on every switch to this tab.
-  const figures = useMemo(() => numericColumns(rows, columns), [rows, columns.join(",")]);
+  const figures = useMemo(() => numericColumns(rows, columns), [rows, columns]);
 
   if (columns.length === 0) {
     return (

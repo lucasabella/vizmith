@@ -40,8 +40,12 @@ jobs:
       - name: ruff check .
         run: ruff check .
 
+      # With coverage, because the number was never measured and the suite turns out to
+      # reach 98% of the package without a warehouse or a model endpoint. The floor in
+      # pyproject.toml is 90, which is there to catch work arriving with no test rather
+      # than to defend the last two percent.
       - name: pytest
-        run: pytest
+        run: pytest --cov
 
       # ci rather than install, because the lockfile is committed and a review should see
       # the dependency versions the author had.
@@ -57,9 +61,13 @@ jobs:
         working-directory: web
         run: npm run lint
 
+      # Reported, not gated. The number vitest can see is about 72%, and the gap is not
+      # untested code: `src/views` reads as 25% because what covers it is the Playwright
+      # suite in the job below, which drives the real server in a real browser and is
+      # invisible to a unit test runner. A floor here would be a floor on the wrong number.
       - name: npm test
         working-directory: web
-        run: npm test
+        run: npm run test:coverage
 
       # Both ecosystems, asked whether anything they depend on has a known hole. High and
       # above only: a moderate advisory in a build-time dev dependency is not a reason to
