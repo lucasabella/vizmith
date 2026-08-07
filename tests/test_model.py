@@ -169,3 +169,19 @@ def test_the_probe_carries_the_schema_it_was_given():
 
     body = json.loads(sent[0].content)
     assert body["response_format"]["json_schema"]["schema"] == SIMPLE
+
+
+def test_the_endpoint_does_not_say_its_key_when_something_prints_it():
+    """The default dataclass repr says every field, and this is the field the rest of this
+    module spends its effort keeping quiet. Nothing prints an Endpoint today; a debugging
+    print, or a framework that renders locals when an exception passes through, is one
+    line away from undoing `_redacted` and `described` at once."""
+    assert KEY not in repr(ENDPOINT)
+    assert KEY not in str(ENDPOINT)
+
+
+def test_the_endpoint_still_says_the_things_that_help():
+    """Quiet about the key, not about everything. What is left is what identifies which
+    endpoint a failure came from."""
+    assert "endpoint.invalid" in repr(ENDPOINT)
+    assert "a-model" in repr(ENDPOINT)

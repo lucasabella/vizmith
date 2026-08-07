@@ -15,7 +15,10 @@ from test_spec_validation import EXPECTED_ERROR
 
 from vizmith.api import (
     CONFIGURATION,
+    LOOPBACK,
     MODEL_CONFIGURATION,
+    _allowed_hosts,
+    _hostname,
     answers,
     app,
     constrains,
@@ -49,7 +52,7 @@ def client(catalog):
     """The API over the fixture database, which is also what records whether a request
     reached a source at all."""
     app.dependency_overrides[source] = lambda: catalog
-    yield TestClient(app)
+    yield TestClient(app, base_url="http://127.0.0.1:8000")
     app.dependency_overrides.clear()
 
 
@@ -57,7 +60,7 @@ def test_health_reports_ok_without_a_configured_source(monkeypatch):
     for name in CONFIGURATION:
         monkeypatch.delenv(name, raising=False)
 
-    response = TestClient(app).get("/api/health")
+    response = TestClient(app, base_url="http://127.0.0.1:8000").get("/api/health")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
@@ -68,17 +71,17 @@ def test_health_reports_a_source_once_it_is_configured(monkeypatch):
     for name in CONFIGURATION:
         monkeypatch.setenv(name, "configured")
 
-    assert TestClient(app).get("/api/health").json()["source"] is True
+    assert TestClient(app, base_url="http://127.0.0.1:8000").get("/api/health").json()["source"] is True
 
 
 def test_health_reports_whether_a_model_is_configured(monkeypatch):
     for name in MODEL_CONFIGURATION:
         monkeypatch.delenv(name, raising=False)
-    assert TestClient(app).get("/api/health").json()["model"] is False
+    assert TestClient(app, base_url="http://127.0.0.1:8000").get("/api/health").json()["model"] is False
 
     for name in MODEL_CONFIGURATION:
         monkeypatch.setenv(name, "configured")
-    assert TestClient(app).get("/api/health").json()["model"] is True
+    assert TestClient(app, base_url="http://127.0.0.1:8000").get("/api/health").json()["model"] is True
 
 
 ORDERS = "vizmith.shop.orders"
@@ -106,7 +109,7 @@ def test_a_get_returns_the_profile_the_prompt_path_was_given(catalog):
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[model] = lambda: scripted
     try:
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:8000")
         client.post("/api/ask", json={"question": "revenue by country"})
         response = client.get(f"/api/tables/{ORDERS}")
     finally:
@@ -199,9 +202,9 @@ def test_a_restarted_server_does_not_profile_the_schema_again(catalog):
     over one state directory is what a restart looks like from here."""
     app.dependency_overrides[source] = lambda: catalog
     try:
-        TestClient(app).get("/api/tables")
+        TestClient(app, base_url="http://127.0.0.1:8000").get("/api/tables")
         profiled = list(catalog.statements)
-        listed = TestClient(app).get("/api/tables")
+        listed = TestClient(app, base_url="http://127.0.0.1:8000").get("/api/tables")
     finally:
         app.dependency_overrides.clear()
 
@@ -251,7 +254,7 @@ def asking(catalog):
         scripted = ScriptedModel(*answers)
         app.dependency_overrides[source] = lambda: catalog
         app.dependency_overrides[model] = lambda: scripted
-        return TestClient(app)
+        return TestClient(app, base_url="http://127.0.0.1:8000")
 
     yield client
     app.dependency_overrides.clear()
@@ -281,7 +284,7 @@ def posting(catalog):
         writer = Model(ENDPOINT, httpx.Client(transport=httpx.MockTransport(handler)))
         app.dependency_overrides[source] = lambda: catalog
         app.dependency_overrides[model] = lambda: writer
-        return TestClient(app), sent
+        return TestClient(app, base_url="http://127.0.0.1:8000"), sent
 
     yield client
     app.dependency_overrides.clear()
@@ -344,7 +347,7 @@ def refusing(catalog):
     def client(message: str):
         app.dependency_overrides[source] = lambda: RefusingCatalog(catalog, message)
         app.dependency_overrides[model] = lambda: ScriptedModel()
-        return TestClient(app)
+        return TestClient(app, base_url="http://127.0.0.1:8000")
 
     yield client
     app.dependency_overrides.clear()
@@ -358,7 +361,7 @@ def unreachable(catalog):
     writer = UnreachableModel()
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[model] = lambda: writer
-    yield TestClient(app), writer
+    yield TestClient(app, base_url="http://127.0.0.1:8000"), writer
     app.dependency_overrides.clear()
     constrains.cache_clear()
 
@@ -593,7 +596,7 @@ def test_the_api_answers_with_rows_from_the_warehouse(live_catalog):
     spec = load(REVENUE_BY_COUNTRY)
     app.dependency_overrides[source] = lambda: live_catalog
     try:
-        response = TestClient(app).post("/api/execute", json={"spec": spec})
+        response = TestClient(app, base_url="http://127.0.0.1:8000").post("/api/execute", json={"spec": spec})
     finally:
         app.dependency_overrides.clear()
 
@@ -610,7 +613,7 @@ def browsing(catalog, tmp_path):
     what the relationship endpoints write to. Nothing here reaches a home directory."""
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
-    yield TestClient(app)
+    yield TestClient(app, base_url="http://127.0.0.1:8000")
     app.dependency_overrides.clear()
 
 
@@ -681,7 +684,7 @@ def overlapping(catalog, tmp_path):
     source_ = Overlapping(catalog)
     app.dependency_overrides[source] = lambda: source_
     app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
-    yield TestClient(app), source_
+    yield TestClient(app, base_url="http://127.0.0.1:8000"), source_
     app.dependency_overrides.clear()
 
 
@@ -807,7 +810,7 @@ def keeping(catalog, tmp_path):
     have credentials."""
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[saved] = lambda: Dashboards(tmp_path / "dashboards.json")
-    yield TestClient(app)
+    yield TestClient(app, base_url="http://127.0.0.1:8000")
     app.dependency_overrides.clear()
 
 
@@ -888,7 +891,7 @@ def test_a_dashboard_is_kept_in_the_state_directory_and_nowhere_else(catalog, st
     dashboard sits beside the relationship answers instead of somewhere a test invented."""
     app.dependency_overrides[source] = lambda: catalog
     try:
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:8000")
         client.put("/api/dashboards/Revenue", json={"tiles": [{"spec": load(REVENUE_BY_COUNTRY)}]})
     finally:
         app.dependency_overrides.clear()
@@ -921,7 +924,7 @@ def unreadable(catalog, tmp_path):
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[saved] = lambda: Dashboards(tmp_path / "dashboards.json")
     app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
-    yield TestClient(app, raise_server_exceptions=False), tmp_path
+    yield TestClient(app, base_url="http://127.0.0.1:8000", raise_server_exceptions=False), tmp_path
     app.dependency_overrides.clear()
 
 
@@ -995,7 +998,7 @@ def test_a_key_of_an_unsupported_type_is_still_offered_as_a_join(catalog, tmp_pa
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
     try:
-        body = TestClient(app).get("/api/relationships").json()
+        body = TestClient(app, base_url="http://127.0.0.1:8000").get("/api/relationships").json()
     finally:
         app.dependency_overrides.clear()
         catalog.describe = described
@@ -1041,7 +1044,7 @@ UNREACHABLE = "the metastore did not answer"
 def unreachable_source(tmp_path):
     app.dependency_overrides[source] = lambda: UnreachableCatalog(UNREACHABLE)
     app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
-    yield TestClient(app)
+    yield TestClient(app, base_url="http://127.0.0.1:8000")
     app.dependency_overrides.clear()
 
 
@@ -1101,7 +1104,7 @@ def test_a_burst_of_requests_asks_when_a_table_changed_once_per_table(catalog):
     held = Held(catalog, hold=30.0, clock=lambda: 0.0)
     app.dependency_overrides[source] = lambda: held
     try:
-        browser = TestClient(app)
+        browser = TestClient(app, base_url="http://127.0.0.1:8000")
         for _ in range(4):
             browser.get("/api/tables")
     finally:
@@ -1208,7 +1211,7 @@ def test_a_critique_the_model_never_answers_says_which_part_failed(asking, catal
     app.dependency_overrides[source] = lambda: catalog
     app.dependency_overrides[model] = lambda: UnreachableModel()
 
-    response = TestClient(app).post("/api/critique", json={"spec": as_arc(SCANS_PER_LOCATION)})
+    response = TestClient(app, base_url="http://127.0.0.1:8000").post("/api/critique", json={"spec": as_arc(SCANS_PER_LOCATION)})
 
     assert response.status_code == 502
     assert response.json()["spoke"] == "model"
@@ -1227,3 +1230,113 @@ def test_a_suggestion_that_would_change_the_query_never_reaches_the_caller(askin
     assert body["spec"] is None
     assert body["findings"], "what the rule said still stands"
     assert any("does not change it" in error for error in body["errors"])
+
+
+# A page the person has open in another tab is the caller these two headers exist to
+# refuse. Nothing else on this API asks who is calling, so if these stop working, the
+# warehouse is reachable from the web and the suite should say so.
+
+
+def test_a_host_that_is_not_this_machine_is_refused(catalog):
+    """DNS rebinding arrives as a same origin request, so no CORS setting is consulted and
+    nothing downstream can tell it apart. What it cannot do is claim the name it dialled
+    was localhost, which is why the name is what gets checked."""
+    app.dependency_overrides[source] = lambda: catalog
+
+    response = TestClient(app, base_url="http://evil.example:8000").get("/api/tables")
+
+    assert response.status_code == 403
+    assert "localhost" in response.json()["errors"][0]
+
+
+def test_a_rebound_host_never_reaches_the_source(catalog):
+    """The refusal happens before the endpoint body, so a rebound page costs no statement."""
+    app.dependency_overrides[source] = lambda: catalog
+
+    TestClient(app, base_url="http://evil.example:8000").get("/api/tables")
+
+    assert catalog.statements == []
+
+
+@pytest.mark.parametrize("host", ["localhost", "127.0.0.1"])
+def test_the_names_that_mean_this_machine_are_answered(catalog, host):
+    app.dependency_overrides[source] = lambda: catalog
+
+    response = TestClient(app, base_url=f"http://{host}:8000").get("/api/tables")
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("127.0.0.1:8000", "127.0.0.1"),
+        ("localhost", "localhost"),
+        ("[::1]:8000", "::1"),
+        ("http://127.0.0.1:8000", "127.0.0.1"),
+        ("https://evil.example", "evil.example"),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_a_host_reduces_to_its_name(header, expected):
+    """Both headers go through one reader so that `[::1]:8000` and `http://[::1]:8000`
+    reduce to the same thing.
+
+    The IPv6 case is here rather than driven through a client because TestClient cannot
+    parse an IPv6 base URL, and the loopback address still has to be answered in the wild.
+    """
+    assert _hostname(header) == expected
+
+
+def test_the_origin_a_sandboxed_frame_sends_is_not_a_name_this_server_answers():
+    """`null` is a legal Origin and not a host name. It reduces to itself rather than to
+    nothing, which is harmless as long as it never matches, so assert the thing that
+    matters rather than the shape it takes on the way."""
+    assert _hostname("null") not in _allowed_hosts()
+
+
+def test_the_loopback_names_need_no_configuration():
+    assert LOOPBACK <= _allowed_hosts()
+
+
+def test_a_foreign_origin_is_refused_even_on_a_host_that_is_allowed(client):
+    """The write half. A cross site POST carrying text/plain needs no preflight and gets
+    parsed as JSON anyway, so a page that cannot read the answer can still spend money or
+    confirm a relationship. It cannot forge Origin."""
+    response = client.post(
+        "/api/relationships",
+        headers={"Origin": "https://evil.example"},
+        json={
+            "left": "orders", "left_column": "customer_id",
+            "right": "customers", "right_column": "id", "answer": CONFIRMED,
+        },
+    )
+
+    assert response.status_code == 403
+    assert "evil.example" in response.json()["errors"][0]
+
+
+def test_an_origin_of_this_machine_is_answered(client):
+    response = client.post(
+        "/api/execute",
+        headers={"Origin": "http://127.0.0.1:8000"},
+        json={"spec": load(REVENUE_BY_COUNTRY)},
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_request_with_no_origin_is_answered(client):
+    """A same origin GET does not always carry one, so absent cannot be a refusal."""
+    assert client.get("/api/tables").status_code == 200
+
+
+def test_a_named_host_is_answered_and_only_the_named_one(catalog, monkeypatch):
+    """The way out for somebody serving on a real interface on purpose. Binding elsewhere
+    does not say which name clients arrive by, so it is stated rather than inferred."""
+    app.dependency_overrides[source] = lambda: catalog
+    monkeypatch.setenv("VIZMITH_ALLOWED_HOSTS", "vizmith.internal")
+
+    assert TestClient(app, base_url="http://vizmith.internal:8000").get("/api/tables").status_code == 200
+    assert TestClient(app, base_url="http://other.internal:8000").get("/api/tables").status_code == 403

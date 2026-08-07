@@ -1,0 +1,36 @@
+Vizmith
+Copyright 2026 Luca Sabella
+
+This product includes software developed by third parties, listed below. A
+Vizmith wheel carries the built interface inside the package, so the frontend
+dependencies here are redistributed rather than merely depended on.
+
+
+--------------------------------------------------------------------------------
+Apache ECharts (https://echarts.apache.org/)
+Bundled into the interface that ships inside the wheel.
+
+  Apache ECharts
+  Copyright 2017-2026 The Apache Software Foundation
+
+  This product includes software developed at
+  The Apache Software Foundation (https://www.apache.org/).
+
+ECharts itself bundles a portion of D3, under the BSD 3-Clause licence:
+
+  Copyright 2010-2016 Mike Bostock
+  All rights reserved.
+
+
+--------------------------------------------------------------------------------
+Databricks SDK for Python (https://github.com/databricks/databricks-sdk-py)
+A runtime dependency, whose own NOTICE attributes the following:
+
+  This Software contains code from the following open source projects:
+
+  - psf/requests (Apache-2.0)
+  - googleapis/google-auth-library-python (Apache-2.0)
+  - openai/openai-python (Apache-2.0)
+  - golang.org/x/oauth2 (BSD-3-Clause)
+  - encode/httpx (BSD-3-Clause)
+  - langchain-ai/langchain (MIT)

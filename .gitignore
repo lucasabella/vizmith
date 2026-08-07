@@ -15,6 +15,10 @@ build/
 data/
 !tests/fixtures/data/
 
+# `vizmith eval` writes here by default, and a run record names the endpoint it asked.
+# That is somebody's internal URL on a machine that is not theirs to publish.
+eval-runs/
+
 .claude/
 
 .DS_Store

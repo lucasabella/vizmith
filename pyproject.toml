@@ -2,8 +2,25 @@
 name = "vizmith"
 version = "0.0.1"
 description = "Natural language question to validated chart spec, driven by database metadata"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Luca Sabella" }]
+keywords = ["visualisation", "charts", "llm", "databricks", "analytics", "sql"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database :: Front-Ends",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
@@ -26,6 +43,12 @@ dev = [
     "duckdb>=1.1",
     "playwright>=1.49",
 ]
+
+[project.urls]
+Homepage = "https://github.com/lucasabella/vizmith"
+Repository = "https://github.com/lucasabella/vizmith"
+Issues = "https://github.com/lucasabella/vizmith/issues"
+Changelog = "https://github.com/lucasabella/vizmith/commits/main/"
 
 [project.scripts]
 vizmith = "vizmith.cli:main"

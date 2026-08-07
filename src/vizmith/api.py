@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -78,6 +79,80 @@ MODEL_CONFIGURATION = (
 )
 
 app = FastAPI(title="Vizmith")
+
+# The names that mean this machine. A browser reaches the server through one of these or
+# it is not the person who started it.
+LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _allowed_hosts() -> frozenset[str]:
+    """Which host names this server will answer to.
+
+    Loopback always, and whatever `VIZMITH_ALLOWED_HOSTS` adds. That variable is the way
+    out for somebody serving on a real interface on purpose: binding elsewhere does not
+    say which name clients will use to arrive, so it cannot be inferred from `--host` and
+    has to be stated. Nothing over HTTP writes it, the same as the rest of the settings.
+    """
+    named = os.environ.get("VIZMITH_ALLOWED_HOSTS", "")
+    return LOOPBACK | frozenset(name.strip().lower() for name in named.split(",") if name.strip())
+
+
+def _hostname(value: str | None) -> str | None:
+    """The host out of a `Host` header or an `Origin`, without its port or its brackets.
+
+    Both go through `urlsplit` so that `[::1]:8000` and `http://[::1]:8000` reduce to the
+    same thing, and so an `Origin` of `null`, which is what a sandboxed frame sends, comes
+    back as nothing rather than as a name that might match one."""
+    if not value:
+        return None
+    prefix = "" if "//" in value else "//"
+    try:
+        return urlsplit(f"{prefix}{value}").hostname
+    except ValueError:
+        return None
+
+
+@app.middleware("http")
+async def only_this_machine(request: Request, call_next):
+    """Refuse anything that did not arrive addressed to this machine, by this machine.
+
+    There is no authentication on this API, and until there is, these two headers are what
+    stands between a warehouse and any page the person happens to have open in another tab.
+
+    The `Host` check is what stops DNS rebinding. Same origin policy keys on the name in
+    the URL rather than on the address it resolves to, so a page on a name that has been
+    repointed at 127.0.0.1 can read our answers as same origin, and no CORS setting is
+    consulted because nothing about it is cross origin any more. What that request cannot
+    do is claim to be addressed to `localhost`, because the browser sends the name it
+    dialled. So the name is what we check.
+
+    The `Origin` check is what stops the writes. A cross site POST carrying `text/plain`
+    is a simple request, needs no preflight, and Starlette parses the body as JSON without
+    consulting the content type, so a page that cannot read the answer can still spend a
+    warehouse bill or confirm a relationship nobody confirmed. It cannot forge `Origin`.
+    Absent is allowed, because a same origin GET does not always carry one; present and
+    foreign is refused.
+    """
+    allowed = _allowed_hosts()
+    if _hostname(request.headers.get("host")) not in allowed:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "errors": [
+                    (
+                        "This server answers only to localhost. Reach it at "
+                        "http://127.0.0.1:8000, or name the host in VIZMITH_ALLOWED_HOSTS."
+                    )
+                ]
+            },
+        )
+    origin = request.headers.get("origin")
+    if origin is not None and _hostname(origin) not in allowed:
+        return JSONResponse(
+            status_code=403,
+            content={"errors": [f"A request from {origin} is not one this server answers."]},
+        )
+    return await call_next(request)
 
 
 @app.exception_handler(Damaged)

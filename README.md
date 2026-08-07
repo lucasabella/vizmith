@@ -2,13 +2,17 @@
 
 Ask a question in plain language, get a chart back.
 
-Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees your raw rows.
+Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees a row.
 
 **Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one.
 
 ## Why metadata and not the data
 
-The LLM receives a profile of your tables, not their contents. That keeps token cost bounded, keeps results reproducible, and means the tool can pass a data governance review: no customer records leave your infrastructure through the model.
+The LLM receives a profile of your tables, not their contents. That keeps token cost bounded and keeps results reproducible. No row is ever assembled and sent, and a query's results go to the renderer rather than back into a prompt.
+
+Be precise about where that boundary sits, because it is the question a governance review will ask. A profile is per column: the name, the type, the null rate, the distinct count, and then two things that come out of the data rather than out of the schema. The extremes of an ordered column, its `min` and its `max`. And, for a column with no more distinct values than the sample threshold, currently 25, that whole set of values. So a `status` or a `category` column of eight values sends its eight values, and an `order_total` column sends its largest and its smallest. That is the boundary, it is `SAMPLE_THRESHOLD` in `profiler.py`, and nothing else widens it.
+
+What that buys is a model that can tell a country code from a currency code without guessing, which is most of what makes a spec right the first time. What it costs is that low cardinality columns leave in full. Whether that is acceptable is a question about your data and your endpoint, not one this README can answer for you, so it is stated here rather than summarised into a promise.
 
 ## Design
 
