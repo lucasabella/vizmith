@@ -16,6 +16,7 @@ that every spec the repository ships compiles and runs against it.
 import json
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from vizmith.catalog import DECLARED, SHAPES, TYPES, UNSUPPORTED
@@ -179,6 +180,29 @@ def test_every_spec_that_ships_runs_against_this_source(path, duckdb_catalog):
 
     assert rows, f"{path.stem} drew nothing"
     assert all(isinstance(row, dict) for row in rows)
+
+
+def test_a_null_is_not_one_of_a_columns_values(tmp_path):
+    """A column with few values and some nulls, which is the shape that says whether a
+    source's own aggregate drops the null or hands it over.
+
+    They disagree: Spark's `collect_set` drops it, DuckDB's `array_agg` keeps one, and
+    BigQuery's raises unless it is told to ignore them. So the profiler drops it, and the
+    three answer the same thing. It has to: a list holding a None cannot be sorted against
+    its own strings, so this was not a wrong figure but a crash, on a nullable column of
+    eight values — which is the ordinary shape of a status column."""
+    path = tmp_path / "vizmith.duckdb"
+    written = duckdb.connect(str(path))
+    written.execute("CREATE SCHEMA shop")
+    written.execute("CREATE TABLE shop.orders (status VARCHAR)")
+    written.execute("INSERT INTO shop.orders VALUES ('shipped'), (NULL), ('held'), ('shipped')")
+    written.close()
+    catalog = DuckDBCatalog(path=str(path), database="vizmith", schema="shop")
+
+    status = profile_table(catalog, "orders").columns[0]
+
+    assert status.samples == ("held", "shipped")
+    assert status.null_rate == 0.25, "the null is reported as a rate rather than as a value"
 
 
 def test_the_connection_cannot_write(duckdb_catalog):

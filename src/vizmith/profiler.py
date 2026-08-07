@@ -295,11 +295,21 @@ def _samples(catalog: Catalog, table: str, columns: list[Column], threshold: int
 
     samples = {}
     for column, values in zip(columns, collected):
+        # A null is not one of a column's values, and whether the source's own aggregate
+        # thinks so differs: Spark's collect_set drops nulls, DuckDB's array_agg keeps one,
+        # and BigQuery's raises unless it is told to ignore them. Dropping it here is what
+        # makes those three answer the same thing, and it is also what stops a list of
+        # values that holds a None from being sorted against its strings, which is a crash
+        # rather than a wrong figure. What a column's nulls are is its null rate, which is
+        # collected separately and printed beside the values in the prompt.
+        held = [value for value in values or [] if value is not None]
         # A distinct count from an approximate function can sit below the threshold while
         # the column sits above it. What came back is then raw data, and it gets dropped
-        # rather than trimmed to size, because a trimmed list still leaks values.
-        if len(values or []) <= threshold:
-            samples[column.name] = tuple(sorted(_text(value) for value in values or []))
+        # rather than trimmed to size, because a trimmed list still leaks values. Counted
+        # after the null comes out, so a column of exactly the threshold's worth of values
+        # plus a null is not refused for the one that was never a value.
+        if len(held) <= threshold:
+            samples[column.name] = tuple(sorted(_text(value) for value in held))
     return samples
 
 
