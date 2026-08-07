@@ -1,5 +1,9 @@
 # Vizmith
 
+[![CI](https://github.com/lucasabella/vizmith/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasabella/vizmith/actions/workflows/ci.yml)
+[![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+
 Ask a question in plain language, get a chart back.
 
 Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees a row.
@@ -134,6 +138,18 @@ Every question is asked of the synthetic fixture dataset, so this needs the sour
 
 `--repair` measures the critique rather than the prompt: wherever a question fails the mark layer, it asks for a suggestion and records whether the same rule accepts it, on the rows that question already fetched. A critique may only change the chart, so those rows cannot have moved, and the run counts how many refused marks it repaired.
 
+## Contributing
+
+Issues are labelled by type, area and priority, and the open ones are a fair picture of
+what is missing rather than a wish list. [ROADMAP.md](ROADMAP.md) is where the decisions
+already made are written down, including the ones that were tried and cut, which is usually
+the faster way to find out why something is the shape it is.
+
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Reporting a vulnerability: [SECURITY.md](SECURITY.md). Please use the private route
+  rather than an issue, because people run Vizmith against their own warehouses.
+
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE), and [NOTICE](NOTICE) for what travels inside a built
+wheel.
