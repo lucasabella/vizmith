@@ -150,11 +150,18 @@ def _configure(args) -> int:
 
 def _ask() -> dict[str, str]:
     """One prompt per setting, showing what is already set and keeping it on an empty
-    answer. The key is read without echoing it and is never shown back."""
+    answer. The key is read without echoing it and is never shown back.
+
+    Which settings those are depends on the kind of source, and the kind is the first
+    question, so answering it changes what is asked next: somebody setting up a local file
+    is not asked for a warehouse id to leave blank. An answer that names no kind Vizmith
+    knows is said so here rather than at the first request, and the questions that follow
+    are the ones for whatever is configured now."""
     stored = config.read()
     answers = {}
     print(f"Setting up Vizmith. Values are kept in {config.config_path()}.\n")
-    for name, why in config.SETTINGS:
+
+    for name, why in _questions(answers):
         print(why)
         if name == config.SECRET:
             answer = getpass.getpass(f"  {name} [{'set' if name in stored else 'not set'}]: ")
@@ -164,6 +171,24 @@ def _ask() -> dict[str, str]:
             answers[name] = answer.strip()
         print()
     return answers
+
+
+def _questions(answers: dict[str, str]):
+    """The settings to ask for, re-read after each answer so that naming a kind of source
+    decides what comes next. Yields at most once per setting, in the order `SETTINGS` puts
+    them in, and stops when the kind that is configured has nothing left to ask."""
+    asked: set[str] = set()
+    while True:
+        remaining = [
+            (name, why)
+            for name, why in config.asked(answers.get(config.SOURCE))
+            if name not in asked
+        ]
+        if not remaining:
+            return
+        name, why = remaining[0]
+        asked.add(name)
+        yield name, why
 
 
 def _eval(args) -> int:

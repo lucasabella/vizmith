@@ -31,21 +31,67 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
+from vizmith.sources import DEFAULT, KINDS
 from vizmith.state import hold
 
 CONFIG_FILE = "config.env"
 
 # Every name Vizmith reads, with what it is for. The order is the order `configure` asks
-# in, so the four that make a source come before the three that make an endpoint.
+# in, so the kind of source comes first, then the settings that make one of that kind, then
+# the three that make an endpoint.
+#
+# Every kind's settings are listed rather than only the chosen one's, because this is also
+# what `.env` documents and what `--show` reports, and a person switching from a warehouse
+# to a file should be able to see both halves without editing anything. What decides which
+# ones have to be filled in is `VIZMITH_SOURCE`, and `configure` asks only for those.
 SETTINGS: tuple[tuple[str, str], ...] = (
+    ("VIZMITH_SOURCE", f"Which kind of source this is: {' or '.join(sorted(KINDS))}"),
     ("VIZMITH_DATABRICKS_PROFILE", "A profile in ~/.databrickscfg, from `databricks auth login`"),
     ("VIZMITH_DATABRICKS_CATALOG", "The catalog a spec's table names resolve against"),
     ("VIZMITH_DATABRICKS_SCHEMA", "The schema a spec's table names resolve against"),
     ("VIZMITH_DATABRICKS_WAREHOUSE", "The SQL warehouse that runs the query"),
+    ("VIZMITH_DUCKDB_PATH", "The .duckdb file to read, opened read only"),
+    ("VIZMITH_DUCKDB_DATABASE", "The database inside it a spec's table names resolve against"),
+    ("VIZMITH_DUCKDB_SCHEMA", "The schema inside that database"),
     ("VIZMITH_MODEL_BASE_URL", "An OpenAI-compatible base URL, before /chat/completions"),
     ("VIZMITH_MODEL_NAME", "The model that writes a spec, or an Azure deployment name"),
     ("VIZMITH_MODEL_KEY", "The key for that endpoint. Written to a file only you can read"),
 )
+
+# The name that says which kind, and what a checkout that predates there being a choice
+# gets without setting it.
+SOURCE = "VIZMITH_SOURCE"
+
+
+def kind() -> str:
+    """Which source is configured. Read from the environment on every call rather than
+    held, because `configure` writes it and `serve` reads it in another process, and a
+    value cached at import would be the one that was set when this module was first
+    touched."""
+    return os.environ.get(SOURCE) or DEFAULT
+
+
+def source_settings() -> tuple[str, ...]:
+    """The settings the configured kind needs, or nothing where the kind is not one this
+    knows. Empty rather than raising: `/api/health` asks this to say whether a source is
+    configured, and a kind nobody recognises is a source that is not."""
+    return KINDS.get(kind(), ())
+
+
+def asked(chosen: str | None = None) -> tuple[tuple[str, str], ...]:
+    """What `configure` asks for: the kind, the settings that kind needs, and the model.
+    Not the other kinds' settings, because a person configuring a file should not be asked
+    for a warehouse id to leave blank.
+
+    `chosen` is a kind answered in this run and not yet written anywhere, which is what
+    makes the first question change the rest of them."""
+    wanted = {
+        SOURCE,
+        *KINDS.get(chosen or kind(), ()),
+        *(name for name, _ in SETTINGS if name.startswith("VIZMITH_MODEL")),
+    }
+    return tuple((name, why) for name, why in SETTINGS if name in wanted)
+
 
 # What is never printed back, whatever asked for it. A key that reaches a terminal reaches
 # a scrollback buffer and whatever is recording it.

@@ -9,25 +9,27 @@ from conftest import CATALOG, PROFILE, RECORDED, SCHEMA, WAREHOUSE, needs_wareho
 from databricks.sdk.service.catalog import TableInfo
 from databricks.sdk.service.sql import StatementState
 
-from vizmith import catalog as catalog_module
 from vizmith.catalog import (
     DECLARED,
     SHAPES,
     TIMESTAMP,
     TYPES,
     UNSUPPORTED,
-    WAIT_LIMIT,
     Column,
-    DatabricksCatalog,
     Held,
     Relationship,
     Table,
+    conform,
+)
+from vizmith.sources import databricks as databricks_module
+from vizmith.sources.databricks import (
+    WAIT_LIMIT,
+    DatabricksCatalog,
     _parameter,
     _parameter_type,
     _table,
     _type,
     _value,
-    conform,
 )
 
 # The recording is what makes the mapping testable without a workspace. Only the live
@@ -275,7 +277,7 @@ class FakeExecution:
 def waiting(monkeypatch, *states, cancel_raises=False):
     """A catalog whose statements answer with the given states, over a clock that costs
     nothing to advance. No workspace is built and no warehouse is reached."""
-    monkeypatch.setattr(catalog_module, "time", Clock())
+    monkeypatch.setattr(databricks_module, "time", Clock())
     execution = FakeExecution(*states, cancel_raises=cancel_raises)
     catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
     catalog._client = SimpleNamespace(statement_execution=execution)

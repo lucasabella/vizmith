@@ -40,16 +40,16 @@ from vizmith.catalog import (
     DECLARED,
     METADATA_WORKERS,
     Catalog,
-    DatabricksCatalog,
     Held,
     Relationship,
 )
-from vizmith.config import state_dir
+from vizmith.config import kind, source_settings, state_dir
 from vizmith.critique import critique
 from vizmith.dashboards import Dashboards, Refused
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
 from vizmith.relationships import Confirmations, graph, resolve, suggest
+from vizmith.sources import build
 from vizmith.spec import validate_spec
 from vizmith.state import Damaged
 
@@ -64,13 +64,6 @@ def _web() -> Path:
 
 
 WEB_DIST = _web()
-
-CONFIGURATION = (
-    "VIZMITH_DATABRICKS_PROFILE",
-    "VIZMITH_DATABRICKS_CATALOG",
-    "VIZMITH_DATABRICKS_SCHEMA",
-    "VIZMITH_DATABRICKS_WAREHOUSE",
-)
 
 MODEL_CONFIGURATION = (
     "VIZMITH_MODEL_BASE_URL",
@@ -174,11 +167,12 @@ def source() -> Catalog:
     Built once is also what lets `Held` mean anything: the window it holds a freshness
     answer for belongs to the source object, so a source rebuilt per request would hold
     nothing. What is held is bounded by a number in `catalog.py` rather than by the life of
-    the process, which is what the profile cache on disk exists to refuse."""
-    profile, catalog, schema, warehouse = (os.environ[name] for name in CONFIGURATION)
-    return Held(
-        DatabricksCatalog(profile=profile, catalog=catalog, schema=schema, warehouse=warehouse)
-    )
+    the process, which is what the profile cache on disk exists to refuse.
+
+    Which kind of source is configuration and never a request, which is the sentence this
+    module opens with. `sources.build` is the only place a name in a settings file becomes
+    a catalog, and it is handed the values the chosen kind asks for and no others."""
+    return Held(build(kind(), [os.environ[name] for name in source_settings()]))
 
 
 @lru_cache
@@ -329,7 +323,8 @@ def health() -> dict[str, str | bool]:
     return {
         "status": "ok",
         "version": __version__,
-        "source": all(os.environ.get(name) for name in CONFIGURATION),
+        "source": bool(source_settings()) and all(os.environ.get(name) for name in source_settings()),
+        "kind": kind(),
         "model": all(os.environ.get(name) for name in MODEL_CONFIGURATION),
     }
 

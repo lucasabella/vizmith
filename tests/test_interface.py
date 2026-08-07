@@ -31,7 +31,8 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-from vizmith.api import CONFIGURATION, MODEL_CONFIGURATION, WEB_DIST, app, constrains, model, source
+from vizmith.api import MODEL_CONFIGURATION, WEB_DIST, app, constrains, model, source
+from vizmith.config import source_settings
 from vizmith.model import Completion
 
 pytest.importorskip("playwright", reason="pip install playwright to drive the interface")
@@ -92,7 +93,7 @@ def served(fixture_db):
     # would be testing the Setup screen. The source and the model are still the overrides
     # above, so nothing here reaches a warehouse or an endpoint.
     patch = pytest.MonkeyPatch()
-    for name in (*CONFIGURATION, *MODEL_CONFIGURATION):
+    for name in (*source_settings(), *MODEL_CONFIGURATION):
         patch.setenv(name, "fixture")
 
     sock = socket.socket()

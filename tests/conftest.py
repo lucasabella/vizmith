@@ -16,13 +16,14 @@ from vizmith.catalog import (
     STRING,
     TIMESTAMP,
     Column,
-    DatabricksCatalog,
     Dialect,
     Relationship,
     Scope,
     Table,
     conform,
 )
+from vizmith.sources.databricks import DatabricksCatalog
+from vizmith.sources.duckdb import DuckDBCatalog
 
 # The same .env the serve command reads, so a workspace that is configured for running the
 # application is also configured for testing against it. Without one the live tests skip
@@ -173,6 +174,54 @@ def fixture_db():
     con = load_fixture_db()
     yield con
     con.close()
+
+
+def write_fixture_file(path):
+    """The same fixture data in a DuckDB file, with the keys the fixture schema declares
+    actually declared.
+
+    The in-memory harness above loads Parquet straight into tables, which carries no
+    constraint and reports every column nullable, so it cannot say anything about a
+    connector that reads either. This one writes the columns out with their types, their
+    nullability and their keys, and then fills them from the same committed Parquet — so
+    what `DuckDBCatalog` describes is what the fixture data actually is.
+
+    The file is named for the database inside it, because that is what DuckDB calls an
+    attached file, and it is what the two segment names in the fixture specs resolve
+    against."""
+    parents = {left: (right, key) for left, _, right, key in FOREIGN_KEYS}
+    keys = {left: column for left, column, _, _ in FOREIGN_KEYS}
+    con = duckdb.connect(str(path))
+    con.execute("CREATE SCHEMA IF NOT EXISTS shop")
+    # Parents first: DuckDB refuses a foreign key to a table that is not there yet, and
+    # the fixture's two keys both point at a table that sorts after the one declaring them.
+    for name in sorted(COLUMNS, key=lambda name: name in parents):
+        columns = [
+            f'"{column}" {type_}' + ("" if (name, column) in NULLABLE else " NOT NULL")
+            for column, type_ in COLUMNS[name]
+        ]
+        if name in parents:
+            parent, key = parents[name]
+            columns.append(f'FOREIGN KEY ("{keys[name]}") REFERENCES shop."{parent}" ("{key}")')
+        # A foreign key needs a unique column to point at, so every table declares its own
+        # primary key. That is a fact about the fixture rather than about the connector.
+        con.execute(f'CREATE TABLE shop."{name}" (PRIMARY KEY ("id"), {", ".join(columns)})')
+        con.execute(f"""INSERT INTO shop."{name}" SELECT * FROM read_parquet('{DATA_DIR / f"{name}.parquet"}')""")
+    con.close()
+    return path
+
+
+@pytest.fixture(scope="session")
+def duckdb_file(tmp_path_factory):
+    """The fixture data as a file a person could point `VIZMITH_DUCKDB_PATH` at."""
+    return write_fixture_file(tmp_path_factory.mktemp("duckdb") / "vizmith.duckdb")
+
+
+@pytest.fixture
+def duckdb_catalog(duckdb_file):
+    """The shipping DuckDB connector over that file, scoped the way the fixture specs are
+    written: a database called vizmith and a schema called shop."""
+    return DuckDBCatalog(path=str(duckdb_file), database="vizmith", schema="shop")
 
 
 @pytest.fixture(scope="session")

@@ -49,3 +49,19 @@ print(m.complete('Answer with the word ready.').text)
 If you check a row and it has moved, please update it here with the date and how you
 checked, rather than only mentioning it in an issue. A table nobody maintains is worse than
 no table, because it is believed.
+
+# Source compatibility
+
+Which sources Vizmith can be pointed at, what each one answers for the two contracts that
+have a `None` in them, and how that was checked. Same house rule as the table above: a row
+carries the date and the method, so a row that was read rather than measured says so.
+
+| Source | Namespace | Approximate distinct | Freshness token | Declared keys | Last verified | How |
+|---|---|---|---|---|---|---|
+| Databricks (Unity Catalog) | `catalog.schema.table` | `approx_count_distinct` | `DESCRIBE DETAIL`'s `lastModified`, one billed statement per table | Read where somebody declared one by hand; never enforced | July 2026 | Live workspace. `tests/fixtures/catalog/tables.json` is the recording, and the live tests check it is still true. |
+| DuckDB | `database.schema.table` | `approx_count_distinct` | **None.** The profile cache is off for this source | Read from `duckdb_constraints()`, and enforced by the engine | August 2026 | A real file, in CI. `tests/test_duckdb.py` compiles and runs every spec the repository ships against it. |
+
+`None` for a freshness token is not a gap in the connector. The protocol says a source with
+no token to give must report one, and a caller must then not cache, which `Profiles` does:
+a profile is rebuilt per read rather than stored under something that would not move when
+the data does. On a local file that costs two statements nobody bills for.

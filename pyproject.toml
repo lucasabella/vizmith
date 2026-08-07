@@ -31,6 +31,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The DuckDB source: a file on this machine rather than a warehouse. An extra rather than a
+# dependency, because somebody pointed at a lakehouse should not install a database engine
+# to read it, and the connector imports it only when it is the configured kind.
+duckdb = ["duckdb>=1.1"]
+
 # DuckDB is the test harness, not part of the product: it writes the fixture Parquet
 # and builds the local database the deterministic tests run against. httpx is not here
 # because the model adapter ships with it. Playwright drives the interface in a browser;

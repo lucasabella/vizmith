@@ -19,6 +19,9 @@ without shipping rows to somebody else's SaaS. It runs on your machine, against 
 warehouse, with a model endpoint you choose. If your data cannot leave your infrastructure,
 that constraint is the reason this exists rather than a feature bolted onto it.
 
+**To try it without a warehouse**, point it at a DuckDB file: `VIZMITH_SOURCE=duckdb` and a
+path. Same interface, same specs, no bill.
+
 **Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one.
 
 ## Why metadata and not the data
@@ -67,7 +70,7 @@ asks the endpoint with the schema it is about to send and believes the answer.
 
 ## Stack
 
-Python (FastAPI, httpx) backend, React frontend, ECharts for rendering, Databricks Unity Catalog as the connector. DuckDB is the test harness, not a source you point Vizmith at.
+Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Two sources: Databricks Unity Catalog, and DuckDB — a file on your own machine, opened read only, which is what makes this runnable without a warehouse and a bill. Both go through the same catalog interface, and the DuckDB one is what the deterministic half of the suite runs against, so it cannot rot without the suite going red.
 
 Vizmith runs on your machine and serves a browser. The frontend talks to the backend over HTTP and nothing else, which keeps a desktop build possible later without touching application code.
 
@@ -92,7 +95,7 @@ When there is a release, the first three lines collapse to `pipx install vizmith
 nothing at all with `uvx vizmith configure` and `uvx vizmith serve`. That is the plan
 rather than the present, and this file will say so when it is true.
 
-`configure` asks for the seven values and writes them to `config.env` in the state directory, readable by you and nobody else, because one of them is a key. The four `VIZMITH_DATABRICKS_` values are the source, without which a spec has nothing to run against. The three `VIZMITH_MODEL_` values are the endpoint that writes a spec from a question, and without them the question field stays disabled while a spec pasted by hand still runs. Pass them as flags instead where there is no terminal to ask in, and run `vizmith configure --show` to see where each one is coming from — it prints that and never the values.
+`configure` asks which kind of source this is and then for the values that kind needs, and writes them to `config.env` in the state directory, readable by you and nobody else, because one of them is a key. `VIZMITH_SOURCE` is `databricks` or `duckdb`; unset means Databricks, which is what shipped first. Its four `VIZMITH_DATABRICKS_` values, or DuckDB's three `VIZMITH_DUCKDB_` ones, are the source, without which a spec has nothing to run against. The three `VIZMITH_MODEL_` values are the endpoint that writes a spec from a question, and without them the question field stays disabled while a spec pasted by hand still runs. Pass them as flags instead where there is no terminal to ask in, and run `vizmith configure --show` to see where each one is coming from — it prints that and never the values.
 
 Configuration is read from three places, nearest first: a real environment variable, a `.env` found from the working directory upwards, then the file `configure` wrote. Nothing over HTTP writes any of it, so a request cannot point Vizmith at a database and the model key has no path into a browser at all.
 
