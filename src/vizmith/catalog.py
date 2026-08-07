@@ -10,6 +10,7 @@ import datetime as dt
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
@@ -63,6 +64,13 @@ SHAPES = {
 # warehouse that has to start answers pending for minutes, so this is generous rather than
 # protective; what it rules out is a wait with no end. See ROADMAP.md for the trade.
 WAIT_LIMIT = 300
+
+# How many of a source's metadata reads run at once. Wider than the profiler's pool on
+# purpose: what bounds that number is how many concurrent statements a small warehouse will
+# run, and a listing or a table description is not a statement. It is a call to the source's
+# control plane, which is nearly all waiting and which nothing bills for, so what bounds
+# this is the source's own rate limit rather than a cluster's queue.
+METADATA_WORKERS = 16
 
 
 @dataclass(frozen=True)
@@ -289,12 +297,26 @@ class DatabricksCatalog:
     def relationships(self) -> list[Relationship]:
         """The foreign keys Unity Catalog holds for the configured schema. A lakehouse
         table carries one only where somebody declared it by hand, so this is often
-        empty, and what fills the gap is a suggestion a person confirms."""
+        empty, and what fills the gap is a suggestion a person confirms.
+
+        Every table is read, because a constraint is held on the table that declares it and
+        there is nothing to ask for the set of them. That was a loop, so a schema's worth of
+        round trips happened one after another for an answer that is nearly all waiting: on
+        a hundred and fifty tables it was the larger half of every join path resolved and
+        every question asked. They overlap now.
+
+        `tables` runs first and on this thread, which is what builds the client before the
+        pool shares it."""
+        names = self.tables()
         workspace = self._workspace()
-        found = []
-        for name in self.tables():
-            for constraint in getattr(workspace.tables.get(name), "table_constraints", None) or []:
-                found.extend(_foreign_key(name, constraint))
+        with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
+            described = zip(names, pool.map(workspace.tables.get, names))
+            found = [
+                relationship
+                for name, table in described
+                for constraint in getattr(table, "table_constraints", None) or []
+                for relationship in _foreign_key(name, constraint)
+            ]
         return sorted(found)
 
     def modified(self, name: str) -> str | None:

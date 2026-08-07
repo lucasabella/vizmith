@@ -1,4 +1,5 @@
 import datetime as dt
+import threading
 import time
 from decimal import Decimal
 from types import SimpleNamespace
@@ -472,6 +473,70 @@ def test_a_statement_that_fails_inside_the_cap_still_reports_what_the_source_sai
 
     with pytest.raises(RuntimeError, match="NO_ERROR"):
         catalog.run("SELECT 1")
+
+
+class OverlappingTables:
+    """A workspace whose `tables.get` records how many calls were in flight at once.
+
+    Every call waits, because a control plane call is nearly all waiting and one that
+    returns instantly cannot show whether two of them overlapped."""
+
+    WAIT = 0.02
+
+    def __init__(self, names, constrained=()):
+        self._names = names
+        self._constrained = dict(constrained)
+        self._lock = threading.Lock()
+        self.asked: list[str] = []
+        self.in_flight = 0
+        self.peak = 0
+
+    def list(self, catalog_name, schema_name):
+        return [SimpleNamespace(full_name=name) for name in self._names]
+
+    def get(self, name):
+        with self._lock:
+            self.asked.append(name)
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+        time.sleep(self.WAIT)
+        with self._lock:
+            self.in_flight -= 1
+        return SimpleNamespace(table_constraints=self._constrained.get(name, []))
+
+
+def foreign_key(child, parent_table, parent):
+    return SimpleNamespace(
+        foreign_key_constraint=SimpleNamespace(
+            child_columns=[child], parent_table=parent_table, parent_columns=[parent]
+        )
+    )
+
+
+def test_reading_the_declared_relationships_does_not_wait_for_one_table_at_a_time():
+    """A constraint is held on the table that declares it and there is nothing to ask for
+    the set of them, so every table is read. That was a loop, which put a schema's worth of
+    round trips one after another in front of every join path resolved and every question
+    asked.
+
+    The overlap is what is asserted rather than a duration: a timing assertion goes red on a
+    loaded runner for a reason nobody caused. Every table is still read exactly once, and
+    the answer is still sorted, because a graph that renumbered between two calls would
+    renumber the answers stored against it."""
+    names = [f"{CATALOG}.{SCHEMA}.table_{n}" for n in range(24)]
+    orders, customers = names[0], names[1]
+    workspace = OverlappingTables(names, {orders: [foreign_key("customer_id", customers, "id")]})
+    catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
+    catalog._client = SimpleNamespace(tables=workspace)
+
+    found = catalog.relationships()
+
+    assert sorted(workspace.asked) == sorted(names), "a table was read twice or not at all"
+    assert workspace.peak > 1, "the tables were read one at a time"
+    assert [(r.left_table, r.left_column, r.right_table, r.right_column) for r in found] == [
+        (orders, "customer_id", customers, "id")
+    ]
+    assert found == sorted(found)
 
 
 @pytest.mark.skipif(not PROFILE, reason="set VIZMITH_DATABRICKS_PROFILE to use a workspace")
