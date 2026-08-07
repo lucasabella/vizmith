@@ -15,19 +15,19 @@
   "$defs": {
     "identifier": {
       "type": "string",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"
+      "pattern": "\\A[A-Za-z_][A-Za-z0-9_]{0,62}\\Z"
     },
 
     "table_ref": {
       "description": "One to three segments, catalog.schema.table. A source with a single namespace uses one.",
       "type": "string",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62}){0,2}$"
+      "pattern": "\\A[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62}){0,2}\\Z"
     },
 
     "column_ref": {
       "description": "An optional table reference plus a column, so at most four segments. The last segment is always the column, which is why a reference is split from the right.",
       "type": "string",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62}){0,3}$"
+      "pattern": "\\A[A-Za-z_][A-Za-z0-9_]{0,62}(\\.[A-Za-z_][A-Za-z0-9_]{0,62}){0,3}\\Z"
     },
 
     "scalar": {

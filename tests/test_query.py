@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import FixtureCatalog, needs_warehouse, shapes
+from conftest import DUCKDB, FixtureCatalog, needs_warehouse, shapes
 
 from vizmith.query import build, execute
 from vizmith.spec import output_columns
@@ -194,3 +194,44 @@ def test_a_truncated_column_carries_its_alias(catalog):
     # temporal value is an object from every catalog, and test_result_set.py is where that
     # is established for each of them.
     assert all(row["month"].day == 1 for row in rows)
+
+
+class Unreachable:
+    """A source whose client raises its own exception type, the way an SDK does for a table
+    that is gone or that this credential cannot read."""
+
+    class Denied(Exception):
+        pass
+
+    dialect = DUCKDB
+
+    def describe(self, name: str):
+        raise self.Denied(f"PERMISSION_DENIED: {name}")
+
+    def run(self, sql, parameters=None):
+        raise AssertionError("nothing should reach the source")
+
+
+def test_a_source_exception_the_handler_does_not_know_becomes_one_it_does():
+    """Every other failure on this path arrives shaped, with a spoke saying which side to
+    look at. An SDK's own type is neither ValueError nor RuntimeError, so it used to come
+    out as a bare 500 for a spec that named a table the credential cannot read."""
+    spec = json.loads((FIXTURES / "valid" / "revenue_by_country.json").read_text())
+
+    with pytest.raises(RuntimeError, match="could not describe"):
+        build(spec, Unreachable())
+
+
+def test_the_spec_is_still_the_spec_s_fault_where_it_is():
+    """ValueError passes through rather than being dressed as the source, because it
+    answers 400 and the spec is what has to change. `qualify` raises it for a name outside
+    the configured schema."""
+
+    class Outside(Unreachable):
+        def describe(self, name: str):
+            raise ValueError(f"{name} is outside the configured schema")
+
+    spec = json.loads((FIXTURES / "valid" / "revenue_by_country.json").read_text())
+
+    with pytest.raises(ValueError, match="outside the configured schema"):
+        build(spec, Outside())

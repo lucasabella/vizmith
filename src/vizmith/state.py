@@ -50,6 +50,22 @@ def stored(path: Path, key: str) -> dict:
     return written[key]
 
 
+def hold(directory: Path) -> Path:
+    """Make sure a directory that holds state exists, and that only its owner can look in.
+
+    Every state file is already written at 0600 by `mkstemp`, so the contents were never
+    the gap. The directory was: created without a mode it lands at 0755, and another
+    account on a shared machine can then list it and learn that `config.env` exists, how
+    large it is and when it last changed, which is a slower way of asking the same
+    questions. `mode` is masked by the umask rather than added to by it, so 0700 is a
+    ceiling and stays one.
+
+    An existing directory keeps whatever mode it has. Tightening one somebody else made is
+    a decision about their filesystem, and the files inside are closed either way."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return directory
+
+
 def write(path: Path, written: str) -> None:
     """Write a state file whole: beside itself, then moved onto the target.
 
@@ -57,7 +73,7 @@ def write(path: Path, written: str) -> None:
     than half of the next one, and a write that is interrupted leaves the file it had. Every
     state file goes through one of these, because the file most worth keeping whole is the
     one holding answers a person typed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    hold(path.parent)
     handle, beside = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
     try:
         with os.fdopen(handle, "w") as writing:

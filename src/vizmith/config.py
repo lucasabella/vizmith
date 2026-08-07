@@ -31,6 +31,8 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
+from vizmith.state import hold
+
 CONFIG_FILE = "config.env"
 
 # Every name Vizmith reads, with what it is for. The order is the order `configure` asks
@@ -112,7 +114,7 @@ def write(values: dict[str, str]) -> Path:
         else:
             stored[name] = value
 
-    path.parent.mkdir(parents=True, exist_ok=True)
+    hold(path.parent)
     lines = [
         "# Written by `vizmith configure`. A real environment variable and a .env in the",
         "# working directory both win over this file.",

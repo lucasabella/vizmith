@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from vizmith.catalog import DATE, DECIMAL, INTEGER, TIMESTAMP, UNSUPPORTED, Catalog, Column
+from vizmith.state import hold
 
 # A column with more distinct values than this gets no samples. Low enough that a list
 # of values still reads as a vocabulary rather than as data.
@@ -236,7 +237,7 @@ class Profiles:
             written = json.dumps(
                 {"version": CACHE_VERSION, "profiles": self._stored}, indent=2, sort_keys=True
             )
-            self._path.parent.mkdir(parents=True, exist_ok=True)
+            hold(self._path.parent)
             # Written beside the file and moved onto it, because a reader arriving while a
             # table is being stored should find the last whole file rather than the first
             # half of the next one. The name beside it is unique per write, since a second
