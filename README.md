@@ -7,6 +7,12 @@
 
 Ask a question in plain language, get a chart back.
 
+![The Chart view: a stacked bar of revenue per country by product category, the wells that
+built it, and the Fields panel listing every table with its row count](docs/vizmith.png)
+
+*Drawn by `docs/screenshot.py` against the committed fixture data, so it is a real query
+over real rows. They are just invented rows.*
+
 Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees a row.
 
 **Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one.
@@ -131,6 +137,13 @@ cd web && npm run build && cd ..
 ```
 
 Set `VIZMITH_CHROMIUM` to a browser's path where one is already installed and Playwright's own copy is not it. These cover what crosses a view, a reload or a repaint, which is what a static render cannot reach; everything else about the interface is tested by `npm test`.
+
+The screenshot at the top of this file is taken by the same machinery, so a change to the
+interface can be shown rather than described:
+
+```
+.venv/bin/python docs/screenshot.py
+```
 
 The suite runs offline against DuckDB. With a profile and a warehouse in `.env` it also compiles and runs every fixture spec against the workspace, through the query builder and through the HTTP API. Without one those tests skip.
 
