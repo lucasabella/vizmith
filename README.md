@@ -7,13 +7,17 @@
 
 Ask a question in plain language, get a chart back.
 
-![The Chart view: a stacked bar of revenue per country by product category, the wells that
-built it, and the Fields panel listing every table with its row count](docs/vizmith.png)
+![The Chart view: a stacked bar of revenue per country by product category, the wells that built it, and the Fields panel listing every table with its row count](docs/vizmith.png)
 
 *Drawn by `docs/screenshot.py` against the committed fixture data, so it is a real query
 over real rows. They are just invented rows.*
 
 Vizmith connects to a database or lakehouse, reads its **metadata** (schemas, column types, cardinality, null rates, value ranges), and uses an LLM to turn a natural language question into a validated visualisation spec. A deterministic renderer draws the chart. The LLM never renders anything and never sees a row.
+
+**Who it is for.** Data and analytics engineers on Databricks who want self-serve charts
+without shipping rows to somebody else's SaaS. It runs on your machine, against your
+warehouse, with a model endpoint you choose. If your data cannot leave your infrastructure,
+that constraint is the reason this exists rather than a feature bolted onto it.
 
 **Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one.
 
@@ -53,27 +57,13 @@ A dashboard is the last of those bullets: several specs saved under a name, in t
 
 Vizmith targets the OpenAI-compatible `base_url` convention, so one adapter covers hosted providers, Azure OpenAI, Ollama, vLLM and LM Studio. You supply the key and the endpoint. Vizmith ships with no model access of its own.
 
-A compatible base URL does not mean a compatible feature set. Vizmith asks the model for a chart spec constrained to a JSON Schema, and support for that differs. It is also not one capability: an endpoint accepts a schema or refuses it, and OpenAI does both depending on which schema it is, because its structured output covers a subset of JSON Schema. Vizmith's spec schema is outside that subset, so it is refused there and the question is asked in prose with the schema in the prompt instead. Checked against each vendor's documentation in July 2026, not against a running instance except where stated:
+A compatible base URL does not mean a compatible feature set. Vizmith asks the model for a chart spec constrained to a JSON Schema, and support for that differs: an endpoint accepts a schema or refuses it, and OpenAI does both depending on which schema it is. Where the schema is refused, the question is asked in prose with the schema in the prompt instead.
 
-| Endpoint | JSON Schema response format | Notes |
-|---|---|---|
-| OpenAI | Not for this schema | `response_format` with `strict: true` is accepted, and covers a subset of JSON Schema that Vizmith's spec schema sits outside of: a live endpoint, `gpt-5.6-luna`, answered `400 'if' is not permitted` on 31 July 2026. Questions there are asked in prose. |
-| Azure OpenAI | Not for this schema | Only through the `/openai/v1/` base URL, which takes a plain bearer key. `model` is the deployment name, not the model name. Same structured output implementation as OpenAI, so the same subset applies. Not measured. |
-| vLLM | Yes | 0.8.5 and later. The older `guided_json` parameter is deprecated in favour of `response_format`. |
-| LM Studio | Yes | `json_schema` only, no `json_object` mode. |
-| Ollama | No | Its OpenAI-compatible route takes a `format` parameter instead, so the schema is refused here. |
-
-None of these were verified against a live endpoint in this repository, because the test suite makes no model calls. The adapter therefore asks rather than assumes: `Model.constrains_output(schema)` sends one request carrying the schema the caller is about to use and reports what the endpoint did with it. It takes the schema rather than owning one, because an answer about a simpler schema than the one being sent is an answer to a different question. The server asks it once, on the first question, so nothing here is configuration and an endpoint that changes needs a restart to be noticed. Smoke check a real endpoint before trusting the table:
-
-```
-.venv/bin/python -c "
-from vizmith.model import Endpoint, Model
-from vizmith.ask import SCHEMA
-m = Model(Endpoint(base_url='https://api.example.com/v1', model='a-model', api_key='YOUR-KEY'))
-print('schema constrained:', m.constrains_output(SCHEMA))
-print(m.complete('Answer with the word ready.').text)
-"
-```
+Which endpoints do what, when each was last checked and how, is in
+**[docs/compatibility.md](docs/compatibility.md)**. It is kept there rather than here
+because it rots on a schedule nobody sets, and a dated row is the only honest way to carry
+it. The adapter does not rely on that table in any case: `Model.constrains_output(schema)`
+asks the endpoint with the schema it is about to send and believes the answer.
 
 ## Stack
 
@@ -83,14 +73,24 @@ Vizmith runs on your machine and serves a browser. The frontend talks to the bac
 
 ## Running it
 
+There is no PyPI release yet, so installing means building the wheel. That needs Node,
+because the interface is built into the package:
+
 ```
-uvx vizmith configure
-uvx vizmith serve
+git clone https://github.com/lucasabella/vizmith && cd vizmith
+python -m build
+pipx install dist/vizmith-*.whl
+
+vizmith configure
+vizmith serve
 ```
 
-Or `pipx install vizmith` for the same two commands without the `uvx`. The wheel carries the built interface, so that is the whole of it: `serve` starts the API on port 8000 and opens a browser.
+`serve` starts the API on port 8000 and opens a browser. The wheel carries the built
+interface, so nothing else has to be running.
 
-There is no release on PyPI yet, so until there is, those two commands need a wheel you built: `python -m build` in a checkout, which needs Node because the interface is built into the wheel, then `pipx install dist/vizmith-*.whl`. Everything after that is the same.
+When there is a release, the first three lines collapse to `pipx install vizmith`, or to
+nothing at all with `uvx vizmith configure` and `uvx vizmith serve`. That is the plan
+rather than the present, and this file will say so when it is true.
 
 `configure` asks for the seven values and writes them to `config.env` in the state directory, readable by you and nobody else, because one of them is a key. The four `VIZMITH_DATABRICKS_` values are the source, without which a spec has nothing to run against. The three `VIZMITH_MODEL_` values are the endpoint that writes a spec from a question, and without them the question field stays disabled while a spec pasted by hand still runs. Pass them as flags instead where there is no terminal to ask in, and run `vizmith configure --show` to see where each one is coming from — it prints that and never the values.
 
