@@ -60,6 +60,8 @@ SETTINGS: tuple[tuple[str, str], ...] = (
     ("VIZMITH_SNOWFLAKE_DATABASE", "The database a spec's table names resolve against"),
     ("VIZMITH_SNOWFLAKE_SCHEMA", "The schema a spec's table names resolve against"),
     ("VIZMITH_SNOWFLAKE_WAREHOUSE", "The warehouse that runs the query"),
+    ("VIZMITH_POSTGRES_SERVICE", "A service in ~/.pg_service.conf. Empty to use the PG* environment"),
+    ("VIZMITH_POSTGRES_SCHEMA", "The schema a spec's table names resolve against"),
     ("VIZMITH_MODEL_BASE_URL", "An OpenAI-compatible base URL, before /chat/completions"),
     ("VIZMITH_MODEL_NAME", "The model that writes a spec, or an Azure deployment name"),
     ("VIZMITH_MODEL_KEY", "The key for that endpoint. Written to a file only you can read"),

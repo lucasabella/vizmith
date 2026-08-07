@@ -55,10 +55,6 @@ export default function Data() {
     );
   }
 
-  const suggested = relationships.filter((r) => r.kind === "suggested" && r.state === "open");
-  const confirmed = relationships.filter((r) => r.kind === "suggested" && r.state === "confirmed");
-  const declared = relationships.filter((r) => r.kind === "declared");
-
   return (
     <div className="data">
       <h1 className="data__head">Relationships</h1>
@@ -67,12 +63,48 @@ export default function Data() {
         them. Only what is confirmed here is used, because a wrong join produces a plausible
         number rather than an error.
       </p>
+      <Sections relationships={relationships} working={working} onAnswer={answer} />
+    </div>
+  );
+}
 
+/**
+ * The three sections, given what is known.
+ *
+ * Split out from the view because what they say depends on the source and the sources
+ * differ: a lakehouse declares almost nothing, so the suggestions are the screen, while
+ * PostgreSQL declares and enforces its keys, so a well designed schema arrives with nothing
+ * to ask. That second case read as broken — two sections saying nothing is here, above a
+ * long list of facts — and it is the good case.
+ */
+export function Sections({
+  relationships,
+  working,
+  onAnswer,
+}: {
+  relationships: Relationship[];
+  working: string | null;
+  onAnswer: (relationship: Relationship, said: "confirmed" | "rejected" | "open") => void;
+}) {
+  const suggested = relationships.filter((r) => r.kind === "suggested" && r.state === "open");
+  const confirmed = relationships.filter((r) => r.kind === "suggested" && r.state === "confirmed");
+  const declared = relationships.filter((r) => r.kind === "declared");
+  // The source has answered its own question: it declares keys and nothing was inferred
+  // that is still open. Saying "you have not confirmed a suggestion yet" to somebody who
+  // was never offered one describes them rather than the schema.
+  const answered = declared.length > 0 && suggested.length === 0 && confirmed.length === 0;
+
+  return (
+    <>
       <Section
         title="Suggested"
         word="Suggested"
         note="Read from column names and types. Nothing uses these until you say so."
-        empty="Nothing is waiting for an answer."
+        empty={
+          answered
+            ? "Nothing is waiting for an answer. This source declares its own keys, so there was nothing left to guess at."
+            : "Nothing is waiting for an answer."
+        }
         relationships={suggested}
       >
         {(relationship) => (
@@ -80,14 +112,14 @@ export default function Data() {
             <button
               className="btn btn--small"
               disabled={working === key(relationship)}
-              onClick={() => answer(relationship, "confirmed")}
+              onClick={() => onAnswer(relationship, "confirmed")}
             >
               Confirm
             </button>
             <button
               className="btn btn--quiet"
               disabled={working === key(relationship)}
-              onClick={() => answer(relationship, "rejected")}
+              onClick={() => onAnswer(relationship, "rejected")}
             >
               Not a match
             </button>
@@ -99,14 +131,18 @@ export default function Data() {
         title="Confirmed"
         word="Confirmed"
         note="Suggestions you agreed with. A join path may be resolved through these."
-        empty="You have not confirmed a suggestion yet."
+        empty={
+          answered
+            ? "Nothing to confirm. Every relationship below is one the source states for itself."
+            : "You have not confirmed a suggestion yet."
+        }
         relationships={confirmed}
       >
         {(relationship) => (
           <button
             className="btn btn--quiet"
             disabled={working === key(relationship)}
-            onClick={() => answer(relationship, "open")}
+            onClick={() => onAnswer(relationship, "open")}
           >
             Un-confirm
           </button>
@@ -120,7 +156,7 @@ export default function Data() {
         empty="The source declares no foreign keys, which is usual for a lakehouse."
         relationships={declared}
       />
-    </div>
+    </>
   );
 }
 
