@@ -60,6 +60,13 @@ carries the date and the method, so a row that was read rather than measured say
 |---|---|---|---|---|---|---|
 | Databricks (Unity Catalog) | `catalog.schema.table` | `approx_count_distinct` | `DESCRIBE DETAIL`'s `lastModified`, one billed statement per table | Read where somebody declared one by hand; never enforced | July 2026 | Live workspace. `tests/fixtures/catalog/tables.json` is the recording, and the live tests check it is still true. |
 | DuckDB | `database.schema.table` | `approx_count_distinct` | **None.** The profile cache is off for this source | Read from `duckdb_constraints()`, and enforced by the engine | August 2026 | A real file, in CI. `tests/test_duckdb.py` compiles and runs every spec the repository ships against it. |
+| BigQuery | `project.dataset.table` | `APPROX_COUNT_DISTINCT` | **None**, pending a measurement. `__TABLES__.last_modified_time` is the candidate and the streaming buffer is why it is not trusted yet | Read from `INFORMATION_SCHEMA`, declared and unenforced | August 2026 | **Never run against a project.** Vendor documentation, plus deterministic tests against a fake client using the real client library's own parameter types. The live half of `tests/test_bigquery.py` is written and skips without `VIZMITH_BIGQUERY_PROJECT`. |
+
+Two rows say `None` for a freshness token and they do not mean the same thing. DuckDB has
+nothing to offer and that is settled. BigQuery has a candidate that nobody has measured, and
+until somebody does, the connector reports `None` rather than a token that mostly moves —
+`tests/test_bigquery.py::test_whether_the_modified_time_moves_when_the_data_changes` is the
+measurement, and it needs a project.
 
 `None` for a freshness token is not a gap in the connector. The protocol says a source with
 no token to give must report one, and a caller must then not cache, which `Profiles` does:

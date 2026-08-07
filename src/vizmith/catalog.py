@@ -162,6 +162,12 @@ class Scope:
         return ".".join(qualified)
 
 
+# How a column is truncated to a unit where a source spells it the way most of them do:
+# the unit first and quoted, the column second. It is the default rather than the only
+# spelling, which is what `truncate` below is for.
+DATE_TRUNC = "date_trunc('{unit}', {column})"
+
+
 @dataclass(frozen=True)
 class Dialect:
     """The parts of a source's SQL that differ between sources, so that everything above
@@ -170,12 +176,21 @@ class Dialect:
     here and `array_agg(DISTINCT c)` there. `approx_distinct` is None for a source that
     offers no approximate count, and a caller then pays for an exact one. `parameter` is
     how a bound value is referred to in a statement, named rather than positional because
-    Unity Catalog's statement execution takes named markers only."""
+    Unity Catalog's statement execution takes named markers only.
+
+    `truncate` is the newest of them and the one that says the record is the right shape.
+    The builder used to write `date_trunc('month', c)` into the statement itself, which is
+    two sources' spelling stated as though it were every source's: BigQuery reverses the
+    arguments and takes the unit as a bare keyword. A template covers that, and the reason
+    a unit is written into the statement rather than bound has not changed — it is one of
+    the grammar's own keywords rather than a value, and a source would need it foldable at
+    plan time either way."""
 
     quote: str
     approx_distinct: str | None
     distinct_values: str
     parameter: str
+    truncate: str = DATE_TRUNC
 
     def quoted(self, identifier: str) -> str:
         return f"{self.quote}{identifier.replace(self.quote, self.quote * 2)}{self.quote}"
