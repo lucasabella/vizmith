@@ -58,10 +58,30 @@ class _Builder:
         # Keyed by the reference as the spec wrote it, because that is what a column
         # qualifier is matched against, and valued with what the source calls the table.
         self._tables = {
-            reference: catalog.describe(reference).name
+            reference: self._describe(catalog, reference).name
             for reference in [query["from"], *(join["table"] for join in query.get("joins", []))]
         }
         self._parameters: dict[str, object] = {}
+
+    @staticmethod
+    def _describe(catalog: Catalog, reference: str):
+        """The source's word on one table, with its own exception types translated.
+
+        A source client raises whatever it likes. The SDK's not-found and permission-denied
+        are neither `ValueError` nor `RuntimeError`, so a spec naming a table that is gone,
+        or one this credential cannot read, came out of here as a bare 500 while every
+        other failure came out shaped, with a `spoke` saying which side to look at. The
+        request was well formed and something behind the server refused it, which is what
+        `RuntimeError` already means everywhere else on this path.
+
+        `ValueError` passes through untouched: it is the spec's own fault, it answers 400,
+        and `qualify` raises it for a name outside the configured schema."""
+        try:
+            return catalog.describe(reference)
+        except ValueError:
+            raise
+        except Exception as failure:
+            raise RuntimeError(f"the source could not describe {reference}: {failure}") from failure
 
     def build(self) -> tuple[str, dict]:
         query = self._query

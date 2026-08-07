@@ -1,0 +1,62 @@
+name: Bug report
+description: Something behaves differently from what it says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If what you have found would let somebody reach data they should not, please do
+        not file it here. See [SECURITY.md](../blob/main/SECURITY.md) for the private
+        route, because a public issue tells everyone running Vizmith at once.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, and what came back.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec
+    attributes:
+      label: The spec, if there was one
+      description: >
+        The whole spec, if a chart is involved. It is the artefact the whole design is
+        built around and it is usually the fastest way to reproduce something. Take out
+        anything you would not want public: table and column names travel in it.
+      render: json
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`vizmith --version`, or the commit you are on."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you are running it
+      options:
+        - An installed wheel
+        - A checkout, editable install
+        - A checkout, with Vite alongside
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model endpoint
+      description: >
+        Which kind, if the model is involved. vLLM, Ollama, OpenAI, LM Studio, something
+        else. Not the URL and never the key.

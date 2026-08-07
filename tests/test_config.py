@@ -189,3 +189,15 @@ def test_re_writing_keeps_what_was_not_mentioned(elsewhere):
 
     assert config.read() == {PROFILE: "other", KEY: "sekrit"}
     assert stat.S_IMODE(config.config_path().stat().st_mode) == 0o600
+
+
+def test_the_state_directory_is_the_owner_s_and_nobody_else_s(tmp_path, monkeypatch):
+    """The files inside were always 0600, because mkstemp makes them that way whatever the
+    umask is. The directory was not: created without a mode it lands at 0755, and another
+    account on a shared machine can then list it and learn that config.env exists, how
+    large it is and when it last changed."""
+    monkeypatch.setenv("VIZMITH_STATE_DIR", str(tmp_path / "state"))
+
+    config.write({"VIZMITH_MODEL_KEY": "not-a-real-key"})
+
+    assert stat.S_IMODE((tmp_path / "state").stat().st_mode) == 0o700

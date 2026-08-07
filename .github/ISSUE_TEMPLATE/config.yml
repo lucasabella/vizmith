@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/lucasabella/vizmith/security/advisories/new
+    about: >
+      Anything that would let somebody reach data they should not. Private, because people
+      run Vizmith against their own warehouses.

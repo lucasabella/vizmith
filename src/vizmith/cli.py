@@ -5,9 +5,12 @@ import threading
 import webbrowser
 from pathlib import Path
 
-import uvicorn
-
 from vizmith import config
+
+# What `--host` can be without the server being reachable from anywhere else. `0.0.0.0`
+# and `::` are absent on purpose: they are every interface, which is the case this warns
+# about.
+BOUND_TO_THIS_MACHINE = frozenset({"127.0.0.1", "localhost", "::1"})
 
 # The question set is a fixture rather than something the package ships: it asks about the
 # synthetic dataset and about nothing else, so it only means anything in a checkout. A
@@ -73,10 +76,39 @@ def main() -> None:
     if args.command == "eval":
         sys.exit(_eval(args))
 
+    _warn_if_not_loopback(args.host)
+
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, args=(f"http://{args.host}:{args.port}",)).start()
 
+    # Imported here rather than at the top, because the two commands above have already
+    # exited by this line and neither of them serves anything. At module scope this cost
+    # every invocation the whole web stack: 152 ms against a 14 ms interpreter, of which
+    # FastAPI is most and `fastapi.openapi.models` alone is 84 ms, spent building models
+    # for an OpenAPI document that `configure` will never produce. `serve` pays it either
+    # way, just after the arguments have parsed rather than before.
+    import uvicorn
+
     uvicorn.run("vizmith.api:app", host=args.host, port=args.port)
+
+
+def _warn_if_not_loopback(host: str) -> None:
+    """Say something when the server is bound somewhere a stranger can reach.
+
+    There is no authentication on this API. The server still refuses a request that did not
+    arrive addressed to a name it knows, so binding wide does not by itself open it, but a
+    person who binds wide is usually about to add the name too, and should hear once what
+    that combination is before they do."""
+    if host in BOUND_TO_THIS_MACHINE:
+        return
+
+    print(
+        f"warning: serving on {host}, which is not loopback. This API has no "
+        "authentication, and requests are refused unless the host they name is in "
+        "VIZMITH_ALLOWED_HOSTS. Setting that on a reachable interface puts the "
+        "warehouse behind it within reach of anyone who can route to this machine.",
+        file=sys.stderr,
+    )
 
 
 def _configure(args) -> int:

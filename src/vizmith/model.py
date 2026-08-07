@@ -20,7 +20,7 @@ otherwise put the key in a stack trace.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -36,7 +36,11 @@ class Endpoint:
 
     base_url: str
     model: str
-    api_key: str
+    # Out of the repr, because the default one says every field and this is the field the
+    # rest of this module spends its effort keeping quiet. A print while debugging, or a
+    # framework that renders locals when an exception passes through, would otherwise
+    # undo `_redacted` and `described` in one line.
+    api_key: str = field(repr=False)
     timeout: float = 60.0
 
 

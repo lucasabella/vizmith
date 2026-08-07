@@ -35,6 +35,7 @@ from vizmith.model import Model, ModelError
 from vizmith.profiler import TableProfile
 from vizmith.relevance import select
 from vizmith.spec import output_columns
+from vizmith.state import hold
 
 VALIDATES = "validates"
 REFERENCES = "references"
@@ -181,7 +182,7 @@ class Cache:
         written = json.dumps(
             {"version": CACHE_VERSION, "answers": self._answers}, indent=2, sort_keys=True
         )
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        hold(self._path.parent)
         # Written beside the file and moved onto it, so a run interrupted halfway leaves the
         # last whole file rather than the first half of the next one.
         handle, beside = tempfile.mkstemp(dir=self._path.parent, prefix=self._path.name + ".")
@@ -246,7 +247,7 @@ def write(record: Run, directory: Path) -> Path:
     """The run, in a file named for when it ran. Sorted keys and one question per entry,
     because the value of a run record is the diff against the last one."""
     directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
+    hold(directory)
     path = directory / f"{record.at.replace(':', '').replace('-', '')}.json"
     path.write_text(json.dumps(record.as_dict(), indent=2, sort_keys=True) + "\n")
     return path

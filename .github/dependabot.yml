@@ -1,0 +1,32 @@
+# Both ecosystems and the workflow file itself. Monthly rather than weekly, because this
+# is a small dependency tree with one maintainer, and a pull request nobody has time to
+# read is worse than a slightly older dependency.
+#
+# The actions ecosystem is here to keep pinned SHAs current once they are pinned. Pinning
+# without this is freezing, and a frozen action is its own problem.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      frontend:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

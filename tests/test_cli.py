@@ -6,6 +6,7 @@ opens a browser, reaches a model or reaches a warehouse: what is being pinned do
 the command does with its arguments, what it prints, and what it exits with.
 """
 
+import subprocess
 import sys
 
 import pytest
@@ -117,7 +118,7 @@ def test_eval_with_no_question_set_names_the_path_it_looked_at(monkeypatch, caps
 
 def test_serve_starts_the_application_on_the_host_and_port_it_was_given(monkeypatch):
     started = {}
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kwargs: started.update(app=app, **kwargs))
+    monkeypatch.setattr("uvicorn.run", lambda app, **kwargs: started.update(app=app, **kwargs))
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: pytest.fail("a test opened a browser"))
 
     monkeypatch.setattr(sys, "argv", ["vizmith", "serve", "--port", "9123", "--no-browser"])
@@ -131,7 +132,7 @@ def test_serve_opens_the_browser_at_the_address_it_is_serving(monkeypatch):
     them read a log. The timer is what waits for the server rather than a sleep in the
     request path, and this asserts what it was told to open rather than opening it."""
     timers = []
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kwargs: None)
+    monkeypatch.setattr("uvicorn.run", lambda app, **kwargs: None)
     monkeypatch.setattr(
         cli.threading, "Timer", lambda delay, target, args: timers.append((delay, target, args)) or _Idle()
     )
@@ -156,3 +157,23 @@ def test_a_command_is_required(monkeypatch, capsys):
     own message lists the commands."""
     assert run(monkeypatch, "") == 2
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_a_command_that_never_serves_does_not_import_a_server():
+    """`configure` and `eval` exit before the line that serves, so neither should pay for
+    the web stack to get there. At module scope that was 152 ms against a 14 ms
+    interpreter, most of it FastAPI, building models for an OpenAPI document `configure`
+    will never produce.
+
+    Run in a subprocess because this process has already imported the world: pytest
+    collected `test_api.py`, so `sys.modules` here says nothing about what `cli` pulls in
+    on its own."""
+    probe = (
+        "import sys, vizmith.cli;"
+        "print('uvicorn' in sys.modules, 'fastapi' in sys.modules)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+
+    assert result.stdout.strip() == "False False", "importing the command pulled in a server"

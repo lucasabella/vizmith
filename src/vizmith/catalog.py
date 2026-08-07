@@ -393,8 +393,32 @@ class DatabricksCatalog:
         ]
 
     def qualify(self, name: str) -> str:
+        """A spec's table name as the source spells it, refusing anything outside the
+        configured pair.
+
+        A one or two segment name gets the configured catalog and schema put in front of it
+        and cannot be anywhere else. A three segment name names them itself, and used to be
+        taken at its word, which meant the two settings described where short names resolve
+        rather than where a spec may read. Those are different promises, and the second one
+        is the one `api.py` makes when it says a client cannot name a database: a spec is
+        hand editable by design, so whatever the credential could reach was reachable by
+        spelling it out in full.
+
+        The reach of the credential is not the scope of the tool. Refuse here, once, where
+        every path that turns a spec's name into the source's name goes through."""
         segments = name.split(".")
-        return ".".join([self._catalog, self._schema][: 3 - len(segments)] + segments)
+        if len(segments) > 3:
+            raise ValueError(f"{name} is not a table name: at most catalog.schema.table")
+
+        qualified = [self._catalog, self._schema][: 3 - len(segments)] + segments
+        catalog, schema = qualified[0], qualified[1]
+        if (catalog, schema) != (self._catalog, self._schema):
+            raise ValueError(
+                f"{name} is outside the configured schema. This server reads "
+                f"{self._catalog}.{self._schema}, and where a spec may read is "
+                "configuration rather than something a spec chooses."
+            )
+        return ".".join(qualified)
 
     def _workspace(self):
         if self._client is None:

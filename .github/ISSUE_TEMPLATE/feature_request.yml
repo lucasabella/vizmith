@@ -1,0 +1,28 @@
+name: Feature request
+description: Something Vizmith cannot do that you want it to.
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What you were trying to find out
+      description: >
+        The question you wanted a chart to answer, rather than the control you think would
+        answer it. Most of this project's grammar gaps were found this way, and the
+        question usually says more about the shape of the fix than the proposal does.
+    validations:
+      required: true
+
+  - type: textarea
+    id: stops
+    attributes:
+      label: Where it stops today
+      description: What Vizmith does instead. A refusal message, a wrong chart, or nothing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: What you think it would take
+      description: Optional. A guess is fine, and so is leaving this empty.
