@@ -59,6 +59,7 @@ class Timed:
     def __init__(self, catalog):
         self._catalog = catalog
         self.dialect = catalog.dialect
+        self.scope = catalog.scope
         self.taken: Counter[str] = Counter()
         self.calls: Counter[str] = Counter()
 

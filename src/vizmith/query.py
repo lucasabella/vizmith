@@ -65,7 +65,17 @@ class _Builder:
 
     @staticmethod
     def _describe(catalog: Catalog, reference: str):
-        """The source's word on one table, with its own exception types translated.
+        """The source's word on one table, resolved against the configured scope first and
+        with the source's own exception types translated.
+
+        The scope is applied here rather than trusted to the source. Every reference in a
+        spec passes through this method, and a spec is the one name in the system that came
+        from outside: `api.py` promises that a client cannot name a database, and until now
+        that promise was kept by `DatabricksCatalog.describe` happening to call its own
+        `qualify` on the way in. It was not on the protocol, no test asked a catalog to
+        refuse anything, and the second implementation in the repository — the fixture
+        catalog the whole suite runs against — quietly rewrote an out-of-scope name to an
+        in-scope one instead. So the refusal is above the source now, where the promise is.
 
         A source client raises whatever it likes. The SDK's not-found and permission-denied
         are neither `ValueError` nor `RuntimeError`, so a spec naming a table that is gone,
@@ -74,10 +84,11 @@ class _Builder:
         request was well formed and something behind the server refused it, which is what
         `RuntimeError` already means everywhere else on this path.
 
-        `ValueError` passes through untouched: it is the spec's own fault, it answers 400,
-        and `qualify` raises it for a name outside the configured schema."""
+        `ValueError` passes through untouched: it is the spec's own fault and it answers
+        400, which is what the scope raises for a name outside what this server reads."""
+        name = catalog.scope.qualify(reference)
         try:
-            return catalog.describe(reference)
+            return catalog.describe(name)
         except ValueError:
             raise
         except Exception as failure:

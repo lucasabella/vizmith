@@ -123,6 +123,49 @@ class Table:
 
 
 @dataclass(frozen=True)
+class Scope:
+    """Where a spec's table names resolve, and the only place a spec may read.
+
+    Two halves, and they are not the same promise. Filling in is a convenience: a spec may
+    name a table with fewer segments than the source uses, and the configured values are
+    what the missing ones are. Refusing is a boundary: a spec is hand editable by design,
+    so a name spelled out in full used to be taken at its word, which made the settings
+    describe where short names resolve rather than where a spec may read. Those are
+    different sentences, and the second one is what `api.py` means when it says a client
+    cannot name a database. The reach of the credential is not the scope of the tool.
+
+    It lives here, on a record every catalog carries, rather than inside one catalog's
+    method, because the rule is not the source's to keep. `query.py` resolves a spec's
+    every reference through this before a name reaches the source, so a connector that
+    never learned about the rule cannot be pointed outside it by a spec.
+
+    `levels` is what the source calls the segments in front of a table — a catalog and a
+    schema here, a project and a dataset on BigQuery, a schema alone on PostgreSQL — and
+    it is carried only so that a refusal reads in the source's own words. `values` is what
+    is configured, and it is the whole of what a name is checked against."""
+
+    levels: tuple[str, ...]
+    values: tuple[str, ...]
+
+    def qualify(self, name: str) -> str:
+        """The name as the source spells it, refusing anything outside the configured
+        values. Raises `ValueError`, which is the spec's own fault and answers 400."""
+        segments = name.split(".")
+        spelled = ".".join([*self.levels, "table"])
+        if len(segments) > len(self.levels) + 1:
+            raise ValueError(f"{name} is not a table name: at most {spelled}")
+
+        qualified = [*self.values[: len(self.levels) + 1 - len(segments)], *segments]
+        if tuple(qualified[: len(self.values)]) != self.values:
+            raise ValueError(
+                f"{name} is outside the configured {self.levels[-1]}. This server reads "
+                f"{'.'.join(self.values)}, and where a spec may read is configuration "
+                "rather than something a spec chooses."
+            )
+        return ".".join(qualified)
+
+
+@dataclass(frozen=True)
 class Dialect:
     """The parts of a source's SQL that differ between sources, so that everything above
     writes one query and the source names the pieces. Templates rather than function
@@ -147,12 +190,19 @@ class Dialect:
 class Catalog(Protocol):
     dialect: Dialect
 
+    # Where a spec's names resolve and the only place it may read. A field rather than a
+    # method, because the rule it carries is enforced above this protocol — `query.py`
+    # resolves a spec's references through it before a name reaches a source — and a
+    # connector that answered the question itself would be a second place for the answer
+    # to be wrong. What a connector owes here is the two configured values, not a check.
+    scope: Scope
+
     def tables(self) -> list[str]:
         """Qualified names, one per table."""
 
     def describe(self, name: str) -> Table:
         """A table by qualified name, with the foreign keys it declares. Fewer segments
-        than the source uses are filled in.
+        than the source uses are filled in, through `scope`.
 
         The declared keys belong here rather than only in `relationships` below because a
         caller that has described the schema has already been told them, and asking a
@@ -270,6 +320,7 @@ class Held:
         clock=time.monotonic,
     ):
         self.dialect = catalog.dialect
+        self.scope = catalog.scope
         self._catalog = catalog
         self._hold = hold
         self._shape = shape
@@ -390,6 +441,7 @@ class DatabricksCatalog:
         self._schema = schema
         self._warehouse = warehouse
         self._client = None
+        self.scope = Scope(levels=("catalog", "schema"), values=(catalog, schema))
 
     def tables(self) -> list[str]:
         listed = self._workspace().tables.list(catalog_name=self._catalog, schema_name=self._schema)
@@ -496,32 +548,13 @@ class DatabricksCatalog:
         ]
 
     def qualify(self, name: str) -> str:
-        """A spec's table name as the source spells it, refusing anything outside the
-        configured pair.
+        """A name as this source spells it, through the scope every catalog carries.
 
-        A one or two segment name gets the configured catalog and schema put in front of it
-        and cannot be anywhere else. A three segment name names them itself, and used to be
-        taken at its word, which meant the two settings described where short names resolve
-        rather than where a spec may read. Those are different promises, and the second one
-        is the one `api.py` makes when it says a client cannot name a database: a spec is
-        hand editable by design, so whatever the credential could reach was reachable by
-        spelling it out in full.
-
-        The reach of the credential is not the scope of the tool. Refuse here, once, where
-        every path that turns a spec's name into the source's name goes through."""
-        segments = name.split(".")
-        if len(segments) > 3:
-            raise ValueError(f"{name} is not a table name: at most catalog.schema.table")
-
-        qualified = [self._catalog, self._schema][: 3 - len(segments)] + segments
-        catalog, schema = qualified[0], qualified[1]
-        if (catalog, schema) != (self._catalog, self._schema):
-            raise ValueError(
-                f"{name} is outside the configured schema. This server reads "
-                f"{self._catalog}.{self._schema}, and where a spec may read is "
-                "configuration rather than something a spec chooses."
-            )
-        return ".".join(qualified)
+        The rule used to live here, which made it this connector's to keep and the next
+        one's to forget. It is `Scope` now, and this is where the workspace's own calls
+        reach it: a `DESCRIBE DETAIL` needs the full name whether the caller wrote one or
+        not."""
+        return self.scope.qualify(name)
 
     def _workspace(self):
         if self._client is None:

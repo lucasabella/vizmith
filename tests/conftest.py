@@ -19,6 +19,7 @@ from vizmith.catalog import (
     DatabricksCatalog,
     Dialect,
     Relationship,
+    Scope,
     Table,
     conform,
 )
@@ -68,6 +69,10 @@ class FixtureCatalog:
 
     def __init__(self, connection, dialect=DUCKDB, modified="1"):
         self.dialect = dialect
+        # The same two levels the workspace has, over the fixture database. Carried rather
+        # than assumed: this double used to take the last segment of whatever it was given
+        # and rebuild the name, so a spec naming another catalog was answered with this one.
+        self.scope = Scope(levels=("catalog", "schema"), values=("vizmith", "shop"))
         self._connection = connection
         # A DuckDB connection is one cursor, so two threads sharing it read each other's
         # rows. Profiling a schema calls run in parallel, so the double serialises rather
@@ -95,7 +100,7 @@ class FixtureCatalog:
         """The table's columns and the keys it declares, together, as a source answers
         them: the shipping catalog reads both off one response, and a double that answered
         them separately would let the application ask twice without a test noticing."""
-        table = name.rsplit(".", 1)[-1]
+        table = self.scope.qualify(name).rsplit(".", 1)[-1]
         self.described.append(f"vizmith.shop.{table}")
         return Table(
             name=f"vizmith.shop.{table}",
@@ -128,7 +133,7 @@ class FixtureCatalog:
         rather than a pass over the table, and what `statements` exists to count is what a
         profile costs to build."""
         self.freshness_checks.append(name)
-        return self.modified_times.get(name.rsplit(".", 1)[-1], self._modified)
+        return self.modified_times.get(self.scope.qualify(name).rsplit(".", 1)[-1], self._modified)
 
     def run(self, sql, parameters=None):
         with self._lock:

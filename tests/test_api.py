@@ -298,6 +298,7 @@ class RefusingCatalog:
 
     def __init__(self, catalog, message: str):
         self.dialect = catalog.dialect
+        self.scope = catalog.scope
         self._catalog = catalog
         self._message = message
 
@@ -650,6 +651,7 @@ class Overlapping:
 
     def __init__(self, catalog):
         self.dialect = catalog.dialect
+        self.scope = catalog.scope
         self._catalog = catalog
         self._lock = threading.Lock()
         self.described: list[str] = []
