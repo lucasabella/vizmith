@@ -205,47 +205,18 @@ def test_an_array_column_is_still_not_chartable():
     assert TYPES.get("ARRAY", UNSUPPORTED) == UNSUPPORTED
 
 
-def test_a_shorter_name_is_filled_in():
-    catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
-    assert catalog.qualify("orders") == f"{CATALOG}.{SCHEMA}.orders"
-    assert catalog.qualify(f"{SCHEMA}.orders") == f"{CATALOG}.{SCHEMA}.orders"
-    assert catalog.qualify(f"{CATALOG}.{SCHEMA}.orders") == f"{CATALOG}.{SCHEMA}.orders"
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        "another_catalog.{schema}.salaries",
-        "{catalog}.another_schema.salaries",
-        "another_catalog.another_schema.salaries",
-    ],
-)
-def test_a_name_outside_the_configured_pair_is_refused(name):
-    """A spec is hand editable by design, so a three segment name taken at its word made
-    the two settings describe where short names resolve rather than where a spec may read.
-    The reach of the credential is not the scope of the tool."""
+def test_the_workspaces_own_calls_go_through_the_configured_scope():
+    """`DESCRIBE DETAIL` needs the full name whether the caller wrote one or not, so this
+    connector still resolves a short name — through the scope every catalog carries rather
+    than through a rule of its own. What that rule is, and that a name outside it is
+    refused, is `tests/test_scope.py`, which holds every catalog to it rather than this
+    one."""
     catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
 
+    assert catalog.scope.values == (CATALOG, SCHEMA)
+    assert catalog.qualify("orders") == catalog.scope.qualify("orders") == f"{CATALOG}.{SCHEMA}.orders"
     with pytest.raises(ValueError, match="outside the configured schema"):
-        catalog.qualify(name.format(catalog=CATALOG, schema=SCHEMA))
-
-
-def test_the_refusal_names_where_this_server_does_read():
-    """A person hand editing a spec is the likeliest caller to hit this, so the message
-    says what to write instead rather than only that this was wrong."""
-    catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
-
-    with pytest.raises(ValueError) as refused:
         catalog.qualify("hr.people.salaries")
-
-    assert f"{CATALOG}.{SCHEMA}" in str(refused.value)
-
-
-def test_more_segments_than_a_table_name_has_is_refused():
-    catalog = DatabricksCatalog(profile="unused", catalog=CATALOG, schema=SCHEMA, warehouse="unused")
-
-    with pytest.raises(ValueError, match="at most catalog.schema.table"):
-        catalog.qualify("a.b.c.d")
 
 
 class Clock:

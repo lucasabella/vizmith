@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from conftest import DUCKDB, FixtureCatalog, needs_warehouse, shapes
 
+from vizmith.catalog import Scope
 from vizmith.query import build, execute
 from vizmith.spec import output_columns
 
@@ -204,6 +205,7 @@ class Unreachable:
         pass
 
     dialect = DUCKDB
+    scope = Scope(levels=("catalog", "schema"), values=("vizmith", "shop"))
 
     def describe(self, name: str):
         raise self.Denied(f"PERMISSION_DENIED: {name}")
