@@ -34,6 +34,12 @@ KINDS: dict[str, tuple[str, ...]] = {
         "VIZMITH_BIGQUERY_DATASET",
         "VIZMITH_BIGQUERY_LOCATION",
     ),
+    "snowflake": (
+        "VIZMITH_SNOWFLAKE_CONNECTION",
+        "VIZMITH_SNOWFLAKE_DATABASE",
+        "VIZMITH_SNOWFLAKE_SCHEMA",
+        "VIZMITH_SNOWFLAKE_WAREHOUSE",
+    ),
 }
 
 # What a person gets without saying, which is the source that shipped first. A checkout
@@ -59,10 +65,19 @@ def _bigquery(project: str, dataset: str, location: str) -> Catalog:
     return BigQueryCatalog(project=project, dataset=dataset, location=location)
 
 
+def _snowflake(connection: str, database: str, schema: str, warehouse: str) -> Catalog:
+    from vizmith.sources.snowflake import SnowflakeCatalog
+
+    return SnowflakeCatalog(
+        connection=connection, database=database, schema=schema, warehouse=warehouse
+    )
+
+
 _BUILDERS: dict[str, Callable[..., Catalog]] = {
     "databricks": _databricks,
     "duckdb": _duckdb,
     "bigquery": _bigquery,
+    "snowflake": _snowflake,
 }
 
 

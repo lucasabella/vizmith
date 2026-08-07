@@ -40,6 +40,10 @@ duckdb = ["duckdb>=1.1"]
 # connector only when it is the configured kind.
 bigquery = ["google-cloud-bigquery>=3.25"]
 
+# The Snowflake source. The credential is not here: the connector reads a named connection
+# from ~/.snowflake/connections.toml, the way the Databricks one reads ~/.databrickscfg.
+snowflake = ["snowflake-connector-python>=3.12"]
+
 # DuckDB is the test harness, not part of the product: it writes the fixture Parquet
 # and builds the local database the deterministic tests run against. httpx is not here
 # because the model adapter ships with it. Playwright drives the interface in a browser;
@@ -52,6 +56,7 @@ dev = [
     "ruff>=0.8",
     "duckdb>=1.1",
     "google-cloud-bigquery>=3.25",
+    "snowflake-connector-python>=3.12",
     "playwright>=1.49",
 ]
 
