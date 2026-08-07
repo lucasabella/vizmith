@@ -263,8 +263,17 @@ def relationship_graph(catalog: Catalog) -> list[Relationship]:
     another, which put a schema's worth of latency in front of every drag of a column onto
     another table: `/api/join-path` is what a drop calls, and it builds this from nothing
     every time. They overlap now, through a pool wider than the profiler's because these are
-    metadata reads rather than statements a warehouse queues. Nothing here is cached, so a
-    graph is still built per request — see the issue on holding it.
+    metadata reads rather than statements a warehouse queues.
+
+    It is one round trip per table rather than two. The declared keys are read off the
+    descriptions rather than asked for again: a constraint is held on the table that
+    declares it, so the response that listed a table's columns already carried them, and
+    `catalog.relationships()` was describing the same schema a second time to find them.
+
+    And it is none at all on the drag after the first, because the configured source holds a
+    description for a window of its own — see `Held` in `catalog.py`. Cold this is a listing
+    plus one overlapped read per table; warm it reaches the source for the listing only,
+    which is what a person dragging a second column pays.
 
     `tables` runs first and on this thread, which is what builds the source's client before
     the pool shares it, the same order `profiles` relies on."""
@@ -274,7 +283,8 @@ def relationship_graph(catalog: Catalog) -> list[Relationship]:
     columns = {
         table.name: {column.name: column.type for column in table.columns} for table in described
     }
-    return graph(catalog.relationships(), suggest(columns))
+    declared = sorted(relationship for table in described for relationship in table.relationships)
+    return graph(declared, suggest(columns))
 
 
 class SpecRequest(BaseModel):

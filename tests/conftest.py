@@ -83,27 +83,44 @@ class FixtureCatalog:
         # question is a DESCRIBE DETAIL the warehouse runs and bills for, so a request that
         # asks it per table has a cost this records and `statements` does not.
         self.freshness_checks = []
+        # Every table this was asked to describe. A metadata read rather than a statement,
+        # and the thing a relationship graph is made of, so a request that rebuilds the
+        # graph per gesture has a cost only this records.
+        self.described = []
 
     def tables(self):
         return [f"vizmith.shop.{name}" for name in sorted(COLUMNS)]
 
     def describe(self, name):
+        """The table's columns and the keys it declares, together, as a source answers
+        them: the shipping catalog reads both off one response, and a double that answered
+        them separately would let the application ask twice without a test noticing."""
         table = name.rsplit(".", 1)[-1]
+        self.described.append(f"vizmith.shop.{table}")
         return Table(
             name=f"vizmith.shop.{table}",
             columns=tuple(
                 Column(name=column, type=TYPES[type_], nullable=(table, column) in NULLABLE)
                 for column, type_ in COLUMNS[table]
             ),
+            relationships=tuple(
+                Relationship(
+                    f"vizmith.shop.{left}", column, f"vizmith.shop.{right}", key, kind=DECLARED
+                )
+                for left, column, right, key in FOREIGN_KEYS
+                if left == table
+            ),
         )
 
     def relationships(self):
         """What the fixture schema declares. Two of them, so that a test can tell a
         declared relationship from a suggested one rather than finding every pair
-        reported the same way."""
+        reported the same way. Rolled up from the descriptions, which is where the
+        constraints are held on a source and how the shipping catalog answers this."""
         return sorted(
-            Relationship(f"vizmith.shop.{left}", column, f"vizmith.shop.{right}", key, kind=DECLARED)
-            for left, column, right, key in FOREIGN_KEYS
+            relationship
+            for name in self.tables()
+            for relationship in self.describe(name).relationships
         )
 
     def modified(self, name):

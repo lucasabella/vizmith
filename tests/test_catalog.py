@@ -11,6 +11,7 @@ from databricks.sdk.service.sql import StatementState
 
 from vizmith import catalog as catalog_module
 from vizmith.catalog import (
+    DECLARED,
     SHAPES,
     TIMESTAMP,
     TYPES,
@@ -19,6 +20,7 @@ from vizmith.catalog import (
     Column,
     DatabricksCatalog,
     Held,
+    Relationship,
     Table,
     _parameter,
     _parameter_type,
@@ -385,9 +387,9 @@ class Ticks:
         return self.now
 
 
-def held(catalog, hold=10.0):
+def held(catalog, hold=10.0, shape=100.0):
     clock = Ticks()
-    return Held(catalog, hold=hold, clock=clock), clock
+    return Held(catalog, hold=hold, shape=shape, clock=clock), clock
 
 
 def test_a_freshness_answer_inside_the_window_is_asked_of_the_source_once(catalog):
@@ -440,21 +442,123 @@ def test_a_source_with_no_modified_time_to_give_is_held_like_any_other_answer(ca
     assert catalog.freshness_checks == ["vizmith.shop.a_view"]
 
 
-def test_everything_that_is_not_a_freshness_check_reaches_the_source(catalog):
-    """This holds one question, not the source. A listing, a description and a statement
-    all have answers that can differ between two calls a second apart, and the whole point
-    of the profile cache is that a statement is what is expensive."""
+def test_a_listing_and_a_statement_still_reach_the_source_every_time(catalog):
+    """What is held is a question with an answer that does not change between two calls a
+    second apart. A listing is not one of those — it is how a table somebody created is
+    noticed, and it is one call for the whole schema rather than one per table — and a
+    statement is a different question every time by construction."""
     source, _ = held(catalog)
 
     assert source.dialect is catalog.dialect
     assert source.tables() == catalog.tables()
-    assert source.describe("vizmith.shop.orders") == catalog.describe("vizmith.shop.orders")
-    assert source.relationships() == catalog.relationships()
 
     catalog.statements.clear()
     source.run("SELECT 1")
     source.run("SELECT 1")
     assert catalog.statements == ["SELECT 1", "SELECT 1"]
+
+
+def test_a_description_inside_the_window_is_asked_of_the_source_once(catalog):
+    """What the shape hold is for. Every join path resolved rebuilds the relationship
+    graph, and building it describes every table, so a person dragging a second column
+    from a second table used to pay the whole schema again."""
+    expected = catalog.describe("vizmith.shop.orders")
+    source, _ = held(catalog)
+    catalog.described.clear()
+
+    described = [source.describe("vizmith.shop.orders") for _ in range(3)]
+
+    assert described == [expected] * 3
+    assert catalog.described == ["vizmith.shop.orders"], "a held description was asked again"
+
+
+def test_a_description_is_asked_again_once_the_window_has_passed(catalog):
+    """The window is what keeps a description from being held for the life of the process.
+    A table altered under a running server is described as it was for at most this long,
+    and the table nothing profiles is the one the window is the only bound on."""
+    source, clock = held(catalog)
+    source.describe("vizmith.shop.orders")
+    catalog.described.clear()
+
+    clock.now += 100.0
+    source.describe("vizmith.shop.orders")
+
+    assert catalog.described == ["vizmith.shop.orders"]
+
+
+def test_a_table_that_moved_drops_the_description_held_for_it(catalog):
+    """The hole a held description would otherwise open in the profile cache.
+
+    `profile_table` describes the table it profiles, so a profile built from a description
+    taken before a column was added would be stored under the freshness token taken after
+    it: current, and missing a column, until the table changed again. The token moving is
+    what says the table was written to or altered, so it drops the description with it.
+
+    The clock is moved past the freshness window and not past the shape's, which is the
+    case this is about: the description is still inside its own window and is dropped
+    anyway, because the source has said the table is not the one that was described."""
+    source, clock = held(catalog)
+    source.modified("vizmith.shop.orders")
+    source.describe("vizmith.shop.orders")
+    catalog.described.clear()
+
+    clock.now += 10.0
+    catalog.modified_times["orders"] = "2"
+    assert source.modified("vizmith.shop.orders") == "2"
+    source.describe("vizmith.shop.orders")
+
+    assert catalog.described == ["vizmith.shop.orders"], "a table that moved kept its shape"
+
+
+def test_a_table_that_did_not_move_keeps_the_description_held_for_it(catalog):
+    """The other half, and what makes the drop above a check rather than a cost: an
+    unchanged token is the source saying neither the data nor the definition moved, so the
+    columns it listed are still the columns."""
+    source, clock = held(catalog)
+    source.modified("vizmith.shop.orders")
+    source.describe("vizmith.shop.orders")
+    catalog.described.clear()
+
+    clock.now += 10.0
+    assert source.modified("vizmith.shop.orders") == "1"
+    source.describe("vizmith.shop.orders")
+
+    assert catalog.described == []
+
+
+def test_the_declared_relationships_are_held_on_the_shape_window(catalog):
+    """A constraint is declared by hand and read by every question asked, so it is held
+    like a description rather than asked for per request. Held whole, because nothing asks
+    for one table's keys on their own.
+
+    Counted in descriptions, since rolling the keys up is what describing every table
+    is for on a source that holds a constraint on the table declaring it."""
+    expected = catalog.relationships()
+    source, clock = held(catalog)
+    catalog.described.clear()
+
+    burst = [source.relationships() for _ in range(3)]
+    asked_in_the_burst = len(catalog.described)
+    clock.now += 100.0
+    later = source.relationships()
+
+    assert burst == [expected] * 3
+    assert later == expected
+    assert asked_in_the_burst == len(catalog.tables()), "a burst rolled the keys up again"
+    assert len(catalog.described) == 2 * len(catalog.tables()), "the window never passed"
+
+
+def test_a_held_description_is_not_a_row(catalog):
+    """The boundary this whole layer exists to keep. A description is names and types, so
+    holding one holds no value out of any table, which is why it can be held for minutes
+    where a profile is keyed on the source's own token."""
+    source, _ = held(catalog)
+
+    described = source.describe("vizmith.shop.orders")
+
+    assert [column.name for column in described.columns]
+    assert not hasattr(described, "rows")
+    assert catalog.statements == []
 
 
 def states(pending, final):
@@ -538,7 +642,7 @@ class OverlappingTables:
         time.sleep(self.WAIT)
         with self._lock:
             self.in_flight -= 1
-        return SimpleNamespace(table_constraints=self._constrained.get(name, []))
+        return SimpleNamespace(full_name=name, columns=[], table_constraints=self._constrained.get(name, []))
 
 
 def foreign_key(child, parent_table, parent):
@@ -558,7 +662,11 @@ def test_reading_the_declared_relationships_does_not_wait_for_one_table_at_a_tim
     The overlap is what is asserted rather than a duration: a timing assertion goes red on a
     loaded runner for a reason nobody caused. Every table is still read exactly once, and
     the answer is still sorted, because a graph that renumbered between two calls would
-    renumber the answers stored against it."""
+    renumber the answers stored against it.
+
+    Once is also the count that matters now that a description carries the constraints: this
+    is the same read `describe` makes rather than a second one beside it, so a caller that
+    does both no longer reads the schema twice."""
     names = [f"{CATALOG}.{SCHEMA}.table_{n}" for n in range(24)]
     orders, customers = names[0], names[1]
     workspace = OverlappingTables(names, {orders: [foreign_key("customer_id", customers, "id")]})
@@ -573,6 +681,68 @@ def test_reading_the_declared_relationships_does_not_wait_for_one_table_at_a_tim
         (orders, "customer_id", customers, "id")
     ]
     assert found == sorted(found)
+
+
+def test_a_description_carries_the_keys_its_table_declares():
+    """What makes the read once rather than twice. The constraints are in the response that
+    lists the columns, so a caller describing the schema has been told them and nothing
+    above has to ask a second time.
+
+    A composite key is several column pairs, read positionally, because that is the order
+    the constraint declares them in."""
+    parent = f"{CATALOG}.{SCHEMA}.customers"
+    child = f"{CATALOG}.{SCHEMA}.order_items"
+    described = _table(
+        TableInfo.from_dict(
+            {
+                "full_name": child,
+                "columns": [
+                    {"name": "order_id", "type_name": "INT", "nullable": False},
+                    {"name": "line", "type_name": "INT", "nullable": False},
+                ],
+                "table_constraints": [
+                    {
+                        "foreign_key_constraint": {
+                            "name": "fk",
+                            "child_columns": ["order_id", "line"],
+                            "parent_table": parent,
+                            "parent_columns": ["id", "line"],
+                        }
+                    }
+                ],
+            }
+        )
+    )
+
+    assert described.relationships == (
+        Relationship(child, "order_id", parent, "id", kind=DECLARED),
+        Relationship(child, "line", parent, "line", kind=DECLARED),
+    )
+
+
+def test_a_table_that_declares_nothing_carries_no_relationships():
+    """A workspace where nobody has declared a foreign key answers with the field absent
+    rather than empty, on every table, which is the common case in a lakehouse. What fills
+    the gap is a suggestion a person confirms, and that is not the source's word to give."""
+    assert _table(SimpleNamespace(full_name="a.b.c", columns=[])).relationships == ()
+
+
+def test_a_constraint_that_is_not_a_foreign_key_is_not_a_relationship():
+    """A primary key is a constraint on the same list and joins nothing to anything. It is
+    read past rather than reported, because a graph is what a join path is resolved
+    against and a table related to itself is not a path."""
+    described = _table(
+        TableInfo.from_dict(
+            {
+                "full_name": f"{CATALOG}.{SCHEMA}.orders",
+                "columns": [{"name": "id", "type_name": "INT", "nullable": False}],
+                "table_constraints": [{"primary_key_constraint": {"name": "pk", "child_columns": ["id"]}}],
+            }
+        )
+    )
+
+    assert described.relationships == ()
+    assert [column.name for column in described.columns] == ["id"]
 
 
 @pytest.mark.skipif(not PROFILE, reason="set VIZMITH_DATABRICKS_PROFILE to use a workspace")

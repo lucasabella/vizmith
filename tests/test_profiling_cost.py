@@ -35,6 +35,7 @@ import pytest
 from conftest import needs_warehouse
 
 from vizmith.api import PROFILE_WORKERS, relationship_graph
+from vizmith.catalog import Held
 from vizmith.profiler import Profiles
 from vizmith.relationships import graph, suggest
 
@@ -137,7 +138,9 @@ def test_the_width_that_ships_is_one_of_the_widths_measured(live_catalog):
 
 
 def sequentially(catalog):
-    """The relationship graph built the way it was before the descriptions overlapped.
+    """The relationship graph built the way it was before the descriptions overlapped: one
+    description after another, and the declared keys asked for separately rather than read
+    off the descriptions, which is the schema read twice.
 
     Kept here rather than in the application, because what it is for is the comparison: a
     number that says the pool helped on this schema, against this workspace, rather than on
@@ -153,17 +156,20 @@ def sequentially(catalog):
 def test_what_building_the_relationship_graph_costs(live_catalog):
     """What a drag of a column onto another table waits for.
 
-    `/api/join-path` is what a drop calls and it builds this from nothing every time, so
-    this is paid per gesture rather than once. It is one round trip per table for the
-    columns and, inside the catalog, one more per table for the declared constraints.
+    `/api/join-path` is what a drop calls, so this is paid per gesture rather than once. It
+    was one round trip per table for the columns and, inside the catalog, one more per table
+    for the declared constraints. It is one per table now — a description carries the
+    constraints the same response held — and none at all on the drag after the first, since
+    the configured source holds a description for a window of its own.
 
-    Both shapes are timed so the comparison is against this workspace rather than against a
+    Three shapes are timed so the comparison is against this workspace rather than against a
     model: the pool is only worth what the source will actually answer at once, and a
-    control plane that serialises them would show up here as two numbers that match.
+    control plane that serialises them would show up here as an overlapped number that
+    matches the sequential one.
 
     Nothing is asserted about the clock. What is asserted is that the concurrent shape asks
-    for each table exactly once and agrees with the sequential one, because a faster answer
-    that differs is not the same answer."""
+    for each table exactly once, that the warm one asks for none, and that all three agree,
+    because a faster answer that differs is not the same answer."""
     concurrent = Timed(live_catalog)
     started = time.monotonic()
     overlapped = relationship_graph(concurrent)
@@ -174,13 +180,25 @@ def test_what_building_the_relationship_graph_costs(live_catalog):
     walked = sequentially(one_at_a_time)
     without_pool = time.monotonic() - started
 
+    # Counted inside the hold rather than outside it, because what is being measured is
+    # what reaches the source and not what the application asked for.
+    counted = Timed(live_catalog)
+    source = Held(counted)
+    relationship_graph(source)
+    started = time.monotonic()
+    warm = relationship_graph(source)
+    held = time.monotonic() - started
+
     tables = len(live_catalog.tables())
     print(
         f"\nrelationship graph over {tables} tables: "
-        f"{with_pool:.1f}s overlapped, {without_pool:.1f}s one at a time"
-        f"\n  describe {concurrent.taken['describe']:.1f}s over {concurrent.calls['describe']} calls, "
-        f"relationships {concurrent.taken['relationships']:.1f}s"
+        f"{without_pool:.1f}s one at a time, {with_pool:.1f}s overlapped, {held:.1f}s held"
+        f"\n  describe {concurrent.taken['describe']:.1f}s over {concurrent.calls['describe']} calls "
+        f"cold, {counted.calls['describe'] - tables} calls on the second graph"
     )
 
     assert overlapped == walked, "the pool changed the graph, not only how long it took"
+    assert warm == overlapped, "a held description changed the graph"
     assert concurrent.calls["describe"] == tables, "a table was described twice or not at all"
+    assert concurrent.calls["relationships"] == 0, "the keys were asked for a second time"
+    assert counted.calls["describe"] == tables, "the second graph described the schema again"

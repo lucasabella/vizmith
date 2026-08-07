@@ -704,6 +704,50 @@ def test_a_join_path_describes_the_schema_without_waiting_for_one_table_at_a_tim
     assert source_.peak > 1, "the descriptions ran one at a time"
 
 
+def test_a_join_path_reads_each_table_once_rather_than_twice(browsing, catalog):
+    """The graph is a table's columns and the keys it declares, and both arrive in the one
+    response a source answers a description with. Asking `relationships()` for the keys was
+    the schema described a second time inside the same request, so a drag paid two round
+    trips per table for one graph.
+
+    Each table exactly once, and the declared keys still in the answer, because halving the
+    reads by losing a fact is not halving anything."""
+    catalog.described.clear()
+
+    resolved = browsing.get("/api/join-path", params={"left": ORDERS, "right": CUSTOMERS})
+
+    assert sorted(catalog.described) == sorted(catalog.tables()), "a table was read twice"
+    assert resolved.json()["joins"] == [
+        {"table": CUSTOMERS, "on": [{"left": f"{ORDERS}.customer_id", "right": f"{CUSTOMERS}.id"}]}
+    ]
+
+
+def test_the_drag_after_the_first_describes_nothing(catalog, tmp_path):
+    """What holding the shape buys, on the gesture direct manipulation exists for. Dragging
+    a column from a table the query does not already read asks for a join path, which
+    rebuilds the graph, which described the whole schema — every time, with no cache on the
+    one path a person triggers most.
+
+    Through the configured source rather than the bare fixture, because the hold is what
+    `source` wraps the catalog in and this is the saving it exists for. The listing is not
+    held and is not counted: it is one call for the schema, and it is how a table somebody
+    created is noticed."""
+    # One source for both requests, which is what `source` is: a hold belongs to the source
+    # object, so a source rebuilt per request would hold nothing.
+    held = Held(catalog, hold=30.0, shape=300.0, clock=lambda: 0.0)
+    app.dependency_overrides[source] = lambda: held
+    app.dependency_overrides[answers] = lambda: Confirmations(tmp_path / "relationships.json")
+    try:
+        client = TestClient(app, base_url="http://127.0.0.1:8000")
+        client.get("/api/join-path", params={"left": ORDERS, "right": CUSTOMERS})
+        catalog.described.clear()
+        client.get("/api/join-path", params={"left": ORDERS, "right": CUSTOMERS})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert catalog.described == [], "the second drag described the schema again"
+
+
 def test_confirming_a_suggestion_makes_it_resolve(browsing):
     """The confirmation is the whole gate. Before it there is no path, after it there is
     one, and nothing in between guesses."""
