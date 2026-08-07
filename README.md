@@ -70,7 +70,7 @@ asks the endpoint with the schema it is about to send and believes the answer.
 
 ## Stack
 
-Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Two sources: Databricks Unity Catalog, and DuckDB — a file on your own machine, opened read only, which is what makes this runnable without a warehouse and a bill. Both go through the same catalog interface, and the DuckDB one is what the deterministic half of the suite runs against, so it cannot rot without the suite going red.
+Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Sources: Databricks Unity Catalog, DuckDB — a file on your own machine, opened read only, which is what makes this runnable without a warehouse and a bill — and BigQuery. All three go through the same catalog interface, and the DuckDB one is what the deterministic half of the suite runs against, so it cannot rot without the suite going red. What each source answers for the contracts that have a `None` in them, and how each was checked, is in [docs/compatibility.md](docs/compatibility.md); BigQuery has not been run against a real project yet and that table says so.
 
 Vizmith runs on your machine and serves a browser. The frontend talks to the backend over HTTP and nothing else, which keeps a desktop build possible later without touching application code.
 

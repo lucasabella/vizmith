@@ -29,6 +29,11 @@ KINDS: dict[str, tuple[str, ...]] = {
         "VIZMITH_DUCKDB_DATABASE",
         "VIZMITH_DUCKDB_SCHEMA",
     ),
+    "bigquery": (
+        "VIZMITH_BIGQUERY_PROJECT",
+        "VIZMITH_BIGQUERY_DATASET",
+        "VIZMITH_BIGQUERY_LOCATION",
+    ),
 }
 
 # What a person gets without saying, which is the source that shipped first. A checkout
@@ -48,7 +53,17 @@ def _duckdb(path: str, database: str, schema: str) -> Catalog:
     return DuckDBCatalog(path=path, database=database, schema=schema)
 
 
-_BUILDERS: dict[str, Callable[..., Catalog]] = {"databricks": _databricks, "duckdb": _duckdb}
+def _bigquery(project: str, dataset: str, location: str) -> Catalog:
+    from vizmith.sources.bigquery import BigQueryCatalog
+
+    return BigQueryCatalog(project=project, dataset=dataset, location=location)
+
+
+_BUILDERS: dict[str, Callable[..., Catalog]] = {
+    "databricks": _databricks,
+    "duckdb": _duckdb,
+    "bigquery": _bigquery,
+}
 
 
 def build(kind: str, values: list[str]) -> Catalog:

@@ -1,5 +1,6 @@
 import copy
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -237,3 +238,36 @@ def test_the_spec_is_still_the_spec_s_fault_where_it_is():
 
     with pytest.raises(ValueError, match="outside the configured schema"):
         build(spec, Outside())
+
+
+def test_truncation_is_the_dialects_spelling_rather_than_one_written_in(catalog):
+    """The builder used to write `date_trunc('month', c)` into the statement, which is two
+    sources' spelling stated as though it were every source's. It reads the dialect now,
+    and what it must not do is stop binding the unit's neighbours: a unit is one of the
+    grammar's own keywords and everything else on that line is still a parameter."""
+    spec = json.loads((FIXTURES / "valid" / "orders_per_month.json").read_text())
+
+    sql, parameters = build(spec, catalog)
+
+    assert 'date_trunc(\'month\', "vizmith"."shop"."orders"."order_date")' in sql
+    assert parameters, "the row limit stopped being bound"
+
+
+def test_a_source_that_spells_truncation_differently_gets_its_own_spelling(catalog):
+    """The fifth field on `Dialect`, from the outside: the same spec against a source whose
+    truncation reverses its arguments and takes the unit as a bare keyword. BigQuery is why
+    this exists, and this asserts it without needing BigQuery."""
+
+    class Elsewhere:
+        dialect = replace(catalog.dialect, truncate="DATE_TRUNC({column}, {unit})")
+        scope = catalog.scope
+
+        def describe(self, name):
+            return catalog.describe(name)
+
+    spec = json.loads((FIXTURES / "valid" / "orders_per_month.json").read_text())
+
+    sql, _ = build(spec, Elsewhere())
+
+    assert 'DATE_TRUNC("vizmith"."shop"."orders"."order_date", month)' in sql
+    assert "date_trunc(" not in sql

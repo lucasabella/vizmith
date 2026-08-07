@@ -126,8 +126,10 @@ class _Builder:
         column = self._column(item["column"])
         unit = item.get("truncate")
         # A unit is one of the grammar's own keywords rather than a value, and a source
-        # that took it as a parameter would still need it foldable at plan time.
-        return f"date_trunc('{unit}', {column})" if unit else column
+        # that took it as a parameter would still need it foldable at plan time. Which
+        # spelling it goes into is the source's, because they differ: the unit is quoted
+        # and first here and a bare keyword and second on BigQuery.
+        return self._dialect.truncate.format(unit=unit, column=column) if unit else column
 
     def _aggregate(self, aggregate: dict) -> str:
         column = self._column(aggregate["column"]) if "column" in aggregate else "*"
