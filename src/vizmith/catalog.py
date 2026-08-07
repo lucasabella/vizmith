@@ -80,12 +80,6 @@ class Column:
     nullable: bool
 
 
-@dataclass(frozen=True)
-class Table:
-    name: str
-    columns: tuple[Column, ...]
-
-
 @dataclass(frozen=True, order=True)
 class Relationship:
     """One join a source either states or is thought to hold. Declared means the source's
@@ -111,6 +105,21 @@ class Relationship:
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class Table:
+    """One table as the source describes it: its columns, and the foreign keys it declares.
+
+    The relationships ride along with the columns because they arrive together. A source
+    holds a constraint on the table that declares it, so the response that lists a table's
+    columns is the response that carries its keys, and asking for them separately means
+    reading every table twice to build one graph. `relationships` is what the source
+    states, never what a name suggests: an empty tuple is a table that declares nothing."""
+
+    name: str
+    columns: tuple[Column, ...]
+    relationships: tuple[Relationship, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -142,11 +151,20 @@ class Catalog(Protocol):
         """Qualified names, one per table."""
 
     def describe(self, name: str) -> Table:
-        """A table by qualified name. Fewer segments than the source uses are filled in."""
+        """A table by qualified name, with the foreign keys it declares. Fewer segments
+        than the source uses are filled in.
+
+        The declared keys belong here rather than only in `relationships` below because a
+        caller that has described the schema has already been told them, and asking a
+        second time is one more round trip per table for facts in hand."""
 
     def relationships(self) -> list[Relationship]:
         """The relationships the source declares for itself, and only those. What is
-        inferred from names and types is not the source's word and is not reported here."""
+        inferred from names and types is not the source's word and is not reported here.
+
+        The same facts `describe` reports per table, rolled up for the schema and sorted,
+        for a caller that has no descriptions to read them off. A caller that does has them
+        already and should not ask."""
 
     def modified(self, name: str) -> str | None:
         """When the source last changed this table, as a token that is only ever compared
@@ -184,48 +202,123 @@ class Catalog(Protocol):
 # needs a warehouse.
 FRESHNESS_HOLD = 30.0
 
+# How long a table's shape — its columns and the keys it declares — is held before the
+# source is asked to describe it again. Longer than the freshness window above, and for a
+# reason rather than for symmetry: what moves a freshness token is a write, and what changes
+# a description is somebody altering the table. A schema is written to all day and altered
+# on the days a person changes it.
+#
+# The window is not the only bound. A description is dropped as soon as the source answers
+# with a modified token that is not the one it was taken under, and Unity Catalog's token
+# moves for a definition change as well as for a write, so every table the profile path
+# reads is re-described the moment it changes rather than at the end of five minutes. The
+# window is what bounds a table nothing asks the freshness of, which is one nothing profiles.
+SHAPE_HOLD = 300.0
+
+# What is recorded against a description taken when no freshness answer was in hand. It
+# compares equal to no token, so the first freshness answer that does arrive drops the
+# description rather than being read as agreement with it.
+_UNKNOWN = object()
+
 
 class Held:
-    """A source whose answers about when a table last changed are held for a few seconds.
+    """A source whose answers about a table are held for a window: when it last changed,
+    and what shape it is.
 
-    The freshness check is what a warm read costs. A stored profile is served only where
-    the source's modified token still matches, so every read of the schema asks the source
-    that question once per table, and on Unity Catalog the answer is a `DESCRIBE DETAIL`
-    the warehouse runs and bills for rather than a free metastore read. One request already
-    asks it once per table; what this removes is the next request asking the same thing
-    about the same tables a second later, which is what a person browsing produces.
+    **Freshness.** The freshness check is what a warm read costs. A stored profile is served
+    only where the source's modified token still matches, so every read of the schema asks
+    the source that question once per table, and on Unity Catalog the answer is a `DESCRIBE
+    DETAIL` the warehouse runs and bills for rather than a free metastore read. One request
+    already asks it once per table; what this removes is the next request asking the same
+    thing about the same tables a second later, which is what a person browsing produces.
 
-    What it costs is that a table rewritten under a running server is described as it was
-    for up to the hold. That is the same trade as caching the profiles at all, made
-    smaller: the check still runs, just not several times inside one burst. Holding it for
-    the life of the process is what the file cache exists to refuse, and this is not that,
-    because the window has a number on it.
+    **Shape.** Describing every table is what the relationship graph is made of, and the
+    graph is rebuilt from nothing by every join path resolved — which is every drag of a
+    column from a table the query does not already read. On a hundred and fifty tables that
+    was the whole schema described per gesture, on the one path in the codebase that had no
+    cache at all. A description is held per table and the declared relationships with it,
+    since a description carries the keys its table declares.
 
-    Everything else is passed through untouched. This is not a cache of the source, it is
-    a cache of one question, and a listing or a statement is a different question with a
-    different answer every time.
+    What it costs is that a table rewritten or altered under a running server is described
+    as it was for up to the hold. That is the same trade as caching the profiles at all,
+    made smaller: the check still runs, just not several times inside one burst. Holding it
+    for the life of the process is what the file cache exists to refuse, and this is not
+    that, because the window has a number on it.
+
+    A held description is dropped early where the source says the table moved, which is what
+    keeps it from reaching the profile cache. `profile_table` describes the table it
+    profiles, so a profile built from a description taken before a column was added would be
+    stored under the freshness token taken after it — current, and missing a column, until
+    the table changed again. So a modified answer that differs from the one a description
+    was taken under drops that description, and a description taken with no token in hand is
+    dropped by the first answer that arrives.
+
+    A listing and a statement are passed through untouched. A listing is how a table that
+    appeared is noticed, and it is one call for the schema rather than one per table; a
+    statement has a different answer every time by construction.
 
     `None` is held like any other answer. A source object that has no modified time to
     give — a view, which `DESCRIBE DETAIL` will not describe — costs a failed statement to
     find that out, and finding it out repeatedly inside one burst is the same waste.
     """
 
-    def __init__(self, catalog: "Catalog", hold: float = FRESHNESS_HOLD, clock=time.monotonic):
+    def __init__(
+        self,
+        catalog: "Catalog",
+        hold: float = FRESHNESS_HOLD,
+        shape: float = SHAPE_HOLD,
+        clock=time.monotonic,
+    ):
         self.dialect = catalog.dialect
         self._catalog = catalog
         self._hold = hold
+        self._shape = shape
         self._clock = clock
         self._lock = threading.Lock()
         self._held: dict[str, tuple[float, str | None]] = {}
+        self._described: dict[str, tuple[float, object, Table]] = {}
+        self._relationships: tuple[float, list[Relationship]] | None = None
 
     def tables(self) -> list[str]:
         return self._catalog.tables()
 
     def describe(self, name: str) -> "Table":
-        return self._catalog.describe(name)
+        """The held description where it is still inside the window and still taken under
+        the token the source last gave, and the source's otherwise.
+
+        The token is read before the source is asked and checked again before the answer is
+        stored, so a description that crossed a write is not stored as though it preceded
+        it. What it costs to lose that race is one more description on the next call."""
+        asked = self._clock()
+        with self._lock:
+            held = self._described.get(name)
+            if held is not None and asked - held[0] < self._shape:
+                return held[2]
+            token = self._token(name, asked)
+
+        described = self._catalog.describe(name)
+        with self._lock:
+            if self._token(name, self._clock()) == token:
+                self._described[name] = (asked, token, described)
+        return described
 
     def relationships(self) -> list["Relationship"]:
-        return self._catalog.relationships()
+        """Every key the schema declares, held whole rather than per table, because that is
+        the shape the question is asked in: nothing asks for one table's keys on their own.
+
+        A caller that describes the schema anyway reads the keys off the descriptions
+        instead and never arrives here — `relationship_graph` in `api.py` — so what this
+        serves is the path that has no descriptions in hand."""
+        asked = self._clock()
+        with self._lock:
+            held = self._relationships
+            if held is not None and asked - held[0] < self._shape:
+                return list(held[1])
+
+        found = self._catalog.relationships()
+        with self._lock:
+            self._relationships = (asked, list(found))
+        return found
 
     def run(self, sql: str, parameters: dict | None = None) -> list[tuple]:
         return self._catalog.run(sql, parameters)
@@ -247,7 +340,18 @@ class Held:
         answer = self._catalog.modified(name)
         with self._lock:
             self._held[name] = (asked, answer)
+            described = self._described.get(name)
+            if described is not None and described[1] != answer:
+                del self._described[name]
         return answer
+
+    def _token(self, name: str, asked: float):
+        """The freshness answer in hand for this table, or `_UNKNOWN` where there is none
+        inside the window. Called under the lock."""
+        held = self._held.get(name)
+        if held is None or asked - held[0] >= self._hold:
+            return _UNKNOWN
+        return held[1]
 
 
 def conform(value):
@@ -305,19 +409,18 @@ class DatabricksCatalog:
         a hundred and fifty tables it was the larger half of every join path resolved and
         every question asked. They overlap now.
 
+        It is the same read `describe` makes, rather than a second one beside it: a
+        description already carries the constraints the response held, so this is those
+        descriptions rolled up. That is what makes the read once rather than twice for
+        anything holding descriptions in front of this — `Held` above — and it is why a
+        graph costs one round trip per table rather than two.
+
         `tables` runs first and on this thread, which is what builds the client before the
         pool shares it."""
         names = self.tables()
-        workspace = self._workspace()
         with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
-            described = zip(names, pool.map(workspace.tables.get, names))
-            found = [
-                relationship
-                for name, table in described
-                for constraint in getattr(table, "table_constraints", None) or []
-                for relationship in _foreign_key(name, constraint)
-            ]
-        return sorted(found)
+            described = pool.map(self.describe, names)
+            return sorted(relationship for table in described for relationship in table.relationships)
 
     def modified(self, name: str) -> str | None:
         """The last time this table's data or definition changed, from `DESCRIBE DETAIL`.
@@ -528,6 +631,11 @@ def _foreign_key(table: str, constraint) -> list[Relationship]:
 
 
 def _table(info) -> Table:
+    """One table's response as a `Table`, columns and declared keys from the same object.
+
+    A table with no constraints answers with the field absent rather than empty, and a
+    workspace that has never had one declared on anything answers that way for every
+    table, so the field is read defensively."""
     return Table(
         name=info.full_name,
         columns=tuple(
@@ -536,6 +644,11 @@ def _table(info) -> Table:
                 type=TYPES.get(column.type_name.value, UNSUPPORTED),
                 nullable=bool(column.nullable),
             )
-            for column in info.columns
+            for column in info.columns or []
+        ),
+        relationships=tuple(
+            relationship
+            for constraint in getattr(info, "table_constraints", None) or []
+            for relationship in _foreign_key(info.full_name, constraint)
         ),
     )
