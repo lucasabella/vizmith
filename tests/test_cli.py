@@ -87,7 +87,11 @@ def test_a_run_with_nothing_to_set_and_no_terminal_says_what_to_do(monkeypatch, 
 
 def test_a_terminal_is_asked_one_question_per_setting(monkeypatch, capsys):
     """The path a person on their own machine takes. An empty answer keeps what is there,
-    and the key is read without echoing it."""
+    and the key is read without echoing it.
+
+    One question per setting the configured kind of source needs, rather than one per
+    setting there is: the settings of a source this is not being pointed at are not
+    questions a person can answer."""
     run(monkeypatch, "configure", "--databricks-profile", "work")
     capsys.readouterr()
 
@@ -99,7 +103,8 @@ def test_a_terminal_is_asked_one_question_per_setting(monkeypatch, capsys):
     code = run(monkeypatch, "configure")
 
     assert code == 0
-    assert len(asked) == len(config.SETTINGS)
+    assert len(asked) == len(config.asked())
+    assert not any("DUCKDB" in question for question in asked), "asked about a source it is not"
     assert any(f"[{'work'}]" in question for question in asked), "what is set is shown back"
     assert not any("sekrit" in question for question in asked)
     assert config.read() == {PROFILE: "work", KEY: "sekrit"}, "an empty answer kept what was there"

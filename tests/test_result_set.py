@@ -4,10 +4,10 @@ The result set contract in ROADMAP.md says what a column is called, in what orde
 what a value is. This file is the last of those three: for every type in the catalog's
 closed set, the shape a value arrives in, asserted against each catalog that ships.
 
-Every test here runs twice, once against the fixture database and once against the
-workspace, because a contract only one source is checked against is a contract the other
-source is free to break. The second half skips without credentials, the way the rest of
-the live suite does.
+Every test here runs against each source that ships, because a contract only one source is
+checked against is a contract the others are free to break: the fixture harness, the DuckDB
+connector over the same rows in a file, and the workspace. The last skips without
+credentials, the way the rest of the live suite does.
 """
 
 import datetime as dt
@@ -79,6 +79,15 @@ def test_the_fixture_catalog_answers_in_the_contracts_shape(kind, table, express
 
 @needs_warehouse
 @pytest.mark.parametrize(("kind", "table", "expression"), VALUES, ids=lambda case: str(case))
+def test_the_duckdb_connector_answers_in_the_contracts_shape(kind, table, expression, duckdb_catalog):
+    """The source a person without a workspace configures, over a file rather than over the
+    in-memory harness. It answers in Python objects like the harness does, so what this
+    holds it to is `conform` rather than a converter."""
+    assert type(statement(duckdb_catalog, table, expression)) is SHAPES[kind]
+
+
+@needs_warehouse
+@pytest.mark.parametrize(("kind", "table", "expression"), VALUES, ids=lambda case: str(case))
 def test_the_workspace_answers_in_the_contracts_shape(kind, table, expression, live_catalog):
     """The statement API answers in text with the types in its manifest, so this is the
     half of the contract that a converter rather than a client has to keep."""
@@ -88,6 +97,11 @@ def test_the_workspace_answers_in_the_contracts_shape(kind, table, expression, l
 @pytest.mark.parametrize(("table", "expression"), NULLABLE, ids=lambda case: str(case))
 def test_a_null_is_none_whatever_type_it_is(table, expression, catalog):
     assert statement(catalog, table, expression, null=True) is None
+
+
+@pytest.mark.parametrize(("table", "expression"), NULLABLE, ids=lambda case: str(case))
+def test_a_null_is_none_from_the_duckdb_connector_too(table, expression, duckdb_catalog):
+    assert statement(duckdb_catalog, table, expression, null=True) is None
 
 
 @needs_warehouse
@@ -116,6 +130,12 @@ def test_a_truncated_date_is_a_timestamp(catalog):
     place a spec turns a date column into something else, and both sources answer a
     `date_trunc` with a timestamp rather than with the type they were given."""
     rows = execute(json.loads(ORDERS_PER_MONTH.read_text()), catalog)
+
+    assert {type(row["month"]) for row in rows} == {dt.datetime}
+
+
+def test_a_truncated_date_is_a_timestamp_from_the_duckdb_connector_too(duckdb_catalog):
+    rows = execute(json.loads(ORDERS_PER_MONTH.read_text()), duckdb_catalog)
 
     assert {type(row["month"]) for row in rows} == {dt.datetime}
 

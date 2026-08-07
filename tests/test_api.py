@@ -14,7 +14,6 @@ from test_model import ENDPOINT
 from test_spec_validation import EXPECTED_ERROR
 
 from vizmith.api import (
-    CONFIGURATION,
     LOOPBACK,
     MODEL_CONFIGURATION,
     _allowed_hosts,
@@ -27,12 +26,14 @@ from vizmith.api import (
     source,
 )
 from vizmith.ask import ATTEMPTS, SCHEMA
-from vizmith.catalog import UNSUPPORTED, WAIT_LIMIT, Held
+from vizmith.catalog import UNSUPPORTED, Held
+from vizmith.config import SETTINGS, source_settings
 from vizmith.dashboards import Dashboards
 from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
 from vizmith.query import build
 from vizmith.relationships import CONFIRMED, OPEN, REJECTED, Confirmations
+from vizmith.sources.databricks import WAIT_LIMIT
 from vizmith.spec import output_columns
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
@@ -57,7 +58,7 @@ def client(catalog):
 
 
 def test_health_reports_ok_without_a_configured_source(monkeypatch):
-    for name in CONFIGURATION:
+    for name in source_settings():
         monkeypatch.delenv(name, raising=False)
 
     response = TestClient(app, base_url="http://127.0.0.1:8000").get("/api/health")
@@ -68,7 +69,7 @@ def test_health_reports_ok_without_a_configured_source(monkeypatch):
 
 
 def test_health_reports_a_source_once_it_is_configured(monkeypatch):
-    for name in CONFIGURATION:
+    for name in source_settings():
         monkeypatch.setenv(name, "configured")
 
     assert TestClient(app, base_url="http://127.0.0.1:8000").get("/api/health").json()["source"] is True
@@ -1163,13 +1164,64 @@ def test_the_configured_source_holds_what_it_was_asked_about_freshness(monkeypat
     """The wiring, not the wrapper: a source built without it pays the burst above in
     billed statements, and nothing else in the suite would notice, since every test here
     puts its own catalog in the source's place."""
-    for name in CONFIGURATION:
+    for name in source_settings():
         monkeypatch.setenv(name, "configured")
     source.cache_clear()
     try:
         assert isinstance(source(), Held)
     finally:
         source.cache_clear()
+
+
+def test_the_configured_kind_is_what_gets_built(monkeypatch, duckdb_file):
+    """Which source Vizmith reads is configuration and never a request, so this is the one
+    place a name in a settings file becomes a catalog. A checkout that predates there being
+    a choice sets nothing and still gets the warehouse."""
+    monkeypatch.setenv("VIZMITH_SOURCE", "duckdb")
+    monkeypatch.setenv("VIZMITH_DUCKDB_PATH", str(duckdb_file))
+    monkeypatch.setenv("VIZMITH_DUCKDB_DATABASE", "vizmith")
+    monkeypatch.setenv("VIZMITH_DUCKDB_SCHEMA", "shop")
+    source.cache_clear()
+    try:
+        built = source()
+        assert isinstance(built, Held)
+        assert built.scope.values == ("vizmith", "shop")
+        assert built.tables()[0].startswith("vizmith.shop.")
+    finally:
+        source.cache_clear()
+
+
+def test_a_kind_nothing_knows_says_what_the_choices_are(monkeypatch):
+    """A person one character away from the kind they meant, told so at configuration
+    rather than as a failed query."""
+    monkeypatch.setenv("VIZMITH_SOURCE", "postgres")
+    source.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="databricks, duckdb"):
+            source()
+    finally:
+        source.cache_clear()
+
+
+def test_health_reports_which_kind_of_source_is_configured(monkeypatch):
+    """The interface names the missing piece rather than letting it arrive as a failed
+    query, and which piece is missing depends on the kind."""
+    for name, _ in SETTINGS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("VIZMITH_SOURCE", "duckdb")
+    client = TestClient(app, base_url="http://127.0.0.1:8000")
+
+    assert client.get("/api/health").json() == {
+        "status": "ok",
+        "version": client.get("/api/health").json()["version"],
+        "source": False,
+        "kind": "duckdb",
+        "model": False,
+    }
+
+    for name in ("VIZMITH_DUCKDB_PATH", "VIZMITH_DUCKDB_DATABASE", "VIZMITH_DUCKDB_SCHEMA"):
+        monkeypatch.setenv(name, "configured")
+    assert client.get("/api/health").json()["source"] is True
 
 
 def test_the_panel_is_filled_by_one_request(client, catalog):
