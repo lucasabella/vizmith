@@ -53,6 +53,22 @@ jobs:
         working-directory: web
         run: npm test
 
+      # Both ecosystems, asked whether anything they depend on has a known hole. High and
+      # above only: a moderate advisory in a build-time dev dependency is not a reason to
+      # fail somebody's pull request, and a threshold nobody believes gets muted.
+      - name: npm audit
+        working-directory: web
+        run: npm audit --audit-level=high
+
+      # --skip-editable because the package under test is installed editable and is not on
+      # PyPI, so auditing it is asking about a distribution that does not exist. Its
+      # dependencies are installed normally and are what this is here to check. Not
+      # --strict, which would turn that skip back into the failure it is avoiding.
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable
+
       - name: npm run build
         working-directory: web
         run: npm run build
