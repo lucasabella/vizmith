@@ -27,7 +27,7 @@ from vizmith.api import (
 )
 from vizmith.ask import ATTEMPTS, SCHEMA
 from vizmith.catalog import UNSUPPORTED, Held
-from vizmith.config import SETTINGS, source_settings
+from vizmith.config import KINDS, SETTINGS, source_settings
 from vizmith.dashboards import Dashboards
 from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
@@ -1191,10 +1191,29 @@ def test_the_configured_kind_is_what_gets_built(monkeypatch, duckdb_file):
         source.cache_clear()
 
 
+@pytest.mark.parametrize("kind", sorted(KINDS))
+def test_every_kind_builds_from_the_settings_it_says_it_needs(kind, monkeypatch):
+    """The settings a kind lists and the values its constructor takes are two lists that
+    have to match, and nothing else would notice they had drifted until a first request
+    failed with a TypeError. Every connector opens its source lazily, so this builds all of
+    them and reaches nothing."""
+    monkeypatch.setenv("VIZMITH_SOURCE", kind)
+    for name in KINDS[kind]:
+        monkeypatch.setenv(name, "configured")
+    source.cache_clear()
+    try:
+        built = source()
+        assert isinstance(built, Held)
+        assert built.scope.values and len(built.scope.values) == len(built.scope.levels)
+        assert built.dialect.quote
+    finally:
+        source.cache_clear()
+
+
 def test_a_kind_nothing_knows_says_what_the_choices_are(monkeypatch):
     """A person one character away from the kind they meant, told so at configuration
     rather than as a failed query."""
-    monkeypatch.setenv("VIZMITH_SOURCE", "postgres")
+    monkeypatch.setenv("VIZMITH_SOURCE", "postgresql")
     source.cache_clear()
     try:
         with pytest.raises(ValueError, match="databricks, duckdb"):

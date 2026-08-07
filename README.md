@@ -70,7 +70,7 @@ asks the endpoint with the schema it is about to send and believes the answer.
 
 ## Stack
 
-Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Sources: Databricks Unity Catalog, DuckDB — a file on your own machine, opened read only, which is what makes this runnable without a warehouse and a bill — BigQuery and Snowflake. All four go through the same catalog interface, and the DuckDB one is what the deterministic half of the suite runs against, so it cannot rot without the suite going red. What each source answers for the contracts that have a `None` in them, and how each was checked, is in [docs/compatibility.md](docs/compatibility.md); BigQuery and Snowflake have not been run against a real project or account yet, and that table says so.
+Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Sources: Databricks Unity Catalog, DuckDB — a file on your own machine, opened read only, which is what makes this runnable without a warehouse and a bill — BigQuery, Snowflake and PostgreSQL. All five go through the same catalog interface, and the DuckDB one is what the deterministic half of the suite runs against, so it cannot rot without the suite going red. What each source answers for the contracts that have a `None` in them, and how each was checked, is in [docs/compatibility.md](docs/compatibility.md); BigQuery, Snowflake and PostgreSQL have not been run against a real project, account or server yet, and that table says so.
 
 Vizmith runs on your machine and serves a browser. The frontend talks to the backend over HTTP and nothing else, which keeps a desktop build possible later without touching application code.
 

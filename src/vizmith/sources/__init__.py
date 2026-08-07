@@ -40,6 +40,10 @@ KINDS: dict[str, tuple[str, ...]] = {
         "VIZMITH_SNOWFLAKE_SCHEMA",
         "VIZMITH_SNOWFLAKE_WAREHOUSE",
     ),
+    "postgres": (
+        "VIZMITH_POSTGRES_SERVICE",
+        "VIZMITH_POSTGRES_SCHEMA",
+    ),
 }
 
 # What a person gets without saying, which is the source that shipped first. A checkout
@@ -73,11 +77,18 @@ def _snowflake(connection: str, database: str, schema: str, warehouse: str) -> C
     )
 
 
+def _postgres(service: str, schema: str) -> Catalog:
+    from vizmith.sources.postgres import PostgresCatalog
+
+    return PostgresCatalog(service=service, schema=schema)
+
+
 _BUILDERS: dict[str, Callable[..., Catalog]] = {
     "databricks": _databricks,
     "duckdb": _duckdb,
     "bigquery": _bigquery,
     "snowflake": _snowflake,
+    "postgres": _postgres,
 }
 
 

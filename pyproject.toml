@@ -44,6 +44,10 @@ bigquery = ["google-cloud-bigquery>=3.25"]
 # from ~/.snowflake/connections.toml, the way the Databricks one reads ~/.databrickscfg.
 snowflake = ["snowflake-connector-python>=3.12"]
 
+# The PostgreSQL source. The credential is libpq's own business: a service in
+# ~/.pg_service.conf, or the standard PG* environment.
+postgres = ["psycopg[binary]>=3.2"]
+
 # DuckDB is the test harness, not part of the product: it writes the fixture Parquet
 # and builds the local database the deterministic tests run against. httpx is not here
 # because the model adapter ships with it. Playwright drives the interface in a browser;
@@ -57,6 +61,7 @@ dev = [
     "duckdb>=1.1",
     "google-cloud-bigquery>=3.25",
     "snowflake-connector-python>=3.12",
+    "psycopg[binary]>=3.2",
     "playwright>=1.49",
 ]
 
