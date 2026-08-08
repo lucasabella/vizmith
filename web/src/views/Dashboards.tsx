@@ -7,7 +7,7 @@ import {
   getDashboards,
   saveDashboard,
 } from "../api";
-import Chart from "../chart/Chart";
+import Chart from "../chart/Deferred";
 import type { Row, Spec } from "../chart/option";
 import { overSeriesLimit } from "../chart/option";
 import {

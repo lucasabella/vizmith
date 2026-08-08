@@ -723,3 +723,28 @@ def test_the_shape_request_costs_the_source_no_statement(page):
     assert any(url.endswith("/api/tables") for url in answered), answered
     # One request for the schema's shape and one for its profiles, not a request per table.
     assert len([url for url in answered if "/api/tables/" in url]) == 0, answered
+
+
+@needs_built_frontend
+def test_the_renderer_is_not_fetched_until_something_needs_a_chart(page):
+    """#104. ECharts is 70% of what this interface ships and nothing on the first paint
+    draws a chart: the shell, the Fields panel and the empty state need none of it, and
+    somebody who opens the app to paste a spec has not drawn one yet either.
+
+    Watched at the network rather than measured, because what the issue is about is when the
+    chunk arrives and not how long anything took. The Fields panel filling is the first
+    paint being usable, which is the moment the renderer must still be absent."""
+    fetched: list[str] = []
+    page.on("request", lambda request: fetched.append(request.url))
+    page.goto(page.url, wait_until="networkidle")
+    page.wait_for_selector(".tree__table", timeout=DRAWN)
+
+    def renderer() -> list[str]:
+        return [url for url in fetched if "/assets/Chart-" in url]
+
+    assert renderer() == [], "the renderer arrived before anything asked for a chart"
+
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+
+    assert renderer(), "a chart was drawn without the renderer being fetched"
