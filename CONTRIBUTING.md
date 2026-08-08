@@ -65,6 +65,14 @@ now true, and they are allowed to be long. `ROADMAP.md` is the other file and is
 what is next, rather than why the built parts are the shape they are. An entry that only says what the code does is one
 the code already said.
 
+**`docs/extending.md` holds the list this file deliberately does not.** What makes a
+contribution acceptable is here — the gate, the rules that do not move, where a decision
+goes. What makes one *complete* is per extension point and lives there: the files a new
+mark, a new well, a new view, a new endpoint or a new source has to touch, in order, with
+the reason each is on the list. Adding a mark is seven steps across two languages, and the
+two whose absence is silent — a mark no rule can refuse, and a series type that is used and
+not registered — are named as such.
+
 **`docs/design.md` holds the half of the house style that governs pixels.** Which surfaces
 exist and which ink is legal on each, why the eight series colours are an order rather than
 a palette and what gate that order clears, the contrast rule and the escape hatch that makes

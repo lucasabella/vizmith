@@ -205,6 +205,10 @@ the shape it is.
 
 - How to build it and what the house style is: [CONTRIBUTING.md](CONTRIBUTING.md), which
   covers the five commands CI runs, the rules that do not move, and where a decision goes.
+- What a change has to touch to be finished: [docs/extending.md](docs/extending.md) — one
+  section per thing somebody would want to add, with the files in order and the reason each
+  one is on the list. Adding a chart type is the longest of them, and two of its steps fail
+  silently when they are missed.
 - What the interface is allowed to look like: [docs/design.md](docs/design.md) — the
   surfaces, the ink that is legal on each, why the eight series colours are an order rather
   than a palette, and the contrast rule that makes the Table tab mandatory. Its numbers are
