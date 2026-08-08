@@ -174,6 +174,8 @@ what is missing rather than a wish list. [ROADMAP.md](ROADMAP.md) is where the d
 already made are written down, including the ones that were tried and cut, which is usually
 the faster way to find out why something is the shape it is.
 
+- How to build it and what the house style is: [CONTRIBUTING.md](CONTRIBUTING.md), which
+  covers the five commands CI runs, the rules that do not move, and where a decision goes.
 - Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - Reporting a vulnerability: [SECURITY.md](SECURITY.md). Please use the private route
   rather than an issue, because people run Vizmith against their own warehouses.
