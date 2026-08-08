@@ -1,0 +1,62 @@
+{
+  "spec_version": "1",
+  "title": "Revenue since a month the filter does not actually ask for",
+  "query": {
+    "from": "orders",
+    "joins": [
+      {
+        "table": "customers",
+        "type": "inner",
+        "on": [
+          {
+            "left": "orders.customer_id",
+            "right": "customers.id"
+          }
+        ]
+      }
+    ],
+    "filters": [
+      {
+        "column": "orders.order_date",
+        "op": ">=",
+        "value": {
+          "relative": "now",
+          "unit": "month"
+        }
+      }
+    ],
+    "group_by": [
+      {
+        "column": "customers.country"
+      }
+    ],
+    "aggregates": [
+      {
+        "fn": "sum",
+        "column": "orders.total",
+        "as": "revenue"
+      }
+    ],
+    "order_by": [
+      {
+        "column": "revenue",
+        "direction": "desc"
+      }
+    ],
+    "limit": 10
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": {
+        "field": "country",
+        "type": "nominal"
+      },
+      "y": {
+        "field": "revenue",
+        "type": "quantitative",
+        "title": "Revenue (EUR)"
+      }
+    }
+  }
+}

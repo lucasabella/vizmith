@@ -1,4 +1,5 @@
 import copy
+import datetime as dt
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -7,7 +8,7 @@ import pytest
 from conftest import DUCKDB, FixtureCatalog, needs_warehouse, shapes
 
 from vizmith.catalog import Scope
-from vizmith.query import build, execute
+from vizmith.query import build, execute, resolve
 from vizmith.spec import output_columns
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
@@ -15,6 +16,7 @@ VALID = sorted((FIXTURES / "valid").glob("*.json"))
 INVALID = sorted((FIXTURES / "invalid").glob("*.json"))
 
 MULTI_SERIES = FIXTURES / "valid" / "revenue_by_category_stacked.json"
+REVENUE_BY_COUNTRY = FIXTURES / "valid" / "revenue_by_country.json"
 
 
 def load(path: Path) -> dict:
@@ -271,3 +273,105 @@ def test_a_source_that_spells_truncation_differently_gets_its_own_spelling(catal
 
     assert 'DATE_TRUNC("vizmith"."shop"."orders"."order_date", month)' in sql
     assert "date_trunc(" not in sql
+
+
+def at(*when: int) -> dt.datetime:
+    """A moment on the wall clock, which is what the builder resolves a relative value
+    against. Naive on purpose and in one place: the zone is the machine's, because "today"
+    is the civil day of the person asking rather than UTC's."""
+    return dt.datetime(*when)  # noqa: DTZ001
+
+
+NOON = at(2026, 8, 8, 14, 30, 45)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ({"relative": "now"}, "2026-08-08 14:30:45"),
+        ({"relative": "today"}, "2026-08-08"),
+        ({"relative": "start_of", "unit": "hour"}, "2026-08-08 14:00:00"),
+        ({"relative": "start_of", "unit": "day"}, "2026-08-08"),
+        ({"relative": "start_of", "unit": "week"}, "2026-08-03"),
+        ({"relative": "start_of", "unit": "month"}, "2026-08-01"),
+        ({"relative": "start_of", "unit": "quarter"}, "2026-07-01"),
+        ({"relative": "start_of", "unit": "year"}, "2026-01-01"),
+        ({"relative": "ago", "unit": "hour", "count": 6}, "2026-08-08 08:30:45"),
+        ({"relative": "ago", "unit": "day", "count": 30}, "2026-07-09"),
+        ({"relative": "ago", "unit": "week", "count": 2}, "2026-07-25"),
+        ({"relative": "ago", "unit": "month", "count": 1}, "2026-07-08"),
+        ({"relative": "ago", "unit": "quarter", "count": 1}, "2026-05-08"),
+        ({"relative": "ago", "unit": "year", "count": 2}, "2024-08-08"),
+    ],
+    ids=lambda entry: entry if isinstance(entry, str) else "",
+)
+def test_a_relative_value_resolves_to_the_text_a_written_date_would_have_been(value, expected):
+    """The whole closed set, against a clock a test holds still. Text rather than a date
+    object because that is the shape a literal date already arrives in, so a relative filter
+    travels the path a written one has always travelled."""
+    assert resolve(value, NOON) == expected
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (at(2026, 3, 31, 9, 0), "2026-02-28"),
+        (at(2024, 3, 31, 9, 0), "2024-02-29"),
+        (at(2026, 1, 31, 9, 0), "2025-12-31"),
+    ],
+    ids=["into a shorter month", "into a leap February", "across a year"],
+)
+def test_a_month_ago_stays_inside_the_month_it_names(day, expected):
+    """Calendar months, counted rather than approximated: thirty days before the 31st of
+    March is not "a month ago" to anybody. Where the target month is shorter the day is
+    clamped, which is the only answer that stays inside the month it names."""
+    assert resolve({"relative": "ago", "unit": "month", "count": 1}, day) == expected
+
+
+def test_a_relative_filter_is_bound_rather_than_written_into_the_statement(catalog):
+    """The rule that does not move: nothing a spec carries reaches the SQL text. A relative
+    value is resolved and then bound exactly as a literal one is, so the statement has a
+    marker where the date goes and the date is in the parameters."""
+    spec = load(REVENUE_BY_COUNTRY)
+    spec["query"]["filters"] = [
+        {"column": "orders.order_date", "op": ">=", "value": {"relative": "ago", "unit": "day", "count": 30}}
+    ]
+
+    sql, parameters = build(spec, catalog, now=NOON)
+
+    assert "2026-07-09" not in sql, "a resolved date was written into the statement"
+    assert "relative" not in sql
+    assert "2026-07-09" in parameters.values()
+
+
+def test_the_same_spec_compiled_on_two_days_asks_two_different_questions(catalog):
+    """What #111 is about. A dashboard is specs, deliberately holding no rows so that a tile
+    shows what the data says now — and a tile filtered on a literal date says what the data
+    said the day it was saved, silently. The same stored spec has to move with the clock."""
+    spec = load(REVENUE_BY_COUNTRY)
+    spec["query"]["filters"] = [
+        {"column": "orders.order_date", "op": ">=", "value": {"relative": "start_of", "unit": "month"}}
+    ]
+
+    _, august = build(spec, catalog, now=at(2026, 8, 20, 12, 0))
+    _, september = build(spec, catalog, now=at(2026, 9, 2, 12, 0))
+
+    assert "2026-08-01" in august.values()
+    assert "2026-09-01" in september.values()
+
+
+def test_a_relative_filter_runs_against_the_source_and_narrows_the_rows(catalog):
+    """Driven rather than asserted on the SQL, because a date the source will not compare is
+    a date this compiles happily and the warehouse refuses. The fixture orders run to
+    2026-06-30, so a window that ends before them returns nothing and one that contains
+    them returns rows — which is the comparison actually happening."""
+    spec = load(REVENUE_BY_COUNTRY)
+    spec["query"]["filters"] = [
+        {"column": "orders.order_date", "op": ">=", "value": {"relative": "start_of", "unit": "year"}}
+    ]
+
+    inside = execute(spec, catalog, now=at(2024, 6, 1, 12, 0))
+    after = execute(spec, catalog, now=at(2030, 1, 1, 12, 0))
+
+    assert inside, "a window containing the fixture data returned nothing"
+    assert after == [], "a window after the fixture data returned rows"
