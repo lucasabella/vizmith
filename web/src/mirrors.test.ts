@@ -1,3 +1,8 @@
+// @vitest-environment node
+//
+// This one reads the spec fixtures off disk, and a jsdom `URL` is not a file URL.
+// The default environment is jsdom now, so a test that only needs Node says so
+// rather than the whole suite paying for the one that does not.
 /**
  * The rules this browser holds a second copy of, asked the same questions the server is.
  *

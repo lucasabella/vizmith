@@ -98,6 +98,19 @@ rather than do it quietly.
 
 ## Tests
 
+There are three tiers and each has a job. A **static render** through
+`renderToStaticMarkup` answers "what does this draw", is the fastest thing here, and cannot
+press anything. A **DOM test** — the `*.dom.test.tsx` files, jsdom and Testing Library —
+answers what a control does: a drop, a drill, a handler, two answers arriving out of order.
+The **browser suite** in `tests/test_interface.py` is deliberately a handful of flows rather
+than a mirror of the other two, because a browser suite that tests controls is slow twice
+over and gets deleted the first time somebody has to fix it in a hurry; what belongs there
+is what crosses a view, a reload or a repaint.
+
+Put a test in the cheapest tier that can hold the property. A test that drives a component
+is coupled to how that component is built, which is what makes suites rot, so assert on what
+a person sees rather than on internals.
+
 Name a test for the property it holds, as a sentence:
 `test_a_burst_that_is_still_reading_keeps_what_it_read_at_the_start_of_it`. The docstring
 says why the property matters, which is usually a bug that happened.
