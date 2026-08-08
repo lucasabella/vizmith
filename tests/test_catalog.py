@@ -360,9 +360,9 @@ class Ticks:
         return self.now
 
 
-def held(catalog, hold=10.0, shape=100.0):
+def held(catalog, hold=10.0, shape=100.0, ceiling=40.0):
     clock = Ticks()
-    return Held(catalog, hold=hold, shape=shape, clock=clock), clock
+    return Held(catalog, hold=hold, shape=shape, ceiling=ceiling, clock=clock), clock
 
 
 def test_a_freshness_answer_inside_the_window_is_asked_of_the_source_once(catalog):
@@ -389,6 +389,62 @@ def test_a_freshness_answer_is_asked_again_once_the_window_has_passed(catalog):
 
     assert source.modified("vizmith.shop.orders") == "2"
     assert catalog.freshness_checks == ["vizmith.shop.orders"] * 2
+
+
+def test_a_burst_that_is_still_reading_keeps_what_it_read_at_the_start_of_it(catalog):
+    """The bug the measurement found. A cold read of 152 tables takes about 25 seconds
+    against a 30 second window, so held per answer the front of the schema was seconds from
+    expiring by the time the back of it was read, and the next request paid for the front
+    again. Here the whole read takes longer than the hold, and it is still one burst.
+
+    Eight tables at two ticks each is 16, well past the hold of 10, and the answer taken
+    first is still the answer served at the end of it."""
+    source, clock = held(catalog)
+
+    for name in catalog.tables():
+        source.modified(name)
+        clock.now += 2.0
+    first = catalog.tables()[0]
+    source.modified(first)
+
+    assert catalog.freshness_checks == catalog.tables(), "the front of the schema was read twice"
+    assert source.modified(first) == "1"
+
+
+def test_a_burst_ends_when_the_reading_does(catalog):
+    """What keeps a burst from being the cache the profile file exists to refuse. It runs
+    while the gaps between reads are shorter than the hold, and one gap longer than that
+    ends it, whatever came before."""
+    source, clock = held(catalog)
+    source.modified("vizmith.shop.orders")
+
+    clock.now += 5.0
+    source.modified("vizmith.shop.customers")
+    clock.now += 10.0
+    catalog.modified_times["orders"] = "2"
+
+    assert source.modified("vizmith.shop.orders") == "2", "a burst outlived the reading"
+
+
+def test_a_burst_cannot_hold_an_answer_past_the_ceiling(catalog):
+    """Where the harm is bounded. Somebody working steadily reads often enough that the gaps
+    never reach the hold, so without this the burst — and the answer it is holding — would
+    last as long as they kept working."""
+    source, clock = held(catalog, hold=10.0, ceiling=40.0)
+    tables = catalog.tables()
+    source.modified(tables[0])
+
+    # A read every five seconds, so the hold never sees a gap, and a table it has not read
+    # before every time, so each one is a read of the source rather than a hit. Seven of
+    # them reaches 35 seconds, and the eighth gesture lands at 40.
+    for name in tables[1:]:
+        clock.now += 5.0
+        source.modified(name)
+    clock.now += 5.0
+    catalog.freshness_checks.clear()
+
+    assert source.modified(tables[0]) == "1"
+    assert catalog.freshness_checks == [tables[0]], "the ceiling did not end the burst"
 
 
 def test_holding_one_tables_answer_says_nothing_about_another(catalog):

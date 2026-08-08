@@ -29,6 +29,7 @@ from vizmith.ask import ATTEMPTS, SCHEMA
 from vizmith.catalog import UNSUPPORTED, Held
 from vizmith.config import KINDS, SETTINGS, source_settings
 from vizmith.dashboards import Dashboards
+from vizmith.model import ATTEMPTS as SENDS
 from vizmith.model import PROBE_PROMPT, Model, ModelError
 from vizmith.profiler import SAMPLE_THRESHOLD, TableProfile, profile_table
 from vizmith.query import build
@@ -282,7 +283,14 @@ def posting(catalog):
                 return httpx.Response(status, json={"error": "not answering that"})
             return httpx.Response(200, json=_completion(replies.pop(0) if replies else "{}"))
 
-        writer = Model(ENDPOINT, httpx.Client(transport=httpx.MockTransport(handler)))
+        # Nothing waits. The adapter sends a request that was refused with a 429 or a 5xx
+        # again, and the backoff between the attempts is asserted in test_model.py rather
+        # than slept through here.
+        writer = Model(
+            ENDPOINT,
+            httpx.Client(transport=httpx.MockTransport(handler)),
+            sleep=lambda _: None,
+        )
         app.dependency_overrides[source] = lambda: catalog
         app.dependency_overrides[model] = lambda: writer
         return TestClient(app, base_url="http://127.0.0.1:8000"), sent
@@ -456,8 +464,12 @@ def test_the_endpoint_is_probed_once_however_many_questions_follow(posting):
 def test_a_probe_that_never_got_an_answer_is_not_remembered_as_a_no(posting):
     """A 503 says nothing about the endpoint. Remembering it would send every question for
     the rest of the process down the unconstrained path for a reason that has nothing to
-    do with what the endpoint can do."""
-    client, sent = posting(json.dumps(load(REVENUE_BY_COUNTRY)), probe=(503, 200))
+    do with what the endpoint can do.
+
+    The 503 is answered for every attempt the adapter makes, because a server that broke is
+    one it sends the request to again: what is being tested is a probe that never got an
+    answer, and one 503 that clears is a probe that did."""
+    client, sent = posting(json.dumps(load(REVENUE_BY_COUNTRY)), probe=(503,) * SENDS + (200,))
 
     failed = client.post("/api/ask", json={"question": "revenue by country"})
     answered = client.post("/api/ask", json={"question": "revenue by country"})
@@ -465,7 +477,7 @@ def test_a_probe_that_never_got_an_answer_is_not_remembered_as_a_no(posting):
     assert failed.status_code == 502
     assert failed.json()["spoke"] == "model"
     assert answered.status_code == 200
-    assert [_is_probe(request) for request in sent] == [True, True, False]
+    assert [_is_probe(request) for request in sent] == [True] * (SENDS + 1) + [False]
 
 
 @pytest.mark.parametrize("path", VALID, ids=lambda p: p.name)

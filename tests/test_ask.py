@@ -4,10 +4,11 @@ import typing
 from collections.abc import Sequence
 from pathlib import Path
 
+import httpx
 import pytest
 
 from vizmith.ask import ATTEMPTS, Answer, ask, prompt
-from vizmith.model import Completion
+from vizmith.model import Completion, Endpoint, Model
 from vizmith.profiler import TableProfile, profile_table
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
@@ -32,6 +33,27 @@ class ScriptedModel:
         """There is no endpoint here to honour a schema. Callers that probe before they
         ask, which the API does, get the answer that costs them nothing."""
         return False
+
+
+def limited(*script: str | int) -> tuple[Model, list]:
+    """A real adapter over a transport that answers each entry of the script in turn: an
+    integer is a status the endpoint refuses with, a string is a completion. The requests
+    it was actually sent come back beside it, because the point of this is the difference
+    between what was sent and what the caller was handed."""
+    sent: list[httpx.Request] = []
+    answers = list(script)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        said = answers.pop(0) if answers else "{}"
+        if isinstance(said, int):
+            return httpx.Response(said, json={"error": "slow down"})
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": said}, "finish_reason": "stop"}]}
+        )
+
+    endpoint = Endpoint(base_url="https://endpoint.invalid/v1", model="a-model", api_key="k")
+    return Model(endpoint, httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda _: None), sent
 
 
 @pytest.fixture
@@ -74,6 +96,20 @@ def test_the_default_attempt_limit_is_the_documented_one(tables):
     model = ScriptedModel(*[json.dumps(REJECTED)] * 10)
 
     assert ask("revenue by country", tables, model).attempts == ATTEMPTS
+
+
+def test_a_rate_limit_does_not_spend_an_attempt_this_loop_is_counting(tables):
+    """The two loops are separate on purpose and this is what that separation buys. A
+    transport retry is the same prompt sent again because the endpoint would not take it;
+    an attempt here is a different prompt, because the validator rejected the answer. A
+    shared budget would mean a 429 costing the model a chance to correct itself."""
+    model, sent = limited(429, json.dumps(REJECTED), 429, 429, json.dumps(VALID))
+
+    answer = ask("revenue by country", tables, model)
+
+    assert answer.spec == VALID
+    assert answer.attempts == 2, "a retried request was counted as an attempt"
+    assert len(sent) == 5, "the request was not sent again for the rate limits"
 
 
 def test_an_answer_that_is_not_json_is_a_failed_attempt_rather_than_a_crash(tables):
