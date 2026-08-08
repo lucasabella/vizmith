@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { critique, getShape, getTables, Refused, type Cost, type Suggestion } from "./api";
+import { ask, critique, execute, getHealth, getShape, getTables, Refused, type Answered, type Cost, type Suggestion } from "./api";
 import { fromProfiles, fromShape, merged, type TableFields } from "./panels/fields";
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";
 import Data from "./views/Data";
 import Dashboards from "./views/Dashboards";
-import { draftIn, drawable, type Draft, type Field } from "./spec/spec";
+import { asSpec, draftIn, drawable, type Draft, type Field } from "./spec/spec";
 import Boundary from "./Boundary";
 import { counted } from "./counted";
-import { announced, REJECTED, SAID, type Outcome, type Spoke, type Working } from "./outcome";
+import { announced, refusal, type Outcome, type Working } from "./outcome";
 import { sequence } from "./runs";
 import {
   NOTHING,
@@ -74,12 +74,11 @@ export default function App() {
   const running = working !== null;
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((response) => response.json())
-      .then((body) => {
-        setBackend(body.version);
-        setSource(body.source);
-        setModel(body.model);
+    getHealth()
+      .then((said) => {
+        setBackend(said.version);
+        setSource(said.source);
+        setModel(said.model);
       })
       .catch(() => setBackend(null));
   }, []);
@@ -150,7 +149,7 @@ export default function App() {
    * says what the canvas waits with and means the spec that comes back replaces whatever
    * is in the editor. A spec that was typed passes none, and keeps its own text.
    */
-  const send = async (endpoint: string, payload: object, question: string | null = null) => {
+  const send = async (asking: () => Promise<Answered>, question: string | null = null) => {
     // Which run this is. Only the one still being waited for writes: see `runs.ts` for the
     // answer that would otherwise be drawn under the wrong spec.
     const latest = runs.current.start();
@@ -159,41 +158,22 @@ export default function App() {
     // one, so the second opinion goes rather than hanging over a chart it is not about.
     setSuggestion(null);
     try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = await response.json();
+      const answered = await asking();
       if (!latest()) return;
       // A question reports what it cost, whether or not it produced a spec — three attempts
       // and nothing to show is the expensive case. Running a spec by hand reaches no model,
       // so it carries no cost and clears the last one rather than leaving it under a chart
       // it is not about.
-      setSpent(body.cost ? { cost: body.cost as Cost, what: "this question" } : null);
-      if (response.ok) {
-        setOutcome({ kind: "chart", spec: body.spec, rows: body.rows });
-        if (question !== null) setText(JSON.stringify(body.spec, null, 2));
-      } else if (body.spoke) {
-        setOutcome({ kind: "refused", spoke: body.spoke, lines: body.errors, ...SAID[body.spoke as Spoke] });
-      } else if (body.errors) {
-        setOutcome({ kind: "refused", heading: "What the validator said", lines: body.errors, plain: REJECTED });
-      } else {
-        setOutcome({
-          kind: "refused",
-          heading: "What the server said",
-          lines: [`${response.status} ${response.statusText}`],
-          plain: "The server answered without saying what failed, so there is nothing here to act on but the status.",
-        });
-      }
+      setSpent(answered.cost ? { cost: answered.cost, what: "this question" } : null);
+      setOutcome({ kind: "chart", spec: answered.spec, rows: answered.rows });
+      if (question !== null) setText(JSON.stringify(answered.spec, null, 2));
     } catch (error) {
       if (!latest()) return;
-      setOutcome({
-        kind: "refused",
-        heading: "What the browser said",
-        lines: [(error as Error).message],
-        plain: "The request never reached the server.",
-      });
+      setOutcome(refusal(error));
+      // A refusal can carry a cost too, and the expensive refusal is the one that took
+      // three attempts and produced nothing.
+      const cost = error instanceof Refused ? error.cost : undefined;
+      setSpent(cost ? { cost, what: "this question" } : null);
     } finally {
       // Only the latest run clears it, so a superseded answer arriving first does not take
       // the canvas off "Running the spec" while the run being waited for is still in flight.
@@ -203,7 +183,7 @@ export default function App() {
 
   const run = () => {
     try {
-      send("/api/execute", { spec: JSON.parse(text) });
+      send(() => execute(JSON.parse(text)));
     } catch (error) {
       setOutcome({
         kind: "refused",
@@ -216,7 +196,7 @@ export default function App() {
 
   /** The model writes the spec, so the answer replaces whatever is in the editor. */
   const askQuestion = () => {
-    if (question.trim() !== "") send("/api/ask", { question }, question);
+    if (question.trim() !== "") send(() => ask(question), question);
   };
 
   /**
@@ -230,14 +210,14 @@ export default function App() {
    */
   const edited = (next: Draft) => {
     setText(JSON.stringify(next, null, 2));
-    if (drawable(next)) send("/api/execute", { spec: next });
+    if (drawable(next)) send(() => execute(asSpec(next)));
   };
 
   /** A drill replaces the chart, and keeps the one it replaced. */
   const drilled = (next: Draft) => {
     setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
     setText(JSON.stringify(next, null, 2));
-    send("/api/execute", { spec: next });
+    send(() => execute(asSpec(next)));
   };
 
   /**
@@ -278,7 +258,7 @@ export default function App() {
     if (!next) return;
     setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
     setText(JSON.stringify(next, null, 2));
-    send("/api/execute", { spec: next });
+    send(() => execute(next));
   };
 
   /**
@@ -290,7 +270,7 @@ export default function App() {
   const correct = (tile: Tile) => {
     setArrangement({ ...arrangement, editing: tile });
     setText(JSON.stringify(tile.spec, null, 2));
-    send("/api/execute", { spec: tile.spec });
+    send(() => execute(tile.spec));
     setView("chart");
   };
 

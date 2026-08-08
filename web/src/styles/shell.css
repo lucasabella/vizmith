@@ -620,6 +620,14 @@ button:focus-visible {
   max-width: 60ch;
 }
 
+/* The plain sentence directly under the machine's own words, with no heading between them.
+   That is how the two places too small for a heading say it — a dashboard tile, and the
+   strip above a dashboard's tiles — and without this they touch. The canvas is unaffected:
+   it puts "In plain terms" in between, so the two are never adjacent there. */
+.refusal__lines + .refusal__plain {
+  margin-top: 11px;
+}
+
 .pages {
   height: var(--h-pages);
   flex: none;

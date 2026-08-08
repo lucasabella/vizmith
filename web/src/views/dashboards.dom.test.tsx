@@ -28,7 +28,7 @@ vi.mock("../api", async () => {
   };
 });
 
-const { Refused, deleteDashboard, getDashboards, saveDashboard } = await import("../api");
+const { Refused, deleteDashboard, execute, getDashboards, saveDashboard } = await import("../api");
 
 const spec = (title: string): Spec =>
   ({
@@ -159,5 +159,43 @@ describe("while the store is being asked", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(getDashboards).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("a tile whose spec was refused", () => {
+  // The tile ran the same endpoint the canvas runs and said "What the source said" over
+  // every failure it got back, with the first line and nothing else. Two of those headings
+  // were untrue — a spec the validator rejected and a request this server would not spend a
+  // query on both reached no source — and the missing lines were the rest of what the
+  // validator had said about the tile.
+
+  it("names the part that refused, rather than the source it never reached", async () => {
+    vi.mocked(execute).mockRejectedValue(
+      new Refused(["That is more than 100 queries in a minute. Wait 12 seconds."], {
+        spoke: "rations",
+      }),
+    );
+    view();
+
+    expect(await screen.findByText("What this server would not spend")).toBeDefined();
+    expect(screen.queryByText("What the source said")).toBeNull();
+    expect(screen.getByText(/Wait 12 seconds/)).toBeDefined();
+  });
+
+  it("shows every line the validator gave, not the first one", async () => {
+    vi.mocked(execute).mockRejectedValue(
+      new Refused(["'limit' is a required property", "'mark' is not one of the marks"]),
+    );
+    view();
+
+    expect(await screen.findByText("What the validator said")).toBeDefined();
+    expect(screen.getByText("'mark' is not one of the marks")).toBeDefined();
+  });
+
+  it("still says something when the request never left the browser", async () => {
+    vi.mocked(execute).mockRejectedValue(new TypeError("Failed to fetch"));
+    view();
+
+    expect(await screen.findByText("What the browser said")).toBeDefined();
   });
 });

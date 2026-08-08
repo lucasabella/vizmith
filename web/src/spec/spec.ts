@@ -58,6 +58,12 @@ export const drawable = (draft: Draft): draft is Draft & { chart: { encoding: { 
  * the JSON and the wells cannot drift apart. */
 export const asDraft = (spec: Spec): Draft => spec as unknown as Draft;
 
+/** The way back, for a draft on its way to the endpoint that runs one. A cast for the same
+ * reason `asDraft` is: they are one object in two views, and what the browser can check is
+ * whether it is *shaped* like a spec — `drawable` — while whether it is legal is the
+ * validator's, which is the judge this request is on its way to. */
+export const asSpec = (draft: Draft): Spec => draft as unknown as Spec;
+
 const anObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

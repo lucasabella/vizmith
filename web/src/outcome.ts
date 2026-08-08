@@ -1,10 +1,11 @@
+import { Refused, type Spoke } from "./api";
 import { overSeriesLimit, type Row, type Spec } from "./chart/option";
 import { counted } from "./counted";
 
-/** Which part refused, as the server named it. It is the only thing that can: a question
- * passes through the source, the model and the source again, and from the browser they are
- * one request. */
-export type Spoke = "source" | "model" | "spec" | "rations";
+/** Which part refused, as the server named it. Declared in `api.ts`, because it is the
+ * server's own field; what each one means to a person is `SAID` below, which is this
+ * interface's opinion and is the half that belongs here. */
+export type { Spoke };
 
 /**
  * What the canvas is showing. A refusal carries the machine's own words and a sentence
@@ -15,6 +16,11 @@ export type Outcome =
   | { kind: "nothing" }
   | { kind: "chart"; spec: Spec; rows: Row[] }
   | { kind: "refused"; heading: string; lines: string[]; plain: string; spoke?: Spoke };
+
+/** A refusal on its own, for the places that hold one without holding a canvas. A dashboard
+ * tile is either drawing or refusing; there is no "nothing" for it, because a tile that has
+ * not answered yet is running its spec. */
+export type Refusal = Extract<Outcome, { kind: "refused" }>;
 
 /** What is in flight. Not an Outcome: running is the absence of one so far. */
 export type Working = "question" | "spec" | null;
@@ -47,6 +53,50 @@ export const SAID: Record<Spoke, { heading: string; plain: string }> = {
       "The spec passed validation, and this rule runs after it because it needs the compiled query, so nothing ran against the source. Correct what is named above and run it again.",
   },
 };
+
+/**
+ * A refusal, turned into what the canvas shows: the machine's own words, and a sentence
+ * saying what they mean.
+ *
+ * This is the half of a failure that belongs to this interface. The transport is `api.ts`,
+ * which throws `Refused` carrying the server's words and the server's `spoke`; what those
+ * mean to somebody reading them is `SAID`, and it is here. Written once, so that the two
+ * callers of the same endpoint — the canvas and a dashboard tile — cannot disagree about
+ * what a refusal is, which they did.
+ *
+ * Three cases, and the third is the one that is easy to lose: a server that failed without
+ * saying what failed is not a validator with an empty list, and telling somebody to correct
+ * what is named above when nothing is named above is worse than saying there is nothing to
+ * act on but the status.
+ */
+export function refusal(error: unknown): Refusal {
+  if (!(error instanceof Refused)) {
+    return {
+      kind: "refused",
+      heading: "What the browser said",
+      lines: [(error as Error).message],
+      plain: "The request never reached the server.",
+    };
+  }
+  if (error.spoke !== undefined) {
+    return { kind: "refused", spoke: error.spoke, lines: error.errors, ...SAID[error.spoke] };
+  }
+  if (!error.said) {
+    return {
+      kind: "refused",
+      heading: "What the server said",
+      lines: error.errors,
+      plain:
+        "The server answered without saying what failed, so there is nothing here to act on but the status.",
+    };
+  }
+  return {
+    kind: "refused",
+    heading: "What the validator said",
+    lines: error.errors,
+    plain: REJECTED,
+  };
+}
 
 /**
  * What the canvas has become, in one sentence, for the live region that announces it.

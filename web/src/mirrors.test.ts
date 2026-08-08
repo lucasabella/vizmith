@@ -23,6 +23,7 @@ import { describe, expect, it } from "vitest";
 import { SERIES } from "./chart/option";
 import { COLUMNS, NAME_LIMIT, TILE_LIMIT, nameProblem } from "./dashboard/dashboard";
 import { namesTable, outputColumns, type Query } from "./spec/spec";
+import { SAID } from "./outcome";
 
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 const names = JSON.parse(read("../../tests/fixtures/mirrors/names.json"));
@@ -175,5 +176,35 @@ describe("the dashboard constants", () => {
     expect(value("COLUMNS")).toBe(COLUMNS);
     expect(value("TILE_LIMIT")).toBe(TILE_LIMIT);
     expect(value("NAME_LIMIT")).toBe(NAME_LIMIT);
+  });
+});
+
+/**
+ * Which parts can refuse, as the server names them.
+ *
+ * `spoke` is a field the server sets and the browser branches on, so the two hold the same
+ * closed set in two languages. What drift looks like here is a fifth part learning to
+ * refuse — a cache, a second model call, whatever it turns out to be — and every interface
+ * that catches it falling through to the sentence for a refusal it is not: `refusal()` in
+ * `outcome.ts` reads an unknown name as `undefined` and heads it "What the validator said",
+ * which is the wrong heading and the wrong next move, silently.
+ *
+ * Only `SAID` is asserted, because TypeScript already ties the rest to it: `SAID` is typed
+ * `Record<Spoke, …>`, so a key here that the union does not have, or a member of the union
+ * with no key, is a compile error rather than something this test has to catch twice.
+ */
+describe("the parts that can refuse", () => {
+  it("are the parts the browser has a sentence for", () => {
+    const python = read("../../src/vizmith/api.py");
+    // Two ways the server writes one. Most refusals go through `refused(spoke, …)`; the
+    // rationing handler writes the body itself, because it is an exception handler and has
+    // a `Retry-After` header to set as well.
+    const named = [
+      ...[...python.matchAll(/\brefused\(\s*"([a-z]+)"/g)].map((match) => match[1]),
+      ...[...python.matchAll(/"spoke":\s*"([a-z]+)"/g)].map((match) => match[1]),
+    ];
+
+    expect(named.length).toBeGreaterThan(0);
+    expect([...new Set(named)].sort()).toEqual(Object.keys(SAID).sort());
   });
 });

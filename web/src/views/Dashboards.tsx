@@ -1,15 +1,9 @@
 import { useEffect, useState } from "react";
-import {
-  Refused,
-  deleteDashboard,
-  execute,
-  getDashboard,
-  getDashboards,
-  saveDashboard,
-} from "../api";
+import { deleteDashboard, execute, getDashboard, getDashboards, saveDashboard } from "../api";
 import Chart from "../chart/Deferred";
 import type { Row, Spec } from "../chart/option";
 import { overSeriesLimit } from "../chart/option";
+import { refusal, type Refusal } from "../outcome";
 import {
   COLUMNS,
   NOTHING,
@@ -59,8 +53,11 @@ export default function Dashboards({
   onEdit: (tile: Tile) => void;
 }) {
   const [list, setList] = useState<Saved[] | null>(null);
-  // What the last save or open said, in the server's words where it spoke.
-  const [refusal, setRefusal] = useState<string[] | null>(null);
+  // What the last save or open said, read the way every other refusal in this interface is
+  // read. A save is refused by the validator about as often as by anything else — a tile
+  // whose spec no longer passes the rules is the usual way — and this panel used to head
+  // that list "What the server said" and stop there.
+  const [refused, setRefused] = useState<Refusal | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
@@ -75,7 +72,7 @@ export default function Dashboards({
   const read = () => {
     getDashboards()
       .then((body) => setList(body.dashboards))
-      .catch((error: Error) => setRefusal([error.message]));
+      .catch((error: unknown) => setRefused(refusal(error)));
   };
 
   useEffect(read, []);
@@ -84,10 +81,10 @@ export default function Dashboards({
     setWorking(true);
     try {
       onChange(opened(await getDashboard(opening)));
-      setRefusal(null);
+      setRefused(null);
       setNote(null);
     } catch (error) {
-      setRefusal(errorsOf(error));
+      setRefused(refusal(error));
     } finally {
       setWorking(false);
     }
@@ -96,7 +93,14 @@ export default function Dashboards({
   const save = async () => {
     const problem = nameProblem(name);
     if (problem !== null) {
-      setRefusal([problem]);
+      // Refused here, before anything was sent, which is why it does not go through
+      // `refusal`: that reads what a server said, and no server was asked.
+      setRefused({
+        kind: "refused",
+        heading: "What the name rule said",
+        lines: [problem],
+        plain: "The name is checked before the dashboard is sent, so nothing was saved.",
+      });
       return;
     }
     setWorking(true);
@@ -106,11 +110,11 @@ export default function Dashboards({
       // stored tiles back would mint new ids for tiles that did not change, and every one of
       // them would run its query again for a save that drew nothing new.
       onChange({ ...arrangement, name: stored.name, savedAs: stored.name });
-      setRefusal(null);
+      setRefused(null);
       setNote(`Saved as ${stored.name}.`);
       read();
     } catch (error) {
-      setRefusal(errorsOf(error));
+      setRefused(refusal(error));
     } finally {
       setWorking(false);
     }
@@ -129,11 +133,11 @@ export default function Dashboards({
       const stored = await saveDashboard(name.trim(), tiles);
       await deleteDashboard(from);
       onChange({ ...arrangement, name: stored.name, savedAs: stored.name });
-      setRefusal(null);
+      setRefused(null);
       setNote(`Renamed ${from} to ${stored.name}.`);
       read();
     } catch (error) {
-      setRefusal(errorsOf(error));
+      setRefused(refusal(error));
     } finally {
       setWorking(false);
     }
@@ -147,7 +151,7 @@ export default function Dashboards({
       setNote(`Deleted ${forgetting}.`);
       read();
     } catch (error) {
-      setRefusal(errorsOf(error));
+      setRefused(refusal(error));
     } finally {
       setWorking(false);
     }
@@ -244,19 +248,20 @@ export default function Dashboards({
               a save that happened. "Saved as …" is polite, because it is agreement with
               what was just pressed and it can wait for a gap. */}
           <div role="alert">
-            {refusal === null ? null : (
+            {refused === null ? null : (
               <div className="refusal">
-                <p className="refusal__head">What the server said</p>
+                <p className="refusal__head">{refused.heading}</p>
                 <ul className="refusal__lines">
-                  {refusal.map((line) => (
+                  {refused.lines.map((line) => (
                     <li key={line}>{line}</li>
                   ))}
                 </ul>
+                <p className="refusal__plain">{refused.plain}</p>
               </div>
             )}
           </div>
           <div role="status" aria-live="polite">
-            {refusal === null && note !== null ? <p className="dash__note">{note}</p> : null}
+            {refused === null && note !== null ? <p className="dash__note">{note}</p> : null}
           </div>
 
           {tiles.length === 0 ? (
@@ -355,25 +360,40 @@ export function TileChart({ spec }: { spec: Spec }) {
   // drew the new ones. Keying the answer on the spec says "I have nothing for this one
   // yet" without a second render, and it is what the answer is actually about — a result
   // set that arrived for a spec this tile no longer holds is not this tile's answer.
-  const [answer, setAnswer] = useState<{ spec: Spec; rows?: Row[]; refusal?: string } | null>(null);
+  const [answer, setAnswer] = useState<{ spec: Spec; rows?: Row[]; refused?: Refusal } | null>(
+    null,
+  );
 
   useEffect(() => {
     let live = true;
     execute(spec)
       .then((body) => live && setAnswer({ spec, rows: body.rows }))
-      .catch((error: Error) => live && setAnswer({ spec, refusal: error.message }));
+      // The same reading of a failure the canvas gets, from the same function. A tile said
+      // "What the source said" over the top of every refusal, including the ones no source
+      // ever saw: a spec the validator rejected, and a request this server would not spend
+      // a query on. Both sent a person to check a warehouse that was never touched.
+      .catch((error: unknown) => live && setAnswer({ spec, refused: refusal(error) }));
     return () => {
       live = false;
     };
   }, [spec]);
 
-  const { rows = null, refusal = null } = answer?.spec === spec ? answer : {};
+  const { rows = null, refused = null } = answer?.spec === spec ? answer : {};
 
-  if (refusal !== null) {
+  if (refused !== null) {
     return (
       <div className="grid__refusal">
-        <p className="refusal__head">What the source said</p>
-        <p className="refusal__plain">{refusal}</p>
+        <p className="refusal__head">{refused.heading}</p>
+        <ul className="refusal__lines">
+          {refused.lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        {/* The plain sentence, without the "In plain terms" heading the canvas puts above
+            it. A tile is half a column wide and holds a chart the rest of the time; the
+            sentence is the part that says what to do, and a heading introducing one line
+            is the part that does not fit. */}
+        <p className="refusal__plain">{refused.plain}</p>
       </div>
     );
   }
@@ -392,7 +412,3 @@ export function TileChart({ spec }: { spec: Spec }) {
 
   return <Chart spec={spec} rows={rows} />;
 }
-
-/** A refusal carries the server's own list; anything else has one message. */
-const errorsOf = (error: unknown): string[] =>
-  error instanceof Refused ? error.errors : [(error as Error).message];
