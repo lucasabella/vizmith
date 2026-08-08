@@ -161,7 +161,7 @@ The model does not write SQL. It returns a query IR: a JSON description of table
 The spec is versioned JSON, validated against a schema, diffable in git. Every feature produces the same output type:
 
 - Type a question, get a spec.
-- Drag a column into a well, get a spec.
+- Drag a column into a well — or pick it up from its row and press the well — and get a spec.
 - Click a mark, get the same spec narrowed to what you clicked.
 - Adjust the spec by hand if you want more control.
 - Save a set of specs as a dashboard.

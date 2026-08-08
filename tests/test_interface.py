@@ -417,6 +417,53 @@ def test_a_column_row_opens_from_the_keyboard_the_way_it_says_it_does(page):
 
 
 @needs_built_frontend
+def test_a_chart_is_built_from_the_keyboard_alone(page):
+    """The interaction the README puts second, reached without a mouse.
+
+    Dragging a column into a well was HTML5 drag and drop and nothing else, so somebody
+    driving this from a keyboard could read the Fields panel, reach every control around it
+    and not build a chart at all. WCAG 2.1.1, level A. Driven with `press` throughout rather
+    than with `click`, because a click on the same buttons proves nothing this file did not
+    already prove.
+    """
+    page.locator(".tree__row--table", has_text="orders").click()
+    take = page.get_by_role("button", name="Pick up total")
+    take.focus()
+    take.press("Enter")
+
+    # Held, and said where a reader hears it rather than only where an eye sees it.
+    assert page.get_by_role("button", name="Put down total").count() == 1
+    assert "Holding total" in page.locator(".wells [role=status]").inner_text()
+
+    place = page.get_by_role("button", name="Place total in Values")
+    place.focus()
+    place.press("Enter")
+
+    chart_drawn(page)
+    assert page.get_by_role("button", name="Pick up total").count() == 1
+
+
+@needs_built_frontend
+def test_a_field_picked_up_can_be_put_down_again(page):
+    """A picked up field is a mode, and a mode with no way out is a trap. Two ways out, on
+    purpose: the control that picked it up, and Escape from wherever the person got to."""
+    page.locator(".tree__row--table", has_text="orders").click()
+    held = page.locator(".wells [role=status]")
+
+    take = page.get_by_role("button", name="Pick up status")
+    take.focus()
+    take.press("Enter")
+    assert "Holding status" in held.inner_text()
+
+    page.get_by_role("button", name="Put down status").press("Enter")
+    assert held.inner_text().strip() == ""
+
+    page.get_by_role("button", name="Pick up status").press("Enter")
+    page.get_by_role("button", name="Place status in Axis").press("Escape")
+    assert held.inner_text().strip() == ""
+
+
+@needs_built_frontend
 def test_the_spec_editor_has_a_name_that_survives_being_typed_in(page):
     """A placeholder is not a name: it is gone the moment there is text in the field."""
     page.get_by_role("button", name="{ } JSON").click()

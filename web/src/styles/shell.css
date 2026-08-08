@@ -999,6 +999,7 @@ button:focus-visible {
 }
 
 .well__drop {
+  width: 100%;
   min-height: 26px;
   display: flex;
   align-items: center;
@@ -1219,6 +1220,41 @@ button:focus-visible {
   font-size: 9px;
   color: var(--rule-2);
   cursor: grab;
+}
+
+/* A column's row and the control that picks it up, side by side. The control is the
+   keyboard's half of the drag, so it is a sibling of the row rather than something inside
+   it: the row is already a button, the one that opens the profile. */
+.tree__line {
+  display: flex;
+  align-items: center;
+}
+
+.tree__take {
+  flex: none;
+  padding: 1px 5px;
+  margin-right: 5px;
+  font-size: 9.5px;
+  color: var(--ink-3);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+  /* Out of the way of a dense tree until it is wanted, and never out of reach: an element
+     at zero opacity is still in the tab order, so :focus-visible is what a keyboard finds
+     and hover is what a mouse finds. Held is always visible, because a control reporting a
+     state nobody can see is the state getting lost. */
+  opacity: 0;
+}
+
+.tree__line:hover .tree__take,
+.tree__take:focus-visible,
+.tree__take[aria-pressed="true"] {
+  opacity: 1;
+}
+
+.tree__take[aria-pressed="true"] {
+  color: var(--chrome-ink);
+  background: var(--chrome);
+  border-color: var(--chrome);
 }
 
 .tree__name {

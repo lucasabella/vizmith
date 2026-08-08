@@ -35,7 +35,7 @@ const profile = (columns: ColumnProfile[]): TableProfile => ({
  * expanded. A static render only reaches the closed state, so the open one is built by
  * rendering the column node through a profile with a single column. */
 const tree = (columns: ColumnProfile[]) =>
-  drawn(<Fields tables={fromProfiles([profile(columns)])} failure={null} onDrag={() => {}} />);
+  drawn(<Fields tables={fromProfiles([profile(columns)])} failure={null} holding={null} onDrag={() => {}} />);
 
 describe("the fields tree", () => {
   it("lists a table with its row count", () => {
@@ -46,13 +46,13 @@ describe("the fields tree", () => {
   });
 
   it("says so when a source is not connected yet", () => {
-    expect(drawn(<Fields tables={[]} failure={null} onDrag={() => {}} />)).toContain(
+    expect(drawn(<Fields tables={[]} failure={null} holding={null} onDrag={() => {}} />)).toContain(
       "once a source is connected",
     );
   });
 
   it("shows what the source refused rather than an empty tree", () => {
-    expect(drawn(<Fields tables={null} failure="the warehouse said no" onDrag={() => {}} />)).toContain(
+    expect(drawn(<Fields tables={null} failure="the warehouse said no" holding={null} onDrag={() => {}} />)).toContain(
       "the warehouse said no",
     );
   });
@@ -68,7 +68,7 @@ describe("the tree before anything has been profiled", () => {
   const shaped = fromShape([
     { table: "vizmith.shop.customers", columns: [{ name: "country", type: "string" }] },
   ]);
-  const outline = drawn(<Fields tables={shaped} failure={null} onDrag={() => {}} />);
+  const outline = drawn(<Fields tables={shaped} failure={null} holding={null} onDrag={() => {}} />);
 
   it("draws the tree from the shape alone", () => {
     // What is on screen while the profiles are still being read, which on a schema nobody
@@ -183,13 +183,15 @@ const TOTAL: Field = { table: "vizmith.shop.orders", column: "total", type: "dec
 const ORDERED: Field = { table: "vizmith.shop.orders", column: "order_date", type: "date" };
 
 const wells = (draft: Draft | null) =>
-  drawn(<Wells draft={draft} dragging={null} onChange={() => {}} onRelationships={() => {}} />);
+  drawn(<Wells draft={draft} dragging={null} onChange={() => {}} onDrag={() => {}} onRelationships={() => {}} />);
 
 describe("the wells", () => {
   const revenue = place(place(null, "Axis", COUNTRY), "Values", TOTAL);
 
   it("offers a drop zone for every well while they are empty", () => {
-    expect(wells(null).match(/Drop a field here/g)).toHaveLength(5);
+    // Once per well, counted on the label rather than the text: the two say the same
+    // thing, because a control a person can see has to answer to what they can see.
+    expect(wells(null).match(/aria-label="Drop a field here, /g)).toHaveLength(5);
   });
 
   it("goes quiet for JSON that parses and is not a spec, rather than taking the tab down", () => {

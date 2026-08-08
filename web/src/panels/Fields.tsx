@@ -28,10 +28,12 @@ import type { ColumnFields, TableFields } from "./fields";
 export default function Fields({
   tables,
   failure,
+  holding,
   onDrag,
 }: {
   tables: TableFields[] | null;
   failure: string | null;
+  holding: Field | null;
   onDrag: (field: Field | null) => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -56,7 +58,8 @@ export default function Fields({
     return (
       <div className="fields">
         <p className="fields__note">
-          Tables and their column profiles appear here once a source is connected.
+          Tables and their column profiles appear here once a source is
+          connected.
         </p>
       </div>
     );
@@ -70,6 +73,7 @@ export default function Fields({
           table={table}
           open={open === table.table}
           onToggle={() => setOpen(open === table.table ? null : table.table)}
+          holding={holding}
           onDrag={onDrag}
         />
       ))}
@@ -81,16 +85,22 @@ function TableNode({
   table,
   open,
   onToggle,
+  holding,
   onDrag,
 }: {
   table: TableFields;
   open: boolean;
   onToggle: () => void;
+  holding: Field | null;
   onDrag: (field: Field | null) => void;
 }) {
   return (
     <div className="tree__table">
-      <button className="tree__row tree__row--table" onClick={onToggle} aria-expanded={open}>
+      <button
+        className="tree__row tree__row--table"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
         <span className="tree__twist" aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
@@ -98,11 +108,19 @@ function TableNode({
         {/* The count comes from a pass over the table, so it arrives with the profile and
             not with the shape. Nothing is better than a zero: a zero is a claim about the
             data, and this is a claim about what has been read. */}
-        <span className="tree__count">{table.row_count === null ? "" : count(table.row_count)}</span>
+        <span className="tree__count">
+          {table.row_count === null ? "" : count(table.row_count)}
+        </span>
       </button>
       {open
         ? table.columns.map((column) => (
-            <ColumnNode key={column.name} table={table.table} column={column} onDrag={onDrag} />
+            <ColumnNode
+              key={column.name}
+              table={table.table}
+              column={column}
+              holding={holding}
+              onDrag={onDrag}
+            />
           ))
         : null}
     </div>
@@ -112,43 +130,74 @@ function TableNode({
 function ColumnNode({
   table,
   column,
+  holding,
   onDrag,
 }: {
   table: string;
   column: ColumnFields;
+  holding: Field | null;
   onDrag: (field: Field | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const field: Field = { table, column: column.name, type: column.type };
+  const held = holding?.table === table && holding.column === column.name;
 
   return (
     <div>
-      <div
-        className="tree__row tree__row--column"
-        draggable
-        onDragStart={() => onDrag({ table, column: column.name, type: column.type })}
-        onDragEnd={() => onDrag(null)}
-        onClick={() => setOpen(!open)}
-        role="button"
-        tabIndex={0}
-        // A control that says it is a button answers Space as well as Enter, which is what
-        // the role promises and what the table row above gets for free by being one. This
-        // is a div because it is also the drag source, and `draggable` on a button is
-        // awkward — that is a reason for the shape and not for answering one key. Space
-        // scrolls the page unless something says otherwise, and a real button says so.
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          setOpen(!open);
-        }}
-        aria-expanded={open}
-      >
-        <span className="tree__grip" aria-hidden="true">
-          ⠿
-        </span>
-        <span className="tree__name">{column.name}</span>
-        <span className="tree__type">{column.type}</span>
+      <div className="tree__line">
+        <div
+          className="tree__row tree__row--column"
+          draggable
+          onDragStart={() => onDrag(field)}
+          onDragEnd={() => onDrag(null)}
+          onClick={() => setOpen(!open)}
+          role="button"
+          tabIndex={0}
+          // A control that says it is a button answers Space as well as Enter, which is what
+          // the role promises and what the table row above gets for free by being one. This
+          // is a div because it is also the drag source, and `draggable` on a button is
+          // awkward — that is a reason for the shape and not for answering one key. Space
+          // scrolls the page unless something says otherwise, and a real button says so.
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            setOpen(!open);
+          }}
+          aria-expanded={open}
+        >
+          <span className="tree__grip" aria-hidden="true">
+            ⠿
+          </span>
+          <span className="tree__name">{column.name}</span>
+          <span className="tree__type">{column.type}</span>
+        </div>
+        {/* The keyboard's half of the drag. A sibling of the row rather than a control inside
+          it, because the row is already a button — the one that opens the profile — and a
+          button inside a button is a control a reader cannot describe.
+
+          It is the same state a drag sets, so there is one notion of what is held and one
+          `place` that receives it: this is an input path and not a second way to build a
+          spec. Escape puts it down, which is what keeps a picked up field from being a mode
+          somebody is stuck in. */}
+        <button
+          className="tree__take"
+          onClick={() => onDrag(held ? null : field)}
+          onKeyDown={(event) => event.key === "Escape" && onDrag(null)}
+          aria-pressed={held}
+          aria-label={
+            held ? `Put down ${column.name}` : `Pick up ${column.name}`
+          }
+        >
+          {held ? "Holding" : "Pick up"}
+        </button>
       </div>
-      {open ? column.profile === null ? <Unread /> : <Profile column={column.profile} /> : null}
+      {open ? (
+        column.profile === null ? (
+          <Unread />
+        ) : (
+          <Profile column={column.profile} />
+        )
+      ) : null}
     </div>
   );
 }
@@ -193,7 +242,12 @@ export function Profile({ column }: { column: ColumnProfile }) {
         }`}
       />
       <Figure name="nulls" value={nullRate(column.null_rate)} />
-      {ranged ? <Figure name="range" value={`${column.minimum ?? "—"} … ${column.maximum ?? "—"}`} /> : null}
+      {ranged ? (
+        <Figure
+          name="range"
+          value={`${column.minimum ?? "—"} … ${column.maximum ?? "—"}`}
+        />
+      ) : null}
       <dt className="profile__key">values</dt>
       <dd className="profile__value">
         {column.samples.length > 0 ? (

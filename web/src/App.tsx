@@ -514,6 +514,7 @@ export default function App() {
                   draft={draft}
                   dragging={dragging}
                   onChange={edited}
+                  onDrag={setDragging}
                   onRelationships={() => setView("data")}
                 />
               )}
@@ -546,6 +547,7 @@ export default function App() {
               <Fields
                 tables={source ? tables : []}
                 failure={schemaFailure}
+                holding={dragging}
                 onDrag={setDragging}
               />
             </div>

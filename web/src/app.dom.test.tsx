@@ -291,7 +291,7 @@ describe("a question in flight", () => {
     stream.say("step", { step: "profiles", attempt: 0, of: 0 });
 
     await waitFor(() =>
-      expect(document.querySelector(".visually-hidden")?.textContent).toBe("Reading the schema."),
+      expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe("Reading the schema."),
     );
   });
 
@@ -305,5 +305,47 @@ describe("a question in flight", () => {
 
     await screen.findByText("What the source said");
     await screen.findByText("the warehouse is asleep");
+  });
+});
+
+/**
+ * A chart built without a mouse.
+ *
+ * The whole path, because the halves are in two files and the point is that they meet:
+ * a column's row offers a control that picks the field up, the wells become buttons that
+ * place what is held, and what they press is the same `drop` a mouse reaches. WCAG 2.1.1,
+ * level A — the interaction the README puts second was reachable one way only.
+ */
+describe("building a chart from the keyboard", () => {
+  it("picks a column up from its row and places it in the well that was pressed", async () => {
+    const user = userEvent.setup();
+    await started();
+
+    await user.click(screen.getByRole("button", { name: /orders/ }));
+    await user.click(screen.getByRole("button", { name: "Pick up total" }));
+
+    // Held, and said so where a reader will hear it.
+    expect(screen.getByRole("button", { name: "Put down total" })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText(/Holding total/)).toBeTruthy(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Place total in Values" }));
+
+    // The same request a drop makes, with the same spec in it.
+    await waitFor(() => expect(waiting).toHaveLength(1));
+    waiting[0](rows(2));
+    await waitFor(() => expect(screen.queryByText(/Holding total/)).toBeNull());
+  });
+
+  it("puts a field down again on a second press, so nothing is stuck holding it", async () => {
+    const user = userEvent.setup();
+    await started();
+
+    await user.click(screen.getByRole("button", { name: /orders/ }));
+    await user.click(screen.getByRole("button", { name: "Pick up status" }));
+    await user.click(screen.getByRole("button", { name: "Put down status" }));
+
+    expect(screen.getByRole("button", { name: "Pick up status" })).toBeTruthy();
   });
 });

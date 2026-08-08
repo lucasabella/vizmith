@@ -43,11 +43,13 @@ export default function Wells({
   draft,
   dragging,
   onChange,
+  onDrag,
   onRelationships,
 }: {
   draft: Draft | null;
   dragging: Field | null;
   onChange: (draft: Draft) => void;
+  onDrag: (field: Field | null) => void;
   onRelationships: () => void;
 }) {
   const [over, setOver] = useState<Well | null>(null);
@@ -71,8 +73,14 @@ export default function Wells({
     }
     try {
       onChange(place(draft, well, field, joins));
+      // Put down what was picked up. A mouse drop clears this on `dragEnd` anyway; a
+      // placement made from the keyboard has no such moment, and a field still held after
+      // it landed is a well that places it again on the next Return.
+      onDrag(null);
     } catch (error) {
       if (!(error instanceof WellRefusal)) throw error;
+      // Still held, on purpose: the drop was refused and the next thing somebody does is
+      // try another well, which they cannot do having been made to pick it up again.
       setRefusal({ well, lines: [error.message], path: false });
     }
   };
@@ -86,6 +94,13 @@ export default function Wells({
     onDrop: (event: React.DragEvent) => {
       event.preventDefault();
       void drop(well);
+    },
+    // The keyboard's half of the same gesture. A well is a button, so Return and Space
+    // already reach this; what is left is the way out, because a field picked up with no
+    // way to put it down is a mode somebody is stuck in.
+    onClick: () => void drop(well),
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (event.key === "Escape") onDrag(null);
     },
   });
 
@@ -112,6 +127,7 @@ export default function Wells({
               onChange={onChange}
               well={well}
               over={over}
+              holding={dragging}
               zone={zone}
             />
           ) : null}
@@ -146,9 +162,7 @@ export default function Wells({
                   </button>
                 </span>
               ) : (
-                <div className={dropClass(over === well, false)} {...zone(well)}>
-                  Drop a field here
-                </div>
+                <Zone well={well} over={over} holding={dragging} zone={zone} />
               )}
             </div>
           ) : null}
@@ -178,9 +192,7 @@ export default function Wells({
                   </button>
                 </span>
               ) : (
-                <div className={dropClass(over === well, missing)} {...zone(well)}>
-                  Drop a field here
-                </div>
+                <Zone well={well} over={over} holding={dragging} zone={zone} missing={missing} />
               )}
             </div>
           ) : null}
@@ -202,9 +214,7 @@ export default function Wells({
                       </button>
                     </span>
                   ))}
-              <div className={dropClass(over === well, false)} {...zone(well)}>
-                Drop a field here
-              </div>
+              <Zone well={well} over={over} holding={dragging} zone={zone} />
             </div>
           ) : null}
 
@@ -231,10 +241,20 @@ export default function Wells({
 
       {draft === null ? (
         <p className="wells__note">
-          Drag a column from Fields into a well. What a well infers, an aggregate or a date
-          unit, is shown in the well and can be changed there.
+          Drag a column from Fields into a well, or pick one up from its row and place it in
+          the well you want. What a well infers, an aggregate or a date unit, is shown in
+          the well and can be changed there.
         </p>
       ) : null}
+
+      {/* What is held, for somebody who cannot see that a row has gone into its pressed
+          state. Silent otherwise: a region that says something on every drag is a region
+          that gets turned off. */}
+      <p className="visually-hidden" role="status">
+        {dragging === null
+          ? ""
+          : `Holding ${dragging.column}. Choose a well to place it in, or press Escape.`}
+      </p>
     </div>
   );
 }
@@ -266,6 +286,7 @@ function Channel({
   channel,
   well,
   over,
+  holding,
   zone,
   onChange,
 }: {
@@ -273,6 +294,7 @@ function Channel({
   channel: "x" | "color";
   well: Well;
   over: Well | null;
+  holding: Field | null;
   zone: (well: Well) => object;
   onChange: (draft: Draft) => void;
 }) {
@@ -280,9 +302,7 @@ function Channel({
   if (draft === undefined || draft === null || bound === undefined) {
     return (
       <div className="well__slot">
-        <div className={dropClass(over === well, false)} {...zone(well)}>
-          Drop a field here
-        </div>
+        <Zone well={well} over={over} holding={holding} zone={zone} />
       </div>
     );
   }
@@ -327,6 +347,44 @@ function Channel({
         </button>
       </span>
     </div>
+  );
+}
+
+/**
+ * A well's empty slot: where a drop lands, and the keyboard's way to the same place.
+ *
+ * It was a `div` with drag handlers on it, which is the whole of #143 in one element — the
+ * primary interaction of the product was reachable with a mouse and with nothing else. A
+ * button is reachable by both, and the drag handlers are unchanged, so this is an input
+ * path rather than a second way of placing a field: what it presses is the same `drop`.
+ *
+ * What it says depends on whether something is held, because a control whose label is
+ * "drop a field here" is describing a gesture the keyboard does not have. The visible text
+ * is inside the accessible name rather than replaced by it, so somebody driving this by
+ * voice can say what they can see.
+ */
+function Zone({
+  well,
+  over,
+  holding,
+  zone,
+  missing = false,
+}: {
+  well: Well;
+  over: Well | null;
+  holding: Field | null;
+  zone: (well: Well) => object;
+  missing?: boolean;
+}) {
+  const said = holding === null ? "Drop a field here" : `Place ${holding.column}`;
+  return (
+    <button
+      className={dropClass(over === well, missing)}
+      {...zone(well)}
+      aria-label={holding === null ? `${said}, ${well}` : `${said} in ${well}`}
+    >
+      {said}
+    </button>
   );
 }
 
