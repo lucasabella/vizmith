@@ -22,7 +22,125 @@ that constraint is the reason this exists rather than a feature bolted onto it.
 **To try it without a warehouse**, point it at a DuckDB file: `VIZMITH_SOURCE=duckdb` and a
 path. Same interface, same specs, no bill.
 
+**Where things are.** [Running it](#running-it) is next, because that is the question after
+the first two. Then [why metadata and not the data](#why-metadata-and-not-the-data), the
+[design](#design), [bringing your own model](#bring-your-own-model), the
+[stack](#stack) and [contributing](#contributing). The arguments behind the built parts are
+in [DESIGN.md](DESIGN.md), what is next is in [ROADMAP.md](ROADMAP.md).
+
 **Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one.
+
+## Running it
+
+There is no PyPI release yet, so installing means building the wheel. That needs Node,
+because the interface is built into the package:
+
+```
+git clone https://github.com/lucasabella/vizmith && cd vizmith
+python -m build
+pipx install dist/vizmith-*.whl
+
+vizmith configure
+vizmith serve
+```
+
+`serve` starts the API on port 8000 and opens a browser. The wheel carries the built
+interface, so nothing else has to be running.
+
+**Without a warehouse.** Answer `duckdb` when `configure` asks which kind of source this is,
+then give it the path to a `.duckdb` file and the database and schema inside it. That is a
+file on your own machine, opened read only, and it is the same interface and the same specs
+with no bill attached.
+
+When there is a release, the first three lines collapse to `pipx install vizmith`, or to
+nothing at all with `uvx vizmith configure` and `uvx vizmith serve`. That is the plan
+rather than the present, and this file will say so when it is true.
+
+### What `configure` asks for
+
+`configure` asks which kind of source this is and then for the values that kind needs, and writes them to `config.env` in the state directory, readable by you and nobody else, because one of them is a key.
+
+**The source.** `VIZMITH_SOURCE` is `databricks`, `duckdb`, `bigquery`, `snowflake` or `postgres`; unset means Databricks, which is what shipped first. That kind's values — the four `VIZMITH_DATABRICKS_` ones, or DuckDB's three — are what a spec runs against, and without them there is nothing to run.
+
+**The model.** The three `VIZMITH_MODEL_` values are the endpoint that writes a spec from a question. Without them the question field stays disabled, and a spec pasted or dragged by hand still runs.
+
+Pass either set as flags where there is no terminal to ask in, and run `vizmith configure --show` to see where each value is coming from — it prints that and never the values.
+
+Configuration is read from three places, nearest first: a real environment variable, a `.env` found from the working directory upwards, then the file `configure` wrote. Nothing over HTTP writes any of it, so a request cannot point Vizmith at a database and the model key has no path into a browser at all.
+
+### From a checkout
+
+```
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+cp .env.example .env      # and fill it in
+.venv/bin/vizmith serve
+```
+
+That resolves the dependency floors in `pyproject.toml` to whatever is newest today, which
+is usually what you want while working. `uv.lock` records the set CI installs and the set
+these numbers were measured against, so `uv sync --extra dev` is the way to reproduce a
+result rather than approximate it. A change that moves a dependency has to move the lock
+with it, and CI refuses the two when they disagree.
+
+An editable install serves `web/dist`, so build the frontend once with `npm run build` in `web/`, or run Vite alongside it:
+
+```
+cd web
+npm install
+npm run dev
+```
+
+Vite proxies `/api` to port 8000. Building a wheel runs that build itself and puts the result inside the package, which is why `python -m build` needs Node and installing does not.
+
+### Tests and lint
+
+The five commands CI runs, and nothing else:
+
+
+```
+.venv/bin/pytest
+.venv/bin/ruff check .
+cd web && npm test && npm run lint
+```
+
+`pytest --cov` adds the coverage report. The offline suite reaches 98% of the package with
+no warehouse and no model endpoint; CI runs it that way and fails under 90. The frontend's
+own number is lower, around 72%, and the gap is mostly the views, which are covered by the
+browser suite below rather than by `npm test`.
+
+**In a browser.** A handful of flows are driven in a real browser, against the same fixture data through the real server. They need the frontend built and a Chromium that Playwright can launch, and they skip where either is missing:
+
+```
+cd web && npm run build && cd ..
+.venv/bin/playwright install chromium
+.venv/bin/pytest tests/test_interface.py
+```
+
+Set `VIZMITH_CHROMIUM` to a browser's path where one is already installed and Playwright's own copy is not it. These cover what crosses a view, a reload or a repaint, which is what a static render cannot reach; everything else about the interface is tested by `npm test`.
+
+**The screenshot** at the top of this file is taken by the same machinery, so a change to the
+interface can be shown rather than described:
+
+```
+.venv/bin/python docs/screenshot.py
+```
+
+The suite runs offline against DuckDB. With a profile and a warehouse in `.env` it also compiles and runs every fixture spec against the workspace, through the query builder and through the HTTP API. Without one those tests skip.
+
+### Scoring the model
+
+On a fixed question set:
+
+
+```
+.venv/bin/vizmith eval
+.venv/bin/vizmith eval --only revenue_by_country
+```
+
+Every question is asked of the synthetic fixture dataset, so this needs the source in `.env` pointed at it, and it needs the model endpoint. Each question is scored in four layers — does the answer validate, does it reference the tables and columns the question needs, does it return the expected rows, is the mark defensible for their shape — and a question stops at the first layer it fails. The run is written to `eval-runs/`, so two runs can be diffed; what makes that worth doing is that the record names the model and the endpoint that produced it. Answers are cached against the prompt that produced them, in the state directory beside the profiles, so re-running a set costs nothing until a prompt, a profile or an endpoint changes. `--no-cache` asks anyway.
+
+`--repair` measures the critique rather than the prompt: wherever a question fails the mark layer, it asks for a suggestion and records whether the same rule accepts it, on the rows that question already fetched. A critique may only change the chart, so those rows cannot have moved, and the run counts how many refused marks it repaired.
 
 ## Why metadata and not the data
 
@@ -77,99 +195,6 @@ Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Sources:
 Vizmith runs on your machine and serves a browser. The frontend talks to the backend over HTTP and nothing else, which keeps a desktop build possible later without touching application code.
 
 Four of those endpoints spend money — two make billed model calls, two run warehouse statements — and they are rationed: a rate per client and a cap on how many may be in flight, both set from the size of a full dashboard, because opening one is the largest burst anybody makes on purpose. Past a ceiling the answer is a 429 naming the ceiling, the variable that moves it and when to try again, so a loop somebody did not mean stops at the server rather than at a bill. `VIZMITH_MODEL_PER_MINUTE`, `VIZMITH_QUERY_PER_MINUTE` and `VIZMITH_IN_FLIGHT` move them, and `0` turns one off.
-
-## Running it
-
-There is no PyPI release yet, so installing means building the wheel. That needs Node,
-because the interface is built into the package:
-
-```
-git clone https://github.com/lucasabella/vizmith && cd vizmith
-python -m build
-pipx install dist/vizmith-*.whl
-
-vizmith configure
-vizmith serve
-```
-
-`serve` starts the API on port 8000 and opens a browser. The wheel carries the built
-interface, so nothing else has to be running.
-
-When there is a release, the first three lines collapse to `pipx install vizmith`, or to
-nothing at all with `uvx vizmith configure` and `uvx vizmith serve`. That is the plan
-rather than the present, and this file will say so when it is true.
-
-`configure` asks which kind of source this is and then for the values that kind needs, and writes them to `config.env` in the state directory, readable by you and nobody else, because one of them is a key. `VIZMITH_SOURCE` is `databricks` or `duckdb`; unset means Databricks, which is what shipped first. Its four `VIZMITH_DATABRICKS_` values, or DuckDB's three `VIZMITH_DUCKDB_` ones, are the source, without which a spec has nothing to run against. The three `VIZMITH_MODEL_` values are the endpoint that writes a spec from a question, and without them the question field stays disabled while a spec pasted by hand still runs. Pass them as flags instead where there is no terminal to ask in, and run `vizmith configure --show` to see where each one is coming from — it prints that and never the values.
-
-Configuration is read from three places, nearest first: a real environment variable, a `.env` found from the working directory upwards, then the file `configure` wrote. Nothing over HTTP writes any of it, so a request cannot point Vizmith at a database and the model key has no path into a browser at all.
-
-### From a checkout
-
-```
-python -m venv .venv
-.venv/bin/pip install -e ".[dev]"
-cp .env.example .env      # and fill it in
-.venv/bin/vizmith serve
-```
-
-That resolves the dependency floors in `pyproject.toml` to whatever is newest today, which
-is usually what you want while working. `uv.lock` records the set CI installs and the set
-these numbers were measured against, so `uv sync --extra dev` is the way to reproduce a
-result rather than approximate it. A change that moves a dependency has to move the lock
-with it, and CI refuses the two when they disagree.
-
-An editable install serves `web/dist`, so build the frontend once with `npm run build` in `web/`, or run Vite alongside it:
-
-```
-cd web
-npm install
-npm run dev
-```
-
-Vite proxies `/api` to port 8000. Building a wheel runs that build itself and puts the result inside the package, which is why `python -m build` needs Node and installing does not.
-
-Tests and lint:
-
-```
-.venv/bin/pytest
-.venv/bin/ruff check .
-cd web && npm test && npm run lint
-```
-
-`pytest --cov` adds the coverage report. The offline suite reaches 98% of the package with
-no warehouse and no model endpoint; CI runs it that way and fails under 90. The frontend's
-own number is lower, around 72%, and the gap is mostly the views, which are covered by the
-browser suite below rather than by `npm test`.
-
-A handful of flows are driven in a real browser, against the same fixture data through the real server. They need the frontend built and a Chromium that Playwright can launch, and they skip where either is missing:
-
-```
-cd web && npm run build && cd ..
-.venv/bin/playwright install chromium
-.venv/bin/pytest tests/test_interface.py
-```
-
-Set `VIZMITH_CHROMIUM` to a browser's path where one is already installed and Playwright's own copy is not it. These cover what crosses a view, a reload or a repaint, which is what a static render cannot reach; everything else about the interface is tested by `npm test`.
-
-The screenshot at the top of this file is taken by the same machinery, so a change to the
-interface can be shown rather than described:
-
-```
-.venv/bin/python docs/screenshot.py
-```
-
-The suite runs offline against DuckDB. With a profile and a warehouse in `.env` it also compiles and runs every fixture spec against the workspace, through the query builder and through the HTTP API. Without one those tests skip.
-
-Scoring the model on a fixed question set:
-
-```
-.venv/bin/vizmith eval
-.venv/bin/vizmith eval --only revenue_by_country
-```
-
-Every question is asked of the synthetic fixture dataset, so this needs the source in `.env` pointed at it, and it needs the model endpoint. Each question is scored in four layers — does the answer validate, does it reference the tables and columns the question needs, does it return the expected rows, is the mark defensible for their shape — and a question stops at the first layer it fails. The run is written to `eval-runs/`, so two runs can be diffed; what makes that worth doing is that the record names the model and the endpoint that produced it. Answers are cached against the prompt that produced them, in the state directory beside the profiles, so re-running a set costs nothing until a prompt, a profile or an endpoint changes. `--no-cache` asks anyway.
-
-`--repair` measures the critique rather than the prompt: wherever a question fails the mark layer, it asks for a suggestion and records whether the same rule accepts it, on the rows that question already fetched. A critique may only change the chart, so those rows cannot have moved, and the run counts how many refused marks it repaired.
 
 ## Contributing
 
