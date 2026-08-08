@@ -15,6 +15,27 @@ on:
 permissions:
   contents: read
 
+# The dependency set, from the lockfile rather than from the floors in pyproject.toml.
+# `pyproject.toml` declares floors and no ceilings, so `pip install -e '.[dev]'` resolved to
+# whatever was newest at that moment: two runs of the same commit a month apart tested
+# different dependencies and a reviewer saw nothing in the diff either time. The frontend
+# already did this correctly with `npm ci` and a committed lockfile, and the argument in
+# that step — a review should see the dependency versions the author had — is the same one.
+#
+# `--frozen` fails where `uv.lock` no longer agrees with `pyproject.toml`, so a dependency
+# added without relocking is caught here rather than resolved quietly. `--require-hashes`
+# is what makes the lock a supply chain artefact rather than a version list: a package
+# replaced upstream fails the install instead of running.
+#
+# The project itself goes in afterwards with `--no-deps`, because it is installed editable
+# and is not a distribution the lockfile pins.
+env:
+  INSTALL: |
+    pip install uv
+    uv export --frozen --extra dev --no-emit-project --output-file requirements.txt
+    pip install --require-hashes -r requirements.txt
+    pip install -e . --no-deps
+
 jobs:
   suite:
     runs-on: ubuntu-latest
@@ -35,7 +56,7 @@ jobs:
           node-version: '22'
 
       - name: Install the package with its dev extra
-        run: pip install -e '.[dev]'
+        run: ${{ env.INSTALL }}
 
       - name: ruff check .
         run: ruff check .
@@ -122,7 +143,7 @@ jobs:
           node-version: '22'
 
       - name: Install the package with its dev extra
-        run: pip install -e '.[dev]'
+        run: ${{ env.INSTALL }}
 
       # Chromium only. The suite drives one browser, and installing three would triple
       # the slowest step in CI to cover engines nothing here is written against.
