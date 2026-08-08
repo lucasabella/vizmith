@@ -202,7 +202,11 @@ export default function Wells({
           ) : null}
 
           {refusal?.well === well ? (
-            <div className="well__refusal">
+            // `alert` rather than a polite region: this arrives in response to a drop
+            // rather than to a click, so there is nothing to move focus to and nothing
+            // else on screen changed. A cross-table drop with no confirmed join path
+            // lands here, and silently refusing it reads as a drop that did nothing.
+            <div className="well__refusal" role="alert">
               {refusal.lines.map((line) => (
                 <p key={line} className="well__refusal-line">
                   {line}

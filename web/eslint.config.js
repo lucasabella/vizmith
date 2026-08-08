@@ -46,19 +46,17 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },
       ],
 
-      // Asking for a restructure of a component that behaves correctly today, which is a
-      // decision rather than a defect. Warned until somebody takes it on deliberately.
-      // `use-memo` and `exhaustive-deps` were downgraded beside it and are errors again:
-      // the only code that tripped them was Table.tsx, and that is fixed.
-      "react-hooks/set-state-in-effect": "warn",
-
-      // `Chart.tsx` writes a ref during render on purpose, so a new handler or a new
-      // result set does not tear the chart down and rebuild it. The rule is right in
-      // general and wrong about this instance: the ref is only ever read inside the click
-      // handler, which ECharts cannot call until the effect that attaches it has run, so
-      // there is no render that can read a stale one. Warned rather than disabled, so the
-      // next write of a ref during render still gets mentioned.
-      "react-hooks/refs": "warn",
+      // Both of these were warnings, for code that behaved correctly and wanted a
+      // restructure to say so. Both restructures are done — `TileChart` derives what it is
+      // waiting for from the spec instead of clearing two pieces of state at the top of an
+      // effect, and `Chart.tsx` refreshes its click ref in an effect rather than in the
+      // render body — so they are errors again, which is what the CI step gates on.
+      //
+      // A warning that is always present is a warning nobody reads, and the next one to
+      // arrive lands in a list that already looks normal. The steady state of this command
+      // is no output.
+      "react-hooks/set-state-in-effect": "error",
+      "react-hooks/refs": "error",
     },
   },
 

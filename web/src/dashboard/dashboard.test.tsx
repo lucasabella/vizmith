@@ -216,6 +216,17 @@ describe("the dashboards view", () => {
     // would drop them the moment somebody went back to build the next chart.
     expect(drawn(null, tiles("a"))).toContain("Running the spec");
   });
+
+  it("has somewhere to announce a save and somewhere else to announce a refusal", () => {
+    // Both were drawn and neither was announced, which made a save that succeeded and a
+    // save that was refused equally silent. The regions are in the tree from the start,
+    // because one swapped in at the moment it has something to say is one a reader may
+    // never notice.
+    const markup = drawn();
+
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain('role="status" aria-live="polite"');
+  });
 });
 
 describe("correcting a tile", () => {

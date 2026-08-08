@@ -3,6 +3,7 @@ import {
   WellRefusal,
   aliasFor,
   clear,
+  draftIn,
   inQuery,
   outputColumns,
   place,
@@ -205,5 +206,43 @@ describe("whether a column needs a join at all", () => {
     expect(qualified(COUNTRY, short)).toBe("customers.country");
     expect(qualified(COUNTRY)).toBe("vizmith.shop.customers.country");
     expect(qualified(CATEGORY, short)).toBe("vizmith.shop.products.category");
+  });
+});
+
+describe("what the editor is holding", () => {
+  const revenueText = () => JSON.stringify(revenue());
+
+  it("reads a spec out of the text both views write", () => {
+    expect(draftIn(revenueText())).toEqual(revenue());
+  });
+
+  it("holds nothing for text that is not JSON, so the wells go quiet", () => {
+    expect(draftIn("")).toBeNull();
+    expect(draftIn("{")).toBeNull();
+    expect(draftIn('{"query": {},')).toBeNull();
+  });
+
+  it("holds nothing for JSON that parses and is not a spec", () => {
+    // The bug. Every one of these used to arrive in the wells as a draft with a `chart`
+    // the checker had been told about and the value did not have, and reading it threw
+    // during render — which unmounts the tree, so the whole interface went blank.
+    expect(draftIn('{"a":1}')).toBeNull();
+    expect(draftIn("null")).toBeNull();
+    expect(draftIn("42")).toBeNull();
+    expect(draftIn('"a spec"')).toBeNull();
+    expect(draftIn("[]")).toBeNull();
+  });
+
+  it("holds nothing while the parts a panel reads are still missing", () => {
+    expect(draftIn('{"query":{"from":"orders","limit":1}}')).toBeNull();
+    expect(draftIn('{"query":{},"chart":{"mark":"bar"}}')).toBeNull();
+    expect(draftIn('{"chart":{"encoding":{}}}')).toBeNull();
+  });
+
+  it("judges the shape and not the spec, which is the validator's job", () => {
+    // A spec with no measure, an unknown mark and a query that names nothing is a spec the
+    // validator will refuse and the wells can still draw. A second opinion in the browser
+    // is one that can disagree with the one that counts.
+    expect(draftIn('{"query":{},"chart":{"mark":"sculpture","encoding":{}}}')).not.toBeNull();
   });
 });

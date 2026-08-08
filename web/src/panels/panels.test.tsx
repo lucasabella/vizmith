@@ -7,7 +7,7 @@ import type { Row, Spec } from "../chart/option";
 import { SERIES_LIMIT } from "../chart/option";
 import Fields, { Profile, nullRate } from "./Fields";
 import Wells from "./Wells";
-import { place, type Draft, type Field } from "../spec/spec";
+import { draftIn, place, type Draft, type Field } from "../spec/spec";
 
 const drawn = (element: React.ReactElement) => renderToStaticMarkup(element);
 
@@ -152,6 +152,14 @@ describe("the wells", () => {
 
   it("offers a drop zone for every well while they are empty", () => {
     expect(wells(null).match(/Drop a field here/g)).toHaveLength(5);
+  });
+
+  it("goes quiet for JSON that parses and is not a spec, rather than taking the tab down", () => {
+    // The consumer half of `draftIn`. `{"a":1}` reaches here as null, and null is the
+    // state these panels have always drawn: reading `draft.chart.encoding` off it threw
+    // during render, which in React 19 unmounts the whole application.
+    expect(() => wells(draftIn('{"a":1}'))).not.toThrow();
+    expect(wells(draftIn('{"a":1}'))).toBe(wells(null));
   });
 
   it("shows what is in a well by the name the result set uses", () => {
