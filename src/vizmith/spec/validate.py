@@ -74,6 +74,20 @@ def _semantic_errors(spec: dict) -> list[str]:
     group_by = query.get("group_by", [])
     aggregates = query.get("aggregates", [])
 
+    aliases = [aggregate["as"] for aggregate in aggregates]
+    for condition in query.get("having", []):
+        if condition["aggregate"] not in aliases:
+            errors.append(
+                f"query.having: '{condition['aggregate']}' is not one of this query's "
+                f"aggregate aliases {aliases or '[]'}. A condition on a measure names the "
+                "measure it is about; a condition on a column is a filter"
+            )
+    if query.get("having") and not aggregates:
+        errors.append(
+            "query.having: a query with no aggregates has no measure to put a condition on. "
+            "Use 'filters', which apply before the rows are grouped"
+        )
+
     if select and (group_by or aggregates):
         errors.append(
             "query: 'select' cannot be combined with 'group_by' or 'aggregates'. An "

@@ -163,6 +163,14 @@
             "$ref": "#/$defs/aggregate"
           }
         },
+        "having": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/having"
+          }
+        },
         "order_by": {
           "type": "array",
           "maxItems": 4,
@@ -363,6 +371,37 @@
           }
         }
       ]
+    },
+    "having": {
+      "description": "A condition on a measure, applied after the rows are grouped. `aggregate` names one of the query's own aggregate aliases rather than a column, because what it compares is the aggregated value and not the values that went into it. A filter is the other one: it applies before grouping and names a column.",
+      "type": "object",
+      "required": [
+        "aggregate",
+        "op",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "aggregate": {
+          "$ref": "#/$defs/identifier"
+        },
+        "op": {
+          "enum": [
+            "=",
+            "!=",
+            "<",
+            "<=",
+            ">",
+            ">="
+          ]
+        },
+        "value": {
+          "type": [
+            "string",
+            "number"
+          ]
+        }
+      }
     },
     "select_item": {
       "type": "object",

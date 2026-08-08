@@ -46,6 +46,11 @@ nothing and its chart binds y to the measure and omits x. Binding the same colum
 plots a measure against itself and is rejected. y is the value axis, so it carries a measure
 and its type is quantitative; a dimension belongs on x or on colour.
 
+A condition on a measure is 'having' rather than 'filters'. A filter applies before the
+rows are grouped and names a column; a having applies after and names one of the query's own
+aggregate aliases. "Countries with revenue over a million" is
+having: [{"aggregate": "revenue", "op": ">", "value": 1000000}].
+
 A question about a moving window says so rather than writing a date down. A filter value
 may be {"relative": "today"} or {"relative": "now"}, {"relative": "start_of", "unit": U} for
 the beginning of the current year, quarter, month, week, day or hour, or {"relative": "ago",
