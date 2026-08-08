@@ -52,16 +52,17 @@ they disagree.
 
 About seventy tests skip on a clean checkout. They are not incomplete: they need a
 Databricks warehouse, a model endpoint, or a browser, and none of those belongs in a public
-repository's CI — the reasoning is in `.github/workflows/ci.yml` and in `ROADMAP.md`. The
+repository's CI — the reasoning is in `.github/workflows/ci.yml` and in `DESIGN.md`. The
 offline suite reaches 98% of the package without any of them. If your change touches the
 live half, say so in the pull request; nobody can check it for you.
 
 ## Where a decision goes
 
-**`ROADMAP.md` holds decisions, argued rather than asserted.** If your change makes a
+**`DESIGN.md` holds decisions, argued rather than asserted.** If your change makes a
 choice somebody could reasonably have made differently, the entry says what the alternative
 was and what it would have cost. Entries are written in the past tense about a thing that is
-now true, and they are allowed to be long. An entry that only says what the code does is one
+now true, and they are allowed to be long. `ROADMAP.md` is the other file and is short:
+what is next, rather than why the built parts are the shape they are. An entry that only says what the code does is one
 the code already said.
 
 **A module docstring says what was rejected.** The reason `catalog.py` explains why a

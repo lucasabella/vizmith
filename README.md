@@ -170,9 +170,10 @@ Every question is asked of the synthetic fixture dataset, so this needs the sour
 ## Contributing
 
 Issues are labelled by type, area and priority, and the open ones are a fair picture of
-what is missing rather than a wish list. [ROADMAP.md](ROADMAP.md) is where the decisions
-already made are written down, including the ones that were tried and cut, which is usually
-the faster way to find out why something is the shape it is.
+what is missing rather than a wish list. [ROADMAP.md](ROADMAP.md) says what is next.
+[DESIGN.md](DESIGN.md) is where the decisions already made are written down, including the
+ones that were tried and cut, which is usually the faster way to find out why something is
+the shape it is.
 
 - How to build it and what the house style is: [CONTRIBUTING.md](CONTRIBUTING.md), which
   covers the five commands CI runs, the rules that do not move, and where a decision goes.

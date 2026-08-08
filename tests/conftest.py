@@ -156,7 +156,7 @@ class FixtureCatalog:
         # DuckDB answers in Python objects, and a decimal column comes back as a Decimal
         # where the shipping catalog gives a float. The harness conforms to the same
         # contract rather than being the one source whose rows read differently, which is
-        # the whole point of writing the shapes down. See ROADMAP.md.
+        # the whole point of writing the shapes down. See DESIGN.md.
         return [tuple(conform(value) for value in row) for row in rows]
 
 

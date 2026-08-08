@@ -303,7 +303,7 @@ def live() -> BigQueryCatalog:
 @needs_project
 @pytest.mark.parametrize("path", sorted(FIXTURES.glob("*.json")), ids=lambda path: path.stem)
 def test_every_spec_that_ships_runs_against_a_real_project(path):
-    """What no fake can answer. The bar ROADMAP.md sets for a dialect is that the one that
+    """What no fake can answer. The bar DESIGN.md sets for a dialect is that the one that
     ships is the only one a user's chart depends on.
 
     It needs the fixture dataset loaded into the project — the same eight tables the

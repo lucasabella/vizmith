@@ -111,7 +111,7 @@ export const SERIES = [
  * inventing one. Folding the tail into "Other" would be aggregating in the renderer,
  * which is the one thing the renderer does not do, and cycling would repaint a series in
  * a colour another series already wears. So a chart with more series than the order holds
- * is not drawn, and the message names the cap and the knob that sets it. See ROADMAP.md.
+ * is not drawn, and the message names the cap and the knob that sets it. See DESIGN.md.
  */
 export const SERIES_LIMIT = SERIES.length;
 

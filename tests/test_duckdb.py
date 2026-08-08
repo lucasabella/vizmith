@@ -173,7 +173,7 @@ def test_a_profile_is_the_figures_and_never_a_row(duckdb_catalog):
 
 @pytest.mark.parametrize("path", VALID, ids=lambda path: path.stem)
 def test_every_spec_that_ships_runs_against_this_source(path, duckdb_catalog):
-    """The bar ROADMAP.md sets for a dialect: the one that ships is the only one a user's
+    """The bar DESIGN.md sets for a dialect: the one that ships is the only one a user's
     chart depends on. Every valid fixture spec is compiled and run, so a dialect that is
     wrong about a function name fails here rather than in front of somebody."""
     rows = execute(json.loads(path.read_text()), duckdb_catalog)

@@ -116,7 +116,7 @@ def _configure(args) -> int:
 
     This is the whole of what may write it. Nothing over HTTP does, so a request still
     cannot name a database and the model key still has no path into a browser, which is
-    what the file kept in the first place. See ROADMAP.md.
+    what the file kept in the first place. See DESIGN.md.
 
     Asking is the path a person on their own machine takes, and it shows what is set
     without showing the key: pressing return keeps whatever is there. Flags are for

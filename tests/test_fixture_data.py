@@ -92,7 +92,7 @@ def test_left_join_on_carriers_differs_from_inner(fixture_db):
 
 def test_the_null_carrier_group_is_visible_and_does_not_rank_first(fixture_db):
     """The orphan shipments rank like any other value, per the result set contract in
-    ROADMAP.md. Sized so a reader sees the group without it winning the chart."""
+    DESIGN.md. Sized so a reader sees the group without it winning the chart."""
     ranking = fixture_db.execute(
         "SELECT c.name, count(*) AS shipment_count FROM vizmith.shop.shipments s "
         "LEFT JOIN vizmith.shop.carriers c ON s.carrier_id = c.id "

@@ -20,5 +20,5 @@
 ## Anything worth arguing about
 
 <!-- A trade-off you made that somebody could reasonably have made differently. Say it
-here rather than leaving it to be found. If a decision belongs in ROADMAP.md, put it
+here rather than leaving it to be found. If a decision belongs in DESIGN.md, put it
 there and say so. -->

@@ -695,7 +695,7 @@ def suggestion(
 
     A second opinion on rules that already exist, which is deliberately all it is: what it
     may say is what is refusable, and the model's part is naming a replacement the rule does
-    not name. See `critique.py` and ROADMAP.md.
+    not name. See `critique.py` and DESIGN.md.
 
     Nothing is applied. The suggestion comes back beside the findings and the caller decides,
     which is why this answers with a spec and never with rows: running one is `/api/execute`,

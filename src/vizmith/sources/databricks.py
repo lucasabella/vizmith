@@ -32,7 +32,7 @@ from vizmith.catalog import (
 
 # How long a statement is waited on before it is given up on and cancelled, in seconds. A
 # warehouse that has to start answers pending for minutes, so this is generous rather than
-# protective; what it rules out is a wait with no end. See ROADMAP.md for the trade.
+# protective; what it rules out is a wait with no end. See DESIGN.md for the trade.
 WAIT_LIMIT = 300
 
 

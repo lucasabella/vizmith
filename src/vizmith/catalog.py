@@ -51,7 +51,7 @@ TYPES = {
 # column is; this says what a row holds, so that a caller reading a result set does not
 # have to know which source produced it. A null is None whatever the column's type, and a
 # column the set calls unsupported cannot be selected, so neither has an entry here. The
-# reasons for these particular shapes, temporal and decimal especially, are in ROADMAP.md.
+# reasons for these particular shapes, temporal and decimal especially, are in DESIGN.md.
 SHAPES = {
     STRING: str,
     INTEGER: int,

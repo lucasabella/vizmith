@@ -755,7 +755,7 @@ function Canvas({
  * is a request that cannot be pointed at one, which is a sentence worth keeping. What that
  * costs is this screen, and what makes it bearable is that the thing it names is a command
  * rather than a file somebody has to find. Said once, here, rather than in two panels with
- * different wording. See ROADMAP.md.
+ * different wording. See DESIGN.md.
  */
 function Setup({ source, model }: { source: boolean; model: boolean }) {
   return (
