@@ -102,15 +102,30 @@ but the last.
 
 ## Adding a view
 
-Three edits, all inside `web/src/App.tsx`: the `view` state's union, a button in the rail
-that sets it, and a branch in the render. The rail uses `aria-current="page"` rather than
-`aria-pressed`, because three buttons that choose a view are navigation.
+Two edits, both inside `web/src/App.tsx`.
 
-The reason this list is short is not that it is well factored — see issue #158. Anything
-substantial in the new view belongs in `web/src/views/`, the way `Dashboards.tsx` and
-`Data.tsx` do, with `App.tsx` holding the state that outlives the view. State that lives in
-a view is state that is thrown away when the view is, which is why the dashboard being
-arranged does not live in `Dashboards.tsx`.
+1. **`VIEWS`** — the id, in the position the rail should draw it. This is also the `ViewId`
+   union, because the union is derived from the list.
+2. **`views`** — the entry: a `label` the rail button is named by, an `icon` from
+   `web/src/icons.tsx`, `page` for whether the canvas scrolls, and `render`.
+
+The second is not optional in the way a forgotten registration usually is: `views` is a
+`Record<ViewId, View>`, so an id in `VIEWS` with no entry is a type error naming the missing
+key rather than a rail button that switches to a blank canvas. The rail uses
+`aria-current="page"` rather than `aria-pressed`, because buttons that choose a view are
+navigation.
+
+`page: true` is the Data and Dashboards surface — padded and scrolling. `page: false` is the
+chart canvas, a column that fits, and it is the right answer only for something that must
+not be scrolled to. `docs/design.md` has the argument; there are two surfaces and this is
+the switch between them.
+
+Anything substantial in the new view belongs in `web/src/views/`, the way `Dashboards.tsx`
+and `Data.tsx` do, with `App.tsx` holding the state that outlives the view. State that lives
+in a view is state that is thrown away when the view is, which is why the dashboard being
+arranged does not live in `Dashboards.tsx`. If what the view needs is the spec on screen,
+the request that produced it or the way back from it, that is `useAsked` in
+`web/src/asked.ts` and it is already held once — do not start a second copy.
 
 ## Adding an endpoint
 
