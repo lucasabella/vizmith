@@ -124,6 +124,29 @@ jobs:
           sys.exit(0 if "vizmith/web/index.html" in inside else f"{wheel} carries no interface")
           PY
 
+  # The floor, run rather than declared. `requires-python` says 3.11 because Debian stable
+  # ships it and nothing in the source needs 3.12, and a floor nobody runs is a floor that
+  # is true until somebody writes a match statement with a PEP 695 generic in it. So the
+  # suite runs on the oldest interpreter the package claims to install on, which is the
+  # cheapest way to keep that claim honest.
+  #
+  # Just the Python suite. The frontend does not care what interpreter serves it, and the
+  # browser job is slow enough once.
+  floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install the package with its dev extra
+        run: ${{ env.INSTALL }}
+
+      - name: pytest
+        run: pytest
+
   # A separate job rather than a step in the one above, because a browser can fail for
   # reasons that belong to the runner rather than to the change under review, and a flake
   # inside the suite would read as the suite failing. It is here at all because the class

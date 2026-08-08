@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lucasabella/vizmith/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasabella/vizmith/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen.svg)](#from-a-checkout)
 
 Ask a question in plain language, get a chart back.
