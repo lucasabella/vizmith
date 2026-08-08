@@ -7,10 +7,12 @@ import {
   WellRefusal,
   type Draft,
   type Field,
+  type Filter,
   type Fn,
   type Join,
   type Unit,
   type Well,
+  anyOf,
   clear,
   inQuery,
   place,
@@ -187,10 +189,10 @@ export default function Wells({
             <div className="well__slot">
               {draft === null
                 ? null
-                : (draft.query.filters ?? []).map((filter, at) => (
-                    <span key={`${filter.column}-${at}`} className="chip">
-                      <span className="chip__name">{filter.column.split(".").slice(-1)[0]}</span>
-                      <span className="chip__said">{filter.op.replace(/_/g, " ")}</span>
+                : (draft.query.filters ?? []).map(chip).map(({ name, said }, at) => (
+                    <span key={`${name}-${at}`} className="chip">
+                      <span className="chip__name">{name}</span>
+                      <span className="chip__said">{said}</span>
                       <button
                         className="chip__off"
                         onClick={() => onChange(clear(draft, "Filters", at))}
@@ -236,6 +238,26 @@ export default function Wells({
     </div>
   );
 }
+
+/**
+ * What a filter chip reads. A condition is its column and its operator, which is the whole
+ * of it. A disjunction is every column it mentions, joined by the word the grammar joins
+ * them with, and the count rather than the operators: `status = or total >` on one chip
+ * reads as two filters, and three of them read as a chip nobody can parse.
+ *
+ * The well's job here is to say which columns are narrowing the rows and that one of these
+ * chips is the loose kind. What each condition actually says is in `{ } JSON`, which is the
+ * other view of the same spec and the one that shows a filter in full. A disjunction is not
+ * something a drop can build — a drop writes `is_not_null` — so this is the reading half of
+ * the feature, and the chip's × still takes the whole filter out.
+ */
+function chip(filter: Filter): { name: string; said: string } {
+  if (!anyOf(filter)) return { name: short(filter.column), said: filter.op.replace(/_/g, " ") };
+  const columns = [...new Set(filter.any.map((condition) => short(condition.column)))];
+  return { name: columns.join(" or "), said: `any of ${filter.any.length}` };
+}
+
+const short = (column: string): string => column.split(".").slice(-1)[0];
 
 /** A well holding a dimension: the column, and the unit a date is truncated to, which is
  * the other thing a drop infers and therefore the other thing that has to be visible. */

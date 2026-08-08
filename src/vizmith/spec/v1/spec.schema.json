@@ -258,6 +258,38 @@
       }
     },
     "filter": {
+      "description": "A condition, or a disjunction of them. One level and no recursion: the compiled WHERE is a conjunction of clauses where a clause may be an OR, which covers the questions people ask without opening the grammar to arbitrary boolean trees. Stated as if/then/else rather than a oneOf for the same reason the condition below is: a oneOf reports only that nothing matched, and these messages are read by a model on retry.",
+      "if": {
+        "type": "object",
+        "required": [
+          "any"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/disjunction"
+      },
+      "else": {
+        "$ref": "#/$defs/condition"
+      }
+    },
+    "disjunction": {
+      "type": "object",
+      "required": [
+        "any"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "any": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        }
+      }
+    },
+    "condition": {
       "description": "The op decides the shape of value. Stated as conditionals rather than a oneOf, because a oneOf reports only that nothing matched, and these messages are read by a model on retry.",
       "type": "object",
       "required": [

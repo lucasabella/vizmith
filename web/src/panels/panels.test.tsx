@@ -245,6 +245,40 @@ describe("the wells", () => {
     expect(wells(revenue)).toContain("Remove from Axis");
     expect(wells(revenue)).toContain("Remove from Values");
   });
+
+  it("shows a filter as its column and what it tests", () => {
+    const markup = wells(place(revenue, "Filters", ORDERED));
+
+    expect(markup).toContain("order_date");
+    // Underscores are the grammar's word for it and not a person's.
+    expect(markup).toContain("is not null");
+  });
+
+  it("shows a disjunction as the columns it mentions and how many ways it lets a row in", () => {
+    // Nothing in the wells builds one — a drop writes `is_not_null` — so this is a spec
+    // that came back from a model or was typed into `{ } JSON`, and the well still has to
+    // read it. Naming both columns is what says which of them are narrowing the rows;
+    // `any of 2` is what says this chip is the loose kind.
+    const loose = {
+      ...revenue,
+      query: {
+        ...revenue.query,
+        filters: [
+          {
+            any: [
+              { column: "vizmith.shop.orders.status", op: "=" as const, value: "pending" },
+              { column: "vizmith.shop.orders.total", op: ">" as const, value: 500 },
+            ],
+          },
+        ],
+      },
+    };
+
+    const markup = wells(loose);
+
+    expect(markup).toContain("status or total");
+    expect(markup).toContain("any of 2");
+  });
 });
 
 describe("the visual card", () => {

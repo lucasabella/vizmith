@@ -464,3 +464,76 @@ def test_a_measure_the_query_does_not_produce_is_refused_by_the_builder_too(cata
 
     with pytest.raises(ValueError, match="profit"):
         build(spec, catalog)
+
+
+def anyOf(spec: dict, *conditions: dict) -> dict:
+    """The spec's filters, plus one disjunction of the conditions given."""
+    spec["query"].setdefault("filters", []).append({"any": list(conditions)})
+    return spec
+
+
+def test_a_disjunction_compiles_to_a_bracketed_or_inside_the_conjunction(catalog):
+    """The gap #112 names. Every condition was joined with AND, so "shipped, or worth more
+    than five hundred" had no form in the grammar — and a model trying to write one spent
+    three billed attempts finding that out.
+
+    The brackets are the correctness of it. `a AND b OR c` is not what these three
+    conditions mean, and the difference is a statement that compiles, runs, and answers a
+    different question."""
+    spec = anyOf(
+        load(REVENUE_BY_COUNTRY),
+        {"column": "orders.status", "op": "=", "value": "shipped"},
+        {"column": "orders.total", "op": ">", "value": 500},
+    )
+
+    sql, parameters = build(spec, catalog)
+
+    clause = sql[sql.index(" WHERE ") : sql.index(" GROUP BY ")]
+    assert " OR " in clause
+    assert re.search(r"\(\S[^()]* OR [^()]*\S\)", clause), clause
+    assert clause.count(" AND ") == 2, "the fixture's own two filters still conjoin"
+    assert "shipped" in parameters.values(), "a disjunct's value skipped the binding"
+    assert 500 in parameters.values()
+    assert "shipped" not in sql
+
+
+def test_a_disjunction_widens_the_rows_rather_than_narrowing_them(catalog):
+    """Driven, because the brackets are the whole point and a missing pair still compiles.
+    Without them the OR would swallow the conjunction and the result would be the rows
+    matching the last disjunct rather than the rows matching either, on top of everything
+    the other filters already said."""
+    both = load(REVENUE_BY_COUNTRY)
+    both["query"]["filters"].append({"column": "orders.status", "op": "=", "value": "shipped"})
+    only_shipped = execute(both, catalog)
+
+    either = anyOf(
+        load(REVENUE_BY_COUNTRY),
+        {"column": "orders.status", "op": "=", "value": "shipped"},
+        {"column": "orders.status", "op": "=", "value": "delivered"},
+    )
+
+    total = {row["country"]: row["revenue"] for row in execute(either, catalog)}
+    shipped = {row["country"]: row["revenue"] for row in only_shipped}
+
+    # Both queries keep the top ten countries, so the two sets are not the same countries.
+    # What holds for every country in both is that widening the status cannot take revenue
+    # away, and for at least one it has to add some.
+    common = set(total) & set(shipped)
+    assert common, "the fixture returned nothing, so this proves nothing"
+    assert all(total[country] >= shipped[country] for country in common)
+    assert any(total[country] > shipped[country] for country in common)
+
+
+def test_a_disjunction_of_null_checks_needs_no_value_either(catalog):
+    """A condition inside `any` is the same condition, so every operator reaches it. The
+    two that take no value are the ones a flattening bug would trip over first."""
+    spec = anyOf(
+        load(REVENUE_BY_COUNTRY),
+        {"column": "orders.order_date", "op": "is_null"},
+        {"column": "orders.total", "op": "in", "value": [100, 200]},
+    )
+
+    sql, parameters = build(spec, catalog)
+
+    assert "IS NULL OR" in sql
+    assert 100 in parameters.values() and 200 in parameters.values()

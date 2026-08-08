@@ -35,6 +35,7 @@ from vizmith.model import Model, ModelError, Spend
 from vizmith.profiler import TableProfile
 from vizmith.relevance import select
 from vizmith.spec import output_columns
+from vizmith.spec.validate import conditions
 from vizmith.state import hold
 
 VALIDATES = "validates"
@@ -424,7 +425,9 @@ def _referenced(spec: dict) -> tuple[set[str], set[str]]:
 
     columns = {
         _normalised(item["column"], default)
-        for item in [*asked.get("select", []), *asked.get("group_by", []), *asked.get("filters", [])]
+        # `conditions` rather than `filters`: a filter may be a disjunction, which names no
+        # column of its own and holds the ones that do.
+        for item in [*asked.get("select", []), *asked.get("group_by", []), *conditions(asked)]
     }
     columns |= {
         _normalised(aggregate["column"], default)

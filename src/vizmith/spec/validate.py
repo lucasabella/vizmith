@@ -62,7 +62,7 @@ def _semantic_errors(spec: dict) -> list[str]:
                 f"{' and '.join(repr(t) for t in named)}, so qualify it with more segments"
             )
 
-    for filter_ in query.get("filters", []):
+    for filter_ in conditions(query):
         if filter_["op"] in ("is_null", "is_not_null") and "value" in filter_:
             errors.append(
                 f"query.filters: '{filter_['op']}' takes no value, but one was given "
@@ -239,8 +239,20 @@ def names_table(table: str, qualifier: str) -> bool:
     return len(wanted) <= len(segments) and segments[-len(wanted) :] == wanted
 
 
+def conditions(query: dict):
+    """Every condition in `filters`, with a disjunction replaced by the conditions it holds.
+
+    A filter is either a condition or `{"any": [...]}`, one level deep, so everything that
+    reads conditions — the reference check, the null check, the relative check, the eval
+    harness counting which columns an answer touched — wants the flat list and none of them
+    wants to know which of the two shapes it came from. One nesting level is the whole of
+    what the grammar allows, so this is a loop rather than a walk."""
+    for filter_ in query.get("filters", []):
+        yield from filter_.get("any", [filter_])
+
+
 def _column_refs(query: dict):
-    yield from ((f["column"], "query.filters") for f in query.get("filters", []))
+    yield from ((f["column"], "query.filters") for f in conditions(query))
     yield from ((s["column"], "query.select") for s in query.get("select", []))
     yield from ((g["column"], "query.group_by") for g in query.get("group_by", []))
     yield from ((a["column"], "query.aggregates") for a in query.get("aggregates", []) if "column" in a)

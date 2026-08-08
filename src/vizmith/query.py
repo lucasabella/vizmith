@@ -286,18 +286,26 @@ class _Builder:
         return sql
 
     def _where(self) -> str:
-        conditions = []
-        for filter_ in self._query.get("filters", []):
-            column = self._column(filter_["column"])
-            op = filter_["op"]
-            if op in ("is_null", "is_not_null"):
-                conditions.append(f"{column} IS {'NOT ' if op == 'is_not_null' else ''}NULL")
-            elif op in COMPARISONS:
-                conditions.append(f"{column} {op} {self._bind(self._value(filter_['value']))}")
-            else:
-                values = ", ".join(self._bind(value) for value in filter_["value"])
-                conditions.append(f"{column} {'NOT ' if op == 'not_in' else ''}IN ({values})")
-        return (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        clauses = [self._clause(filter_) for filter_ in self._query.get("filters", [])]
+        return (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    def _clause(self, filter_: dict) -> str:
+        """One filter, as one clause. A disjunction is bracketed, which is the whole of the
+        correctness here: `a AND b OR c` is not what a spec listing two filters means, and
+        the difference is a query that looks right and answers a different question."""
+        if "any" not in filter_:
+            return self._condition(filter_)
+        return "(" + " OR ".join(self._condition(each) for each in filter_["any"]) + ")"
+
+    def _condition(self, filter_: dict) -> str:
+        column = self._column(filter_["column"])
+        op = filter_["op"]
+        if op in ("is_null", "is_not_null"):
+            return f"{column} IS {'NOT ' if op == 'is_not_null' else ''}NULL"
+        if op in COMPARISONS:
+            return f"{column} {op} {self._bind(self._value(filter_['value']))}"
+        values = ", ".join(self._bind(value) for value in filter_["value"])
+        return f"{column} {'NOT ' if op == 'not_in' else ''}IN ({values})"
 
     def _group_by(self) -> str:
         group_by = self._query.get("group_by", [])

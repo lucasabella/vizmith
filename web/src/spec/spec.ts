@@ -20,7 +20,21 @@ export type Join = {
 
 export type Item = { column: string; truncate?: Unit; as?: string };
 export type Aggregate = { fn: Fn; column?: string; as: string };
-export type Filter = { column: string; op: Op; value?: unknown };
+/** One test against one column. */
+export type Condition = { column: string; op: Op; value?: unknown };
+
+/** Conditions where any one of them is enough, which is the only place `filters` is not a
+ * conjunction. One level and no recursion: the grammar allows a disjunction of conditions
+ * and not a disjunction of disjunctions, so the compiled `WHERE` is a conjunction of
+ * clauses where a clause may be a bracketed `OR`. See DESIGN.md. */
+export type Disjunction = { any: Condition[] };
+
+export type Filter = Condition | Disjunction;
+
+/** Which of the two shapes a filter is. `any` is the key the grammar tells them apart by,
+ * so it is the key this reads: a condition cannot carry one, because the schema refuses
+ * every property beside it. */
+export const anyOf = (filter: Filter): filter is Disjunction => "any" in filter;
 /** A condition on a measure, which names an aggregate alias rather than a column because
  * what it compares is the aggregated value. `filters` is the other one and applies before
  * the rows are grouped. */
@@ -128,6 +142,19 @@ const aListOfRecords = (value: unknown): value is Record<string, unknown>[] | un
 
 const aString = (value: unknown): boolean => typeof value === "string";
 
+/** A filter a chip can be built out of: a condition with a column and an operator, or a
+ * list of them under `any`. An empty `any` is refused here as well as by the schema, since
+ * a chip made of no conditions has nothing to name. */
+const aFilter = (filter: Record<string, unknown>): boolean => {
+  const held = filter.any;
+  if (held === undefined) return aString(filter.column) && aString(filter.op);
+  return (
+    Array.isArray(held) &&
+    held.length > 0 &&
+    held.every((each) => anObject(each) && aString(each.column) && aString(each.op))
+  );
+};
+
 /**
  * The text in `{ } JSON`, as the draft both views read, or as nothing.
  *
@@ -173,8 +200,10 @@ export const draftIn = (text: string): Draft | null => {
     // A select or group_by item is written into a well by its alias where it has one and
     // by the last segment of its column otherwise, so one of the two has to be text.
     items.every((item: Record<string, unknown>) => aString(item.column) || aString(item.as)) &&
-    // A filter chip splits the column and rewrites the operator, so both of those do.
-    filters.every((filter) => aString(filter.column) && aString(filter.op))
+    // A filter chip splits the column and rewrites the operator, so both of those do — and
+    // a disjunction is a chip built out of the conditions it holds, so it is the same
+    // question asked of each of them.
+    filters.every(aFilter)
       ? (parsed as unknown as Draft)
       : null
   );
@@ -485,7 +514,7 @@ function ranked(draft: Draft, field: Field): Draft {
  * screen rather than something a drag guesses at.
  */
 function filtered(draft: Draft, field: Field): Draft {
-  const filter: Filter = { column: qualified(field, draft.query), op: "is_not_null" };
+  const filter: Condition = { column: qualified(field, draft.query), op: "is_not_null" };
   return { ...draft, query: { ...draft.query, filters: [...(draft.query.filters ?? []), filter] } };
 }
 

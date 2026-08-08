@@ -16,9 +16,9 @@
 
 import type { Row, Value } from "../chart/option";
 import {
+  type Condition,
   type Draft,
   type Field,
-  type Filter,
   type Item,
   type Spec,
   aliasFor,
@@ -78,7 +78,7 @@ export function drill(spec: Spec, rows: Row[], clicked: Clicked, by: Field): Spe
   }
 
   const value = valueOf(spec, rows, clicked);
-  const filter: Filter =
+  const filter: Condition =
     value === null
       ? { column: item.column, op: "is_null" }
       : { column: item.column, op: "=", value };

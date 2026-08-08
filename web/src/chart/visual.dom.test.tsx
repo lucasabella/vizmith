@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import Visual from "./Visual";
 import type { Row } from "./option";
 import type { Spec } from "../spec/spec";
-import type { Draft, Field } from "../spec/spec";
+import { type Draft, type Field, anyOf } from "../spec/spec";
 
 /**
  * The drill: a mark clicked, a dimension chosen, and the spec that produces.
@@ -96,7 +96,7 @@ describe("clicking a mark", () => {
     await waitFor(() => expect(onDrill).toHaveBeenCalled());
     const next = onDrill.mock.calls[0][0] as Draft;
     const filters = next.query.filters ?? [];
-    expect(filters.some((filter) => filter.value === "Netherlands")).toBe(true);
+    expect(filters.some((filter) => !anyOf(filter) && filter.value === "Netherlands")).toBe(true);
     expect(next.chart.encoding.x?.field).toBe("status");
   });
 

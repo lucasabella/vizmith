@@ -260,7 +260,7 @@ describe("the grammar's closed sets, against the schema that is the grammar", ()
     ["join.type", enumOf("join", "type"), JOIN_TYPES],
     ["order_by.direction", enumOf("order_by", "direction"), DIRECTIONS],
     ["limit_by.direction", schema.$defs.query.properties.limit_by.properties.direction.enum, DIRECTIONS],
-    ["filter.op", enumOf("filter", "op"), OPS],
+    ["condition.op", enumOf("condition", "op"), OPS],
     ["having.op", enumOf("having", "op"), COMPARISONS],
   ])("%s is what spec.ts holds", (_name, declared, held) => {
     expect(declared.length).toBeGreaterThan(0);

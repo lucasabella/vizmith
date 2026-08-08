@@ -45,6 +45,11 @@ EXPECTED_ERROR = {
         "query.limit_by.by: 'status' is not one of the query's aggregate aliases, and "
         "ranking 'country' needs a measure to rank it by"
     ),
+    "any_with_a_condition_beside_it.json": (
+        "query/filters/0: Additional properties are not allowed "
+        "('column', 'op', 'value' were unexpected)"
+    ),
+    "any_of_one_condition.json": "query/filters/0/any: [{'column': 'status', 'op': '=', 'value': 'pending'}] is too short",
     "format_on_a_dimension.json": (
         "chart.encoding.x: 'format' says how a number reads, and 'country' is bound as "
         "'nominal'. Only a quantitative channel carries one"

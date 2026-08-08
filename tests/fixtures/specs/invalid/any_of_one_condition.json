@@ -1,0 +1,18 @@
+{
+  "spec_version": "1",
+  "title": "Orders per month",
+  "query": {
+    "from": "orders",
+    "filters": [{ "any": [{ "column": "status", "op": "=", "value": "pending" }] }],
+    "group_by": [{ "column": "order_date", "truncate": "month", "as": "month" }],
+    "aggregates": [{ "fn": "count", "as": "order_count" }],
+    "limit": 500
+  },
+  "chart": {
+    "mark": "line",
+    "encoding": {
+      "x": { "field": "month", "type": "temporal" },
+      "y": { "field": "order_count", "type": "quantitative" }
+    }
+  }
+}

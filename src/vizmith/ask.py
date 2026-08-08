@@ -58,6 +58,15 @@ rows are grouped and names a column; a having applies after and names one of the
 aggregate aliases. "Countries with revenue over a million" is
 having: [{"aggregate": "revenue", "op": ">", "value": 1000000}].
 
+Filters are joined with AND: every one of them has to hold. Where the question wants a row
+that satisfies any of several conditions, write one filter as {"any": [condition,
+condition]} and the conditions inside it are joined with OR. "Orders that are pending or
+worth over 500" is one filter: {"any": [{"column": "status", "op": "=", "value":
+"pending"}, {"column": "total", "op": ">", "value": 500}]}, alongside whichever other
+filters the question also asks for. This nests one level and no further: the conditions
+inside "any" are plain conditions and cannot themselves hold an "any". Several values of
+one column is "in" rather than a disjunction.
+
 A question about a moving window says so rather than writing a date down. A filter value
 may be {"relative": "today"} or {"relative": "now"}, {"relative": "start_of", "unit": U} for
 the beginning of the current year, quarter, month, week, day or hour, or {"relative": "ago",

@@ -254,6 +254,19 @@ describe("what the editor is holding", () => {
     expect(draftIn(JSON.stringify({ ...filtered, query: { ...filtered.query, filters: [{ column: "a" }] } }))).toBeNull();
   });
 
+  it("holds a disjunction, and nothing for one whose conditions a chip cannot name", () => {
+    // The other filter shape. A chip is built out of the conditions it holds, so the
+    // question the flat kind is asked is asked of each of them — and `{"any": []}` builds
+    // a chip out of nothing, which draws an empty chip with an × on it.
+    const spec = revenue();
+    const filters = (any: unknown) => JSON.stringify({ ...spec, query: { ...spec.query, filters: [any] } });
+
+    expect(draftIn(filters({ any: [{ column: "a", op: "=" }, { column: "b", op: ">" }] }))).not.toBeNull();
+    expect(draftIn(filters({ any: [{ column: "a" }] }))).toBeNull();
+    expect(draftIn(filters({ any: [] }))).toBeNull();
+    expect(draftIn(filters({ any: "status" }))).toBeNull();
+  });
+
   it("holds nothing for a group_by item a panel cannot name", () => {
     const spec = revenue();
     const nameless = { ...spec, query: { ...spec.query, group_by: [{ truncate: "month" }] } };
