@@ -64,6 +64,11 @@ EXPECTED_ERROR = {
     "figure_with_colour.json": (
         "chart.encoding: 'color' needs an 'x', because one figure has nothing to colour"
     ),
+    "relative_value_with_a_key_it_does_not_read.json": (
+        "query.filters: a relative value of 'now' takes neither, so 'unit' does nothing "
+        "here and the filter does not mean what it says"
+    ),
+    "relative_start_without_a_unit.json": ("'unit' is a required property"),
     "ambiguous_table_qualifier.json": (
         "query.group_by: 'orders.status' is ambiguous, 'orders' names "
         "'vizmith.archive.orders' and 'vizmith.shop.orders', so qualify it with more segments"

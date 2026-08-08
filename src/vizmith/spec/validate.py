@@ -68,6 +68,7 @@ def _semantic_errors(spec: dict) -> list[str]:
                 f"query.filters: '{filter_['op']}' takes no value, but one was given "
                 f"for '{filter_['column']}'"
             )
+        errors += _relative_errors(filter_)
 
     select = query.get("select", [])
     group_by = query.get("group_by", [])
@@ -153,6 +154,41 @@ def _semantic_errors(spec: dict) -> list[str]:
         )
 
     return errors
+
+
+def _relative_errors(filter_: dict) -> list[str]:
+    """What the schema cannot say about a relative value without answering in the language
+    of `if` and `then`.
+
+    The schema holds what each token *needs* — `start_of` a unit, `ago` a unit and a count —
+    because a missing key is what a model most often gets wrong. What is here is the other
+    half: a key that is present and means nothing. `{"relative": "now", "unit": "month"}`
+    validates against a schema that only checks the required side, and a model that wrote it
+    believes it asked for the start of the month. Saying so is cheaper than the alternative,
+    which is a filter that quietly means this instant.
+    """
+    value = filter_.get("value")
+    if not isinstance(value, dict) or "relative" not in value:
+        return []
+    token = value["relative"]
+    spare = [key for key in ("unit", "count") if key in value and key not in _TAKES[token]]
+    if not spare:
+        return []
+    takes = _TAKES[token]
+    wants = f"takes {' and '.join(repr(key) for key in takes)}" if takes else "takes neither"
+    named = " and ".join(repr(key) for key in spare)
+    return [
+        (
+            f"query.filters: a relative value of '{token}' {wants}, so {named} "
+            f"{'do' if len(spare) > 1 else 'does'} nothing here and the filter does not "
+            "mean what it says"
+        )
+    ]
+
+
+# What each relative token reads. Anything else present alongside it is a key the builder
+# ignores, which is the same as a spec that lies about what it asked for.
+_TAKES = {"now": (), "today": (), "start_of": ("unit",), "ago": ("unit", "count")}
 
 
 def output_columns(query: dict) -> list[str]:

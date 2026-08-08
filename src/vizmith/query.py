@@ -11,6 +11,8 @@ same list the validator checks references against, so the builder cannot drift f
 spec was validated as producing.
 """
 
+import datetime as dt
+
 from vizmith.catalog import Catalog
 from vizmith.spec import names_table, output_columns, validate_spec
 
@@ -33,27 +35,104 @@ RANKING = {"sum": "sum", "count": "sum", "count_distinct": "sum", "min": "min", 
 
 COMPARISONS = {"=", "!=", "<", "<=", ">", ">="}
 
+# How many months each unit is worth, for the units that are a whole number of them. The
+# rest are counted in days or hours, because a week is seven days everywhere and a month is
+# not thirty of anything.
+MONTHS = {"year": 12, "quarter": 3, "month": 1}
 
-def build(spec: dict, catalog: Catalog) -> tuple[str, dict]:
+
+def build(spec: dict, catalog: Catalog, now: dt.datetime | None = None) -> tuple[str, dict]:
     """SQL plus the values to bind to it. Needs the catalog for names only: a spec may
     name a table with fewer segments than the source uses, and the source is the only
-    thing that can fill the rest in."""
+    thing that can fill the rest in.
+
+    `now` is what a relative filter value resolves against, and it is the server's clock.
+    That is the decision this feature had to make, because a warehouse's `current_date` and
+    the server's differ by zone and a spec that means something different depending on where
+    it was compiled is not the reproducible artefact this design promises. Resolving here
+    means the spec on disk stays relative while the statement is absolute, and the local
+    civil day is what "today" means to the person asking — this runs on their machine.
+    A caller passes one to make an answer repeatable; nothing in the application does."""
     errors = validate_spec(spec)
     if errors:
         raise ValueError("spec is not valid: " + "; ".join(errors))
-    return _Builder(spec["query"], catalog).build()
+    # Naive local time, deliberately. The zone is the machine's and "today" is the civil day
+    # of the person asking; an aware UTC clock would answer a different question for most of
+    # the world for part of every day.
+    return _Builder(spec["query"], catalog, now or dt.datetime.now()).build()  # noqa: DTZ005
 
 
-def execute(spec: dict, catalog: Catalog) -> list[dict]:
+def execute(spec: dict, catalog: Catalog, now: dt.datetime | None = None) -> list[dict]:
     """Rows as plain objects keyed by the query's output columns."""
-    sql, parameters = build(spec, catalog)
+    sql, parameters = build(spec, catalog, now)
     names = output_columns(spec["query"])
     return [dict(zip(names, row)) for row in catalog.run(sql, parameters)]
 
 
+def resolve(value: dict, now: dt.datetime) -> str:
+    """One relative value, as the text a literal date would have arrived as.
+
+    Text rather than a date object on purpose. A date written into a spec by hand is already
+    a string — `"2025-01-01"` in the fixtures — and every connector binds a value as text
+    with a declared type, so resolving to the same shape means a relative filter travels the
+    path a literal one has always travelled and no source needs to learn anything.
+
+    Date grained where the unit is, timestamp grained where it is not. Comparing a DATE
+    column against midnight and a TIMESTAMP column against a date both work in every dialect
+    here; what would not is inventing a precision the question did not have.
+    """
+    token = value["relative"]
+    if token == "now":
+        return now.replace(microsecond=0).isoformat(sep=" ")
+    if token == "today":
+        return now.date().isoformat()
+
+    unit = value["unit"]
+    if token == "start_of":
+        return _started(now, unit)
+    return _before(now, unit, value["count"])
+
+
+def _started(now: dt.datetime, unit: str) -> str:
+    if unit == "hour":
+        return now.replace(minute=0, second=0, microsecond=0).isoformat(sep=" ")
+    day = now.date()
+    if unit == "day":
+        return day.isoformat()
+    if unit == "week":
+        # Monday, which is what a week starts on everywhere this is likely to be read.
+        return (day - dt.timedelta(days=day.weekday())).isoformat()
+    if unit == "month":
+        return day.replace(day=1).isoformat()
+    if unit == "quarter":
+        return day.replace(month=3 * ((day.month - 1) // 3) + 1, day=1).isoformat()
+    return day.replace(month=1, day=1).isoformat()
+
+
+def _before(now: dt.datetime, unit: str, count: int) -> str:
+    if unit == "hour":
+        return (now.replace(microsecond=0) - dt.timedelta(hours=count)).isoformat(sep=" ")
+    day = now.date()
+    if unit in ("day", "week"):
+        return (day - dt.timedelta(days=count * (7 if unit == "week" else 1))).isoformat()
+
+    # Calendar months, counted rather than approximated: thirty days before the 31st of
+    # March is not "a month ago" to anybody. The day is clamped where the target month is
+    # shorter, which is the only answer that stays inside the month it names.
+    months = day.month - 1 - count * MONTHS[unit]
+    year = day.year + months // 12
+    month = months % 12 + 1
+    return day.replace(year=year, month=month, day=min(day.day, _days_in(year, month))).isoformat()
+
+
+def _days_in(year: int, month: int) -> int:
+    return (dt.date(year + month // 12, month % 12 + 1, 1) - dt.timedelta(days=1)).day
+
+
 class _Builder:
-    def __init__(self, query: dict, catalog: Catalog):
+    def __init__(self, query: dict, catalog: Catalog, now: dt.datetime):
         self._query = query
+        self._now = now
         self._dialect = catalog.dialect
         # Keyed by the reference as the spec wrote it, because that is what a column
         # qualifier is matched against, and valued with what the source calls the table.
@@ -179,7 +258,7 @@ class _Builder:
             if op in ("is_null", "is_not_null"):
                 conditions.append(f"{column} IS {'NOT ' if op == 'is_not_null' else ''}NULL")
             elif op in COMPARISONS:
-                conditions.append(f"{column} {op} {self._bind(filter_['value'])}")
+                conditions.append(f"{column} {op} {self._bind(self._value(filter_['value']))}")
             else:
                 values = ", ".join(self._bind(value) for value in filter_["value"])
                 conditions.append(f"{column} {'NOT ' if op == 'not_in' else ''}IN ({values})")
@@ -216,6 +295,12 @@ class _Builder:
 
     def _quoted(self, name: str) -> str:
         return self._dialect.quoted(name)
+
+    def _value(self, value):
+        """A filter's value, with a relative one resolved. Resolved here and bound like any
+        other, so nothing relative ever reaches the statement text: what the source is sent
+        is the same parameter a written down date would have produced."""
+        return resolve(value, self._now) if isinstance(value, dict) else value
 
     def _bind(self, value) -> str:
         name = f"p{len(self._parameters)}"

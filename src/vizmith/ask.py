@@ -46,6 +46,15 @@ nothing and its chart binds y to the measure and omits x. Binding the same colum
 plots a measure against itself and is rejected. y is the value axis, so it carries a measure
 and its type is quantitative; a dimension belongs on x or on colour.
 
+A question about a moving window says so rather than writing a date down. A filter value
+may be {"relative": "today"} or {"relative": "now"}, {"relative": "start_of", "unit": U} for
+the beginning of the current year, quarter, month, week, day or hour, or {"relative": "ago",
+"unit": U, "count": N} for N of those units before now. Use one wherever the question is
+about the present — "this month", "the last 30 days", "so far this year" — because a date
+written down is the answer to the day it was written and this spec may be saved and run
+again. Each token reads only its own keys: "today" and "now" take neither a unit nor a
+count, and "start_of" takes no count.
+
 Every query needs a row limit. A chart that binds a colour channel also needs limit_by,
 whose column is that colour dimension and whose by is an aggregate's alias, so the two are
 never the same. It keeps the top N values of one dimension whole instead of cutting rows
