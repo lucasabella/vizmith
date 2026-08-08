@@ -167,7 +167,10 @@ describe("two answers arriving out of order", () => {
 describe("what the canvas announces", () => {
   it("says what is in flight, and then what landed", async () => {
     await started();
-    const said = () => screen.getByRole("status").textContent;
+    // The region that announces the canvas, which is the hidden one. The visual card has
+    // a second status region for what an export press just did — a different statement,
+    // and the reason this query names which region it means.
+    const said = () => document.querySelector(".visually-hidden[role='status']")?.textContent;
 
     await typeAndRun();
     await waitFor(() => expect(said()).toBe("Running the spec."));

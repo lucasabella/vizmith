@@ -118,3 +118,68 @@ describe("clicking a mark", () => {
     expect(await screen.findByText("Netherlands")).toBeDefined();
   });
 });
+
+/**
+ * The three ways out. The pure half — the escaping, the file name — is `exporting.test.ts`;
+ * this is the half that only exists once a control has been pressed, which is what the
+ * control does with what that produces.
+ *
+ * The stub above draws no canvas and therefore announces no instance, which is also the
+ * state a real card is in while the renderer is being fetched. That makes it exactly the
+ * right double for one of these: a control that saves a picture must be disabled when
+ * there is no picture.
+ */
+/** jsdom defines `navigator.clipboard` with a getter and no setter, so it is redefined
+ * rather than assigned. Restored by nothing, because each of these installs its own. */
+const clipboard = (writeText: (text: string) => Promise<void>) =>
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+describe("getting a chart out of the tab", () => {
+  it("puts the spec on the clipboard, and says so", async () => {
+    // `userEvent.setup()` installs its own clipboard, which is the closest thing to a real
+    // one here, so this reads what the control wrote rather than stubbing the write.
+    const { user } = visual();
+
+    await user.click(screen.getByRole("button", { name: "Copy the spec" }));
+
+    expect(JSON.parse(await navigator.clipboard.readText())).toEqual(SPEC);
+    expect(await screen.findByText("Spec copied.")).toBeDefined();
+  });
+
+  it("says it could not, where the browser refuses the clipboard", async () => {
+    // Absent on an insecure origin and refusable by permission. A control that says
+    // "Copied" when nothing was copied is worse than one that says it could not.
+    const { user } = visual();
+    // After `visual`, because `userEvent.setup` installs a clipboard of its own and would
+    // otherwise put a working one back over this.
+    clipboard(() => Promise.reject(new Error("denied")));
+
+    await user.click(screen.getByRole("button", { name: "Copy the spec" }));
+
+    expect(await screen.findByText(/would not let this page write to the clipboard/)).toBeDefined();
+  });
+
+  it("hands the rows over as a file named after the chart", async () => {
+    const saved: { name: string; type: string }[] = [];
+    const url = vi.fn(() => "blob:rows");
+    Object.assign(URL, { createObjectURL: url, revokeObjectURL: vi.fn() });
+    const clicking = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        saved.push({ name: this.download, type: this.href });
+      });
+    const { user } = visual();
+
+    await user.click(screen.getByRole("button", { name: "Rows as CSV" }));
+
+    expect(saved).toEqual([{ name: "revenue-by-country.csv", type: "blob:rows" }]);
+    expect(await screen.findByText("Saved revenue-by-country.csv.")).toBeDefined();
+    clicking.mockRestore();
+  });
+
+  it("will not offer a picture of a chart nothing has drawn", async () => {
+    visual();
+
+    expect(screen.getByRole("button", { name: "Chart as PNG" })).toHaveProperty("disabled", true);
+  });
+});

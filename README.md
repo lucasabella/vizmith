@@ -97,7 +97,6 @@ Vite proxies `/api` to port 8000. Building a wheel runs that build itself and pu
 
 The five commands CI runs, and nothing else:
 
-
 ```
 .venv/bin/pytest
 .venv/bin/ruff check .
@@ -131,7 +130,6 @@ The suite runs offline against DuckDB. With a profile and a warehouse in `.env` 
 ### Scoring the model
 
 On a fixed question set:
-
 
 ```
 .venv/bin/vizmith eval
@@ -167,6 +165,7 @@ The spec is versioned JSON, validated against a schema, diffable in git. Every f
 - Click a mark, get the same spec narrowed to what you clicked.
 - Adjust the spec by hand if you want more control.
 - Save a set of specs as a dashboard.
+- Take any of it with you: the spec to the clipboard, the rows as a CSV, the chart as a PNG.
 
 Nothing generated is executed as code. A spec the interface writes goes through the same validator a model's answer does, because the validator is the only judge of what is legal.
 

@@ -73,7 +73,10 @@ const SERIES_TYPE = { bar: "bar", line: "line", area: "line", point: "scatter" }
  * moves without this one. Reading the computed styles instead would give one copy, at
  * the price of a DOM in every test of this file.
  */
-const SURF = "#ffffff";
+// Exported because a PNG of the chart needs it: a canvas has no background of its own, and
+// a picture taken without one is transparent where the chart's surface should be. The mirror
+// test reads it as text off this line either way.
+export const SURF = "#ffffff";
 const INK = "#14202b";
 const INK_2 = "#5c6b7a";
 const INK_3 = "#8c99a6";

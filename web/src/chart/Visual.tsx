@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Chart from "./Deferred";
 import Table from "./Table";
+import type { Drawn } from "./Chart";
+import { copy, csv, download, fileName } from "./exporting";
 import { overSeriesLimit, type Row, type Spec } from "./option";
 import { NoDrill, candidates, drill, type Clicked } from "../spec/drill";
 import { asDraft, type Draft, type Field } from "../spec/spec";
@@ -32,6 +34,19 @@ export default function Visual({
   const [view, setView] = useState<"chart" | "table">("chart");
   const [clicked, setClicked] = useState<Clicked | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  // The instance, while there is one. State rather than a ref, because whether there is a
+  // picture to save is a thing a control has to be disabled by, and a ref does not repaint.
+  const [drawn, setDrawn] = useState<Drawn | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+
+  // What an export just did, for the four seconds a person needs to read it. Cleared on a
+  // timer rather than left up, because it is about the press and not about the chart, and a
+  // message that outlives what it describes is one nobody believes the next time.
+  useEffect(() => {
+    if (said === null) return;
+    const forget = setTimeout(() => setSaid(null), 4000);
+    return () => clearTimeout(forget);
+  }, [said]);
 
   const tooMany = overSeriesLimit(spec, rows);
   const draft = asDraft(spec);
@@ -50,9 +65,56 @@ export default function Visual({
     }
   };
 
+  /**
+   * The three ways out, in order of what they cost.
+   *
+   * The spec first, because it is the artefact this project is built around and there was
+   * no control that gave anybody a copy of it. The rows second, because they are already
+   * here in the builder's column order. The picture last, and only while there is one: the
+   * renderer arrives behind a lazy boundary and the empty state and the figure draw no
+   * canvas, so `drawn` is null exactly when there is nothing to save.
+   */
+  const copySpec = async () => {
+    setSaid((await copy(JSON.stringify(spec, null, 2))) ? "Spec copied." : "The browser would not let this page write to the clipboard.");
+  };
+
+  const saveRows = () => {
+    download(fileName(spec, "csv"), new Blob([csv(rows)], { type: "text/csv;charset=utf-8" }));
+    setSaid(`Saved ${fileName(spec, "csv")}.`);
+  };
+
+  const saveImage = () => {
+    if (drawn === null) return;
+    const anchor = document.createElement("a");
+    anchor.href = drawn.png();
+    anchor.download = fileName(spec, "png");
+    anchor.click();
+    setSaid(`Saved ${fileName(spec, "png")}.`);
+  };
+
   return (
     <div className="visual">
       <div className="visual__head">
+        <span className="visual__out">
+          <button className="visual__save" onClick={copySpec}>
+            Copy the spec
+          </button>
+          <button className="visual__save" onClick={saveRows} disabled={rows.length === 0}>
+            Rows as CSV
+          </button>
+          <button
+            className="visual__save"
+            onClick={saveImage}
+            disabled={drawn === null || view !== "chart"}
+            title={
+              drawn === null
+                ? "There is no chart on screen to save."
+                : "A PNG of the chart, at twice the pixels."
+            }
+          >
+            Chart as PNG
+          </button>
+        </span>
         <span className="visual__tabs">
           <button
             className={view === "chart" ? "visual__tab visual__tab--on" : "visual__tab"}
@@ -94,9 +156,16 @@ export default function Visual({
               setRefusal(null);
               setClicked(mark);
             }}
+            onDrawn={setDrawn}
           />
         )}
       </div>
+
+      {/* What the last press did. Polite, and one line: it is a receipt for a control the
+          person just pressed, not a second account of what the canvas shows. */}
+      <p className="visual__said" role="status">
+        {said ?? ""}
+      </p>
 
       {clicked !== null ? (
         <div className="drill">

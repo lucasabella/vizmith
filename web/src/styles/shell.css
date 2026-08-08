@@ -286,6 +286,43 @@ button:focus-visible {
   background: var(--chrome);
 }
 
+/* The three ways out, on the left of the same strip the tabs are on the right of. Quiet:
+   they are always available and are not what a person came to the card for. */
+.visual__out {
+  display: flex;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.visual__save {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--rule-2);
+}
+
+.visual__save:hover:not(:disabled) {
+  color: var(--ink);
+  border-bottom-color: var(--ink-3);
+}
+
+.visual__save:disabled {
+  color: var(--ink-3);
+  border-bottom-color: transparent;
+}
+
+/* The receipt for a press. One line, and it holds its height whether or not it says
+   anything, so the chart above it does not move when it appears. */
+.visual__said {
+  flex: none;
+  min-height: 14px;
+  padding: 0 8px 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  text-align: right;
+}
+
 .visual__body {
   flex: 1;
   min-height: 0;

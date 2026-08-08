@@ -84,8 +84,10 @@ describe("the chart chrome, against the tokens it copies", () => {
 
   const token = (name: string) =>
     new RegExp(`--${name}:\\s*([^;]+);`).exec(tokens)?.[1].trim().toLowerCase();
+  // `export` is optional: `SURF` is exported so a PNG can be taken on the surface the
+  // chart is drawn on, and the mirror is about the value rather than about the visibility.
   const constant = (name: string) =>
-    new RegExp(`^const ${name} = (["'])(.*)\\1;`, "m").exec(option)?.[2].trim().toLowerCase();
+    new RegExp(`^(?:export )?const ${name} = (["'])(.*)\\1;`, "m").exec(option)?.[2].trim().toLowerCase();
 
   it.each([
     ["SURF", "surf"],
