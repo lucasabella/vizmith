@@ -155,6 +155,23 @@ trade-off yet.
 If your change closes an issue, say `Closes #123`. If measuring changed what you built — it
 happens here more than you would expect — say what you measured and what it redirected.
 
+### The co-authorship trailers are meant
+
+Most commits on `main` carry a `Co-authored-by: Claude` trailer, and some carry the URL of
+the session that produced them. That is a statement rather than an artefact nobody cleaned
+up: a large part of this repository was written with an AI assistant, and the commit that
+says so is the honest place to say it. It costs nothing to leave and it would cost a history
+rewrite to remove — every `#nnn` and every hash quoted in `DESIGN.md`, `ROADMAP.md` and the
+code comments points into this history.
+
+What the trailer does not do is move responsibility. The reasoning in `DESIGN.md`, the
+measurements the comments quote and the tests that hold them are the work, and they were
+argued and reviewed by a person whichever way the keys were pressed. If you contribute with
+an assistant, the same applies: keep the trailer, and own the diff.
+
+Nothing about your own workflow is asked for beyond that. A pull request is read for what it
+does and what it argues, and there is no separate bar for one written with help.
+
 ## Reporting things
 
 Security holes go through
