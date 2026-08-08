@@ -1,4 +1,7 @@
-/* Design tokens. The source of truth is .claude/skills/vizmith-design/SKILL.md. */
+/* Design tokens. What each is for, which ink is legal on which surface, and the two rules
+   that govern the categorical order below, are in docs/design.md. The numbers that document
+   quotes are measured off this file by docs/palette.py, so a colour edited here without that
+   script being re-run leaves a document that is visibly stale. */
 
 :root {
   --chrome: #1e2b38;

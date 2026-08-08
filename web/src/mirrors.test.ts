@@ -105,6 +105,66 @@ describe("the chart chrome, against the tokens it copies", () => {
   });
 });
 
+/**
+ * The document is a third copy, and it is the one a contributor reads before touching
+ * anything. `docs/design.md` quotes every series colour and the contrast each has against
+ * `--surf`, because a rule about which slots are legal is not a rule unless it says which
+ * slots. Those numbers are printed by `docs/palette.py` off `tokens.css`, so the failure
+ * mode is a colour changed in the stylesheet and a document still describing the old one —
+ * a contributor checking their new chart against a table that is quietly wrong.
+ *
+ * The contrast is recomputed here rather than parsed from the script, so the document is
+ * checked against the tokens and not against the thing that generated it.
+ */
+describe("the design document, against the tokens it documents", () => {
+  const tokens = read("./styles/tokens.css");
+  const design = read("../../docs/design.md");
+
+  const value = (name: string) =>
+    new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`).exec(tokens)?.[1].toLowerCase();
+
+  const luminance = (colour: string) => {
+    const channels = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255);
+    const [red, green, blue] = channels.map((one) =>
+      one <= 0.04045 ? one / 12.92 : ((one + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const contrast = (one: string, two: string) => {
+    const [first, second] = [luminance(one), luminance(two)];
+    return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+  };
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])("names slot %i and the colour the token holds", (slot) => {
+    const colour = value(`series-${slot}`);
+    expect(colour).toBeDefined();
+    // The row of the order table: a slot, its token, its hex.
+    expect(design).toContain(`| ${slot} | \`--series-${slot}\` | \`${colour}\` |`);
+  });
+
+  it("quotes each series colour's contrast against --surf as it is", () => {
+    const surf = value("surf");
+    expect(surf).toBeDefined();
+    for (let slot = 1; slot <= 8; slot += 1) {
+      const colour = value(`series-${slot}`) as string;
+      const stated = new RegExp(`\\| ${slot} \\| \`${colour}\` \\| ([0-9.]+) \\|`).exec(design);
+      expect(stated, `docs/design.md has no contrast row for slot ${slot}`).not.toBeNull();
+      expect(Number(stated?.[1])).toBeCloseTo(contrast(colour, surf as string), 2);
+    }
+  });
+
+  it("names the three slots the Table tab exists for", () => {
+    // The escape hatch is quoted by slot number in Table.tsx and Visual.tsx, so which
+    // slots fail 3:1 is load-bearing prose rather than a detail of the table above it.
+    const surf = value("surf") as string;
+    const failing = [1, 2, 3, 4, 5, 6, 7, 8].filter(
+      (slot) => contrast(value(`series-${slot}`) as string, surf) < 3,
+    );
+    expect(failing).toEqual([3, 4, 5]);
+    expect(design).toContain("Three slots are under 3:1");
+  });
+});
+
 describe("the dashboard constants", () => {
   it("hold what the store holds", () => {
     const python = read("../../src/vizmith/dashboards.py");

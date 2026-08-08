@@ -4,10 +4,11 @@ import { label, type Row } from "./option";
 /**
  * The result set, in the builder's column order.
  *
- * Not a convenience. Three of the eight series colours sit under 3:1 against the light
- * surface, and the rule for a colour that does is visible labels or a table view. Interior
- * stacked segments cannot carry labels, so this is what makes those colours legal, and a
- * chart shipping them without it is a chart that fails the contrast rule.
+ * Not a convenience. Slots 3, 4 and 5 of the series order sit under 3:1 against `--surf`,
+ * and the contrast rule in docs/design.md gives a mark that fails 3:1 two ways out: a
+ * visible label, or the same numbers readable as text. An interior stacked segment cannot
+ * carry a label, so this is the branch that is taken, and it is what makes those three
+ * colours legal. A chart shipping them without it fails the rule.
  *
  * It shows the rows and shapes nothing. No sorting, no paging, no filtering: the query
  * already did all three, and a table that re-sorts what a chart drew is a second answer to

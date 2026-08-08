@@ -8,10 +8,11 @@ import { asDraft, type Draft, type Field } from "../spec/spec";
 /**
  * The visual card: the chart, and the table of what it was drawn from.
  *
- * The Table tab is not a convenience. Three of the series colours sit under 3:1 against
- * this surface, an interior stacked segment cannot carry a label, and the rule for a
- * colour that fails contrast is then visible labels or a table view. This is what makes
- * those colours legal.
+ * The Table tab is not a convenience. Slots 3, 4 and 5 of the series order sit under 3:1
+ * against this surface, an interior stacked segment cannot carry a label, and the contrast
+ * rule in docs/design.md then requires the numbers to be readable as text. This is what
+ * makes those colours legal, which is why a view that draws marks and has no table beside
+ * it is a view that fails the rule.
  *
  * A click on a mark asks the same question about the thing that was clicked. What the
  * narrowed question is grouped by is asked rather than guessed, which is the one decision

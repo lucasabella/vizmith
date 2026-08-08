@@ -87,10 +87,12 @@ const LABEL = { fontFamily: MONO, fontSize: 11, color: INK_2 };
 
 /**
  * The series colours, in the order they are assigned, which is the order and not a
- * palette to pick from. The first three are the ones the application tokens carry and are
- * validated against these surfaces; all eight are the data viz skill's categorical order,
- * whose sequence is the colourblind safety mechanism rather than a preference. Assigning
- * out of order breaks the adjacent pair gates that order was chosen to clear.
+ * palette to pick from. The sequence is the colour vision safety mechanism rather than a
+ * preference: adjacent slots are the pairs a reader actually has to tell apart, since a
+ * series takes the next free slot, and the order is what keeps them apart under the two
+ * common dichromacies. The gate, what it does not promise, and the measurements are in
+ * docs/design.md; the worst adjacent pair clears it by three dE, so assigning out of
+ * order is not a matter of taste.
  *
  * Never cycled. ECharts cycles its own palette by default, which is what puts one colour
  * on two entries of one legend: a chart that lies about which series it is.

@@ -177,6 +177,10 @@ the shape it is.
 
 - How to build it and what the house style is: [CONTRIBUTING.md](CONTRIBUTING.md), which
   covers the five commands CI runs, the rules that do not move, and where a decision goes.
+- What the interface is allowed to look like: [docs/design.md](docs/design.md) — the
+  surfaces, the ink that is legal on each, why the eight series colours are an order rather
+  than a palette, and the contrast rule that makes the Table tab mandatory. Its numbers are
+  measured off the stylesheet by `docs/palette.py`.
 - Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - Reporting a vulnerability: [SECURITY.md](SECURITY.md). Please use the private route
   rather than an issue, because people run Vizmith against their own warehouses.

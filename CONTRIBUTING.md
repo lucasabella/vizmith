@@ -65,6 +65,14 @@ now true, and they are allowed to be long. `ROADMAP.md` is the other file and is
 what is next, rather than why the built parts are the shape they are. An entry that only says what the code does is one
 the code already said.
 
+**`docs/design.md` holds the half of the house style that governs pixels.** Which surfaces
+exist and which ink is legal on each, why the eight series colours are an order rather than
+a palette and what gate that order clears, the contrast rule and the escape hatch that makes
+the Table tab mandatory rather than convenient, and that provenance is never colour alone.
+Its numbers are measured off `tokens.css` by `docs/palette.py` rather than remembered, so a
+token that moves is a script to re-run and a table to paste. Anything adding a panel, a
+chart type, a status indicator or a view that draws marks is downstream of that file.
+
 **A module docstring says what was rejected.** The reason `catalog.py` explains why a
 freshness answer is held per burst rather than per entry is that the next person to read it
 would otherwise reasonably change it back. Comments here explain why, on the assumption the
