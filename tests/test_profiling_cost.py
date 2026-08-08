@@ -35,7 +35,7 @@ import pytest
 from conftest import needs_warehouse
 
 from vizmith.api import PROFILE_WORKERS, relationship_graph
-from vizmith.catalog import Held
+from vizmith.catalog import FRESHNESS_CEILING, FRESHNESS_HOLD, Held
 from vizmith.profiler import Profiles
 from vizmith.relationships import graph, suggest
 
@@ -203,3 +203,47 @@ def test_what_building_the_relationship_graph_costs(live_catalog):
     assert concurrent.calls["describe"] == tables, "a table was described twice or not at all"
     assert concurrent.calls["relationships"] == 0, "the keys were asked for a second time"
     assert counted.calls["describe"] == tables, "the second graph described the schema again"
+
+
+@needs_warehouse
+def test_what_the_freshness_window_has_to_cover(live_catalog, tmp_path):
+    """The measurement #103 asked for, which is the one this file was written to make
+    possible and the one the constants are still short of.
+
+    `FRESHNESS_HOLD` and `FRESHNESS_CEILING` govern something proportional to the schema: a
+    cold read pays a freshness statement per table, and the window has to outlive that read
+    or the request after it re-reads the front of the schema while the back is still warm.
+    Held per answer that failed at 150 tables. Held per burst it holds — up to the ceiling,
+    which is the number this prints the evidence for.
+
+    Nothing is asserted about the clock beyond the one thing that is a real bound: a cold
+    read longer than the ceiling is a schema this design does not cover, and that is worth
+    failing rather than printing."""
+    counted = Timed(live_catalog)
+    source = Held(counted)
+    kept = Profiles(tmp_path / "profiles.json")
+    names = live_catalog.tables()
+
+    def sweep() -> float:
+        started = time.monotonic()
+        with ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as pool:
+            list(pool.map(lambda name: kept.read(source, name), names))
+        return time.monotonic() - started
+
+    cold = sweep()
+    asked = counted.calls[FRESHNESS]
+    warm = sweep()
+    again = counted.calls[FRESHNESS] - asked
+
+    print(
+        f"\nfreshness window over {len(names)} tables: {cold:.1f}s cold, {warm:.1f}s warm"
+        f"\n  {asked} freshness statements cold, {again} on the read after it"
+        f"\n  hold {FRESHNESS_HOLD:.0f}s, ceiling {FRESHNESS_CEILING:.0f}s"
+    )
+
+    assert asked == len(names), "a cold read did not ask about every table exactly once"
+    assert again == 0, "the burst did not outlive the read it is there to protect"
+    assert cold < FRESHNESS_CEILING, (
+        f"a cold read of {cold:.1f}s does not fit inside a ceiling of {FRESHNESS_CEILING:.0f}s, "
+        "so the burst rolls while it is still running and this schema is not covered"
+    )

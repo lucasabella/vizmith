@@ -216,6 +216,22 @@ describe("the dashboards view", () => {
     // would drop them the moment somebody went back to build the next chart.
     expect(drawn(null, tiles("a"))).toContain("Running the spec");
   });
+
+  it("has somewhere to announce a save and somewhere else to announce a refusal", () => {
+    // Both were drawn and neither was announced, which made a save that succeeded and a
+    // save that was refused equally silent.
+    //
+    // Containers that are in the tree from the start, because the polite one has to be: a
+    // live region is reported when its contents change while it is in the document, and one
+    // swapped in already carrying its sentence is one a reader may never mention. An alert
+    // is the exception — inserting a `role="alert"` node is the pattern readers do announce,
+    // which is why `Wells` puts one under the well that refused rather than five empty ones
+    // under every well.
+    const markup = drawn();
+
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain('role="status" aria-live="polite"');
+  });
 });
 
 describe("correcting a tile", () => {

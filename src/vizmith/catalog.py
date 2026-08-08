@@ -253,16 +253,40 @@ class Catalog(Protocol):
         client is not safe to share serialises here rather than making the caller ask."""
 
 
-# How long one of the source's freshness answers is held before it is asked for again. A
-# burst is a page load and what the person does immediately after it — expand a table, ask
-# a question, drag a field into a well — and each of those reads the profiles and pays a
-# freshness statement per table to do it. Thirty seconds is about how long that burst is,
-# and it is a guess bounded by the harm it can do: a table rewritten while somebody has the
-# interface open is described as it was for at most this long, where holding the answer for
-# the life of the process would describe it that way until a restart. What would tune this
-# rather than reason about it is the measurement in tests/test_profiling_cost.py, which
-# needs a warehouse.
+# How long the source's freshness answers are held before they are asked for again. A burst
+# is a page load and what the person does immediately after it — expand a table, ask a
+# question, drag a field into a well — and each of those reads the profiles and pays a
+# freshness statement per table to do it. Thirty seconds is about how long that burst is.
+#
+# What the window covers is the burst rather than the entry, and that is the correction
+# measuring it forced. Held per entry, this is a constant governing something proportional
+# to the schema: one cold read of 152 tables takes about 25 seconds against a 30 second
+# window, so the answers taken at the top of a request were seconds from expiring by the
+# time it finished, and the next request re-read the front of the schema while the back of
+# it was still warm — 152 billed DESCRIBE DETAIL statements for a schema nobody changed.
+# A read taken while a burst is running joins that burst and lives as long as it does, so
+# one request cannot expire halfway through the next — for a cold read up to the ceiling
+# below, which is where the guarantee stops rather than being unconditional.
 FRESHNESS_HOLD = 30.0
+
+# The most a burst may reach from its first read to its last. A burst runs for as long as
+# the gaps between reads stay under the hold, so somebody working steadily would otherwise
+# extend one indefinitely and hold an answer for as long as they kept working.
+#
+# This is where the harm is bounded, and it is the number to argue with. A table rewritten
+# under a running server is described as it was for at most this long while the interface is
+# in use, and for at most FRESHNESS_HOLD after it goes quiet. Four times the hold, which
+# leaves room for a cold read of a schema several times larger than the ones measured and
+# still says a stale answer is a matter of minutes rather than of a restart.
+#
+# Two things it costs, both of them chosen. A burst dies whole, so the request that lands
+# just after the ceiling re-reads every table at once rather than a few at a time — spikier
+# than the old per-entry window, and about a quarter of its statements over the same two
+# minutes, which is the trade. And a cold read that takes longer than this rolls the burst
+# while it is still running, which is the failure this whole change is about, reappearing
+# for a schema several times larger than any that has been measured. Both are reasons to
+# raise the number rather than to hold answers per entry again.
+FRESHNESS_CEILING = 120.0
 
 # How long a table's shape — its columns and the keys it declares — is held before the
 # source is asked to describe it again. Longer than the freshness window above, and for a
@@ -293,6 +317,19 @@ class Held:
     DETAIL` the warehouse runs and bills for rather than a free metastore read. One request
     already asks it once per table; what this removes is the next request asking the same
     thing about the same tables a second later, which is what a person browsing produces.
+
+    The window covers a burst rather than an answer. A burst is a run of reads of the source
+    with no gap of `hold` or more between them, and every answer taken in one is held for as
+    long as that burst runs — which is what keeps a cold read of a large schema from
+    expiring at the front while it is still working on the back. It cannot run longer than
+    `ceiling` from its first read to its last, and that is the bound on how stale an answer
+    can be: a read is dated from when it was asked for rather than from when it returned, so
+    a slow round trip does not buy an answer extra life.
+
+    Only a read of the source extends a burst. A request answered entirely from the hold
+    renews nothing, so the window is `hold` after the last time the source was actually
+    asked and not after the last time somebody looked — which is the conservative direction
+    and the one that keeps browsing from holding an answer open indefinitely.
 
     **Shape.** Describing every table is what the relationship graph is made of, and the
     graph is rebuilt from nothing by every join path resolved — which is every drag of a
@@ -329,6 +366,7 @@ class Held:
         catalog: "Catalog",
         hold: float = FRESHNESS_HOLD,
         shape: float = SHAPE_HOLD,
+        ceiling: float = FRESHNESS_CEILING,
         clock=time.monotonic,
     ):
         self.dialect = catalog.dialect
@@ -336,9 +374,17 @@ class Held:
         self._catalog = catalog
         self._hold = hold
         self._shape = shape
+        self._ceiling = ceiling
         self._clock = clock
         self._lock = threading.Lock()
-        self._held: dict[str, tuple[float, str | None]] = {}
+        # Which burst is running, when it began and when it last read. A freshness answer
+        # is stored against a burst rather than against the moment it was taken, so the
+        # whole of a burst expires together and none of it expires under the request that
+        # is still taking it.
+        self._burst = 0
+        self._began = 0.0
+        self._last = None
+        self._held: dict[str, tuple[int, str | None]] = {}
         self._described: dict[str, tuple[float, object, Table]] = {}
         self._relationships: tuple[float, list[Relationship]] | None = None
 
@@ -387,32 +433,71 @@ class Held:
         return self._catalog.run(sql, parameters)
 
     def modified(self, name: str) -> str | None:
-        """The held answer where it is still inside the window, and the source's otherwise.
+        """The held answer where the burst it was taken in is still running, and the
+        source's otherwise.
 
         Two threads asking about the same table at the same moment both ask the source,
         which is what they did before this existed. Collapsing them would mean holding a
         lock across a warehouse round trip, and the profiling that produces those threads
         asks each table once anyway: what arrives at the same moment is several tables,
-        not several copies of one."""
+        not several copies of one.
+
+        The burst a read joins is the one that was running when it *started*, not when it
+        returned. Both of those matter and they are not the same instant: a `DESCRIBE
+        DETAIL` queued on a cold warehouse takes tens of seconds, so joining on the reply
+        would let a burst lapse underneath a read that began inside it — the case #103 names
+        outright — and would date the answer from the reply while it describes the table as
+        it was at the request."""
         asked = self._clock()
         with self._lock:
             held = self._held.get(name)
-            if held is not None and asked - held[0] < self._hold:
+            if held is not None and held[0] == self._burst and self._running(asked):
                 return held[1]
 
         answer = self._catalog.modified(name)
         with self._lock:
-            self._held[name] = (asked, answer)
+            self._held[name] = (self._joined(asked, self._clock()), answer)
             described = self._described.get(name)
             if described is not None and described[1] != answer:
                 del self._described[name]
         return answer
 
+    def _running(self, now: float) -> bool:
+        """Whether the burst is still running at `now`, which is what says an answer taken
+        in it may still be served. Called under the lock."""
+        return (
+            self._last is not None
+            and now - self._last < self._hold
+            and now - self._began < self._ceiling
+        )
+
+    def _joined(self, asked: float, answered: float) -> int:
+        """The burst a read that started at `asked` and returned at `answered` belongs to,
+        beginning one where the last had stopped running by the time it started, and holding
+        the running one open where it had not. Called under the lock.
+
+        A burst spans from its first question to its last answer, and the two ends are the
+        two different things they are used for. `_began` is the earliest question, because
+        an answer describes the table as it was when it was asked for, and the ceiling is a
+        bound on how old a served answer may be. `_last` is the latest answer, because what
+        says a burst is still running is that work was still happening.
+
+        Both move outwards rather than being assigned, since reads finish out of order:
+        several threads profile at once, and a slow one that started first stores last."""
+        if not self._running(asked):
+            self._burst += 1
+            self._began = asked
+            self._last = answered
+            return self._burst
+        self._began = min(self._began, asked)
+        self._last = max(self._last, answered)
+        return self._burst
+
     def _token(self, name: str, asked: float):
         """The freshness answer in hand for this table, or `_UNKNOWN` where there is none
-        inside the window. Called under the lock."""
+        from the burst that is running. Called under the lock."""
         held = self._held.get(name)
-        if held is None or asked - held[0] >= self._hold:
+        if held is None or held[0] != self._burst or not self._running(asked):
             return _UNKNOWN
         return held[1]
 

@@ -28,6 +28,7 @@ import {
   type Tile,
 } from "../dashboard/dashboard";
 import { drawable, type Draft } from "../spec/spec";
+import { counted } from "../counted";
 
 /**
  * Dashboards: several specs under one name, arranged, and opened again.
@@ -190,9 +191,7 @@ export default function Dashboards({
                 <li key={entry.name} className={entry.name === name ? "dash__item dash__item--on" : "dash__item"}>
                   <button className="dash__open" onClick={() => open(entry.name)} disabled={working}>
                     <span className="dash__name">{entry.name}</span>
-                    <span className="dash__tally">
-                      {entry.tiles} {entry.tiles === 1 ? "tile" : "tiles"}
-                    </span>
+                    <span className="dash__tally">{counted(entry.tiles, "tile")}</span>
                   </button>
                   <button
                     className="btn btn--quiet"
@@ -239,18 +238,26 @@ export default function Dashboards({
             </p>
           )}
 
-          {refusal !== null ? (
-            <div className="refusal">
-              <p className="refusal__head">What the server said</p>
-              <ul className="refusal__lines">
-                {refusal.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          ) : note !== null ? (
-            <p className="dash__note">{note}</p>
-          ) : null}
+          {/* Two regions rather than one, because a refusal and a confirmation are not the
+              same urgency, and they were equally silent. A refused save is an alert: it
+              interrupts, because nothing moved focus and a save that says nothing reads as
+              a save that happened. "Saved as …" is polite, because it is agreement with
+              what was just pressed and it can wait for a gap. */}
+          <div role="alert">
+            {refusal === null ? null : (
+              <div className="refusal">
+                <p className="refusal__head">What the server said</p>
+                <ul className="refusal__lines">
+                  {refusal.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div role="status" aria-live="polite">
+            {refusal === null && note !== null ? <p className="dash__note">{note}</p> : null}
+          </div>
 
           {tiles.length === 0 ? (
             <p className="dash__empty">
@@ -316,6 +323,11 @@ export default function Dashboards({
                       </button>
                     </span>
                   </header>
+                  {/* A tile's own state is not announced. A dashboard holds up to 24 of
+                      them and they all resolve at once, so a region per tile is 24
+                      sentences for one gesture, which is how a person turns announcements
+                      off. What a tile is doing is written in the tile — "Running the
+                      spec.", or what refused — and read where it sits. */}
                   <div className="grid__body">
                     <TileChart spec={tile.spec} />
                   </div>
@@ -337,20 +349,25 @@ export default function Dashboards({
  * shown in the tile it refused for, so the other tiles are still readable.
  */
 export function TileChart({ spec }: { spec: Spec }) {
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
+  // One piece of state, and the spec it is about. Clearing the previous tile's rows used
+  // to be two more setState calls at the top of the effect, which is a cascading render
+  // for what is a fetch: the tile drew the old rows, then drew "Running the spec.", then
+  // drew the new ones. Keying the answer on the spec says "I have nothing for this one
+  // yet" without a second render, and it is what the answer is actually about — a result
+  // set that arrived for a spec this tile no longer holds is not this tile's answer.
+  const [answer, setAnswer] = useState<{ spec: Spec; rows?: Row[]; refusal?: string } | null>(null);
 
   useEffect(() => {
     let live = true;
-    setRows(null);
-    setRefusal(null);
     execute(spec)
-      .then((body) => live && setRows(body.rows))
-      .catch((error: Error) => live && setRefusal(error.message));
+      .then((body) => live && setAnswer({ spec, rows: body.rows }))
+      .catch((error: Error) => live && setAnswer({ spec, refusal: error.message }));
     return () => {
       live = false;
     };
   }, [spec]);
+
+  const { rows = null, refusal = null } = answer?.spec === spec ? answer : {};
 
   if (refusal !== null) {
     return (

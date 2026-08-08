@@ -49,8 +49,18 @@ export default function Chart({
   const option = useMemo(() => buildOption(spec, rows), [spec, rows]);
   // What a click means, read through a ref so that a new handler, a new spec or a new
   // result set does not tear the chart down and rebuild it.
+  //
+  // Refreshed in an effect rather than in the render body, which is where it used to be.
+  // React may render a component and throw the result away, and a write in the body has
+  // already changed shared state by the time it does — the interface mounts in StrictMode,
+  // which renders twice, so this is a live hazard rather than a theoretical one. An effect
+  // with no dependency array runs after every render that was kept, which is exactly when
+  // this should move. Nothing can read it in between: the initial value is already current,
+  // and ECharts cannot call the handler until the effect that attaches it has run.
   const clicking = useRef({ onSelect, spec, rows });
-  clicking.current = { onSelect, spec, rows };
+  useEffect(() => {
+    clicking.current = { onSelect, spec, rows };
+  });
 
   // A question with no dimension. The validator has already established that the query
   // returns one row, so the measure is read off it and drawn as a figure. There is no

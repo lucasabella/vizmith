@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { critique, getTables, Refused, type Suggestion, type TableProfile } from "./api";
 import Visual from "./chart/Visual";
-import type { Row, Spec } from "./chart/option";
 import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";
 import Data from "./views/Data";
 import Dashboards from "./views/Dashboards";
-import { drawable, type Draft, type Field } from "./spec/spec";
+import { draftIn, drawable, type Draft, type Field } from "./spec/spec";
+import Boundary from "./Boundary";
+import { counted } from "./counted";
+import { announced, REJECTED, SAID, type Outcome, type Spoke, type Working } from "./outcome";
 import { sequence } from "./runs";
 import {
   NOTHING,
@@ -17,21 +19,6 @@ import {
   type Tile,
 } from "./dashboard/dashboard";
 
-/** Which part refused, as the server named it. It is the only thing that can: a question
- * passes through the source, the model and the source again, and from here they are one
- * request. */
-type Spoke = "source" | "model" | "spec";
-
-/**
- * What the canvas is showing. A refusal carries the machine's own words and a sentence
- * that says what they mean, because one without the other is either unreadable or
- * unverifiable.
- */
-type Outcome =
-  | { kind: "nothing" }
-  | { kind: "chart"; spec: Spec; rows: Row[] }
-  | { kind: "refused"; heading: string; lines: string[]; plain: string; spoke?: Spoke };
-
 /**
  * How many drills the way back holds.
  *
@@ -41,27 +28,6 @@ type Outcome =
  * dropped, because the way back is walked from the newest end.
  */
 const DRILLS_KEPT = 10;
-
-const REJECTED =
-  "The spec did not pass validation, so nothing ran against the source. Correct what is named above and run it again.";
-
-const SAID: Record<Spoke, { heading: string; plain: string }> = {
-  source: {
-    heading: "What the source said",
-    plain:
-      "The spec passed validation and the source refused the statement it compiled to. Change the query or check the source.",
-  },
-  model: {
-    heading: "What the model said",
-    plain:
-      "The model endpoint never answered, so no spec was written. Check the endpoint and the key, then ask again.",
-  },
-  spec: {
-    heading: "What the spec check said",
-    plain:
-      "The spec passed validation, and this rule runs after it because it needs the compiled query, so nothing ran against the source. Correct what is named above and run it again.",
-  },
-};
 
 export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
@@ -77,7 +43,7 @@ export default function App() {
   const [schemaFailure, setSchemaFailure] = useState<string | null>(null);
   const [dragging, setDragging] = useState<Field | null>(null);
   // What is in flight. Not an Outcome: running is the absence of one so far.
-  const [working, setWorking] = useState<"question" | "spec" | null>(null);
+  const [working, setWorking] = useState<Working>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "nothing" });
   // Which run is the one being waited for. A ref rather than state: nothing drawn depends
   // on it, so a render for each change would be a render for nothing.
@@ -130,17 +96,11 @@ export default function App() {
   /**
    * The spec on screen, parsed. The wells and `{ } JSON` are two views of one spec rather
    * than two specs, so this is the one place it lives and both write to it. Text that is
-   * not JSON parses to nothing and the wells go quiet, which is what a half typed spec
-   * should do to them.
+   * not a spec parses to nothing and the wells go quiet, which is what a half typed spec
+   * should do to them. What counts as a spec here is `draftIn`, which is in `spec.ts`
+   * because that is where a test can reach it.
    */
-  const draft = useMemo<Draft | null>(() => {
-    try {
-      const parsed = JSON.parse(text);
-      return parsed !== null && typeof parsed === "object" ? (parsed as Draft) : null;
-    } catch {
-      return null;
-    }
-  }, [text]);
+  const draft = useMemo<Draft | null>(() => draftIn(text), [text]);
 
   /** Every column of every table, which is what a well drags and what a drill offers. */
   const columns = useMemo<Field[]>(
@@ -362,7 +322,7 @@ export default function App() {
             className={view === "chart" ? "rail__btn rail__btn--on" : "rail__btn"}
             title="Chart"
             aria-label="Chart"
-            aria-pressed={view === "chart"}
+            aria-current={view === "chart" ? "page" : undefined}
             onClick={() => setView("chart")}
           >
             <ChartIcon />
@@ -371,7 +331,7 @@ export default function App() {
             className={view === "dashboards" ? "rail__btn rail__btn--on" : "rail__btn"}
             title="Dashboards"
             aria-label="Dashboards"
-            aria-pressed={view === "dashboards"}
+            aria-current={view === "dashboards" ? "page" : undefined}
             onClick={() => setView("dashboards")}
           >
             <DashboardIcon />
@@ -380,7 +340,7 @@ export default function App() {
             className={view === "data" ? "rail__btn rail__btn--on" : "rail__btn"}
             title="Data"
             aria-label="Data"
-            aria-pressed={view === "data"}
+            aria-current={view === "data" ? "page" : undefined}
             onClick={() => setView("data")}
           >
             <DataIcon />
@@ -421,15 +381,28 @@ export default function App() {
               </div>
             </div>
 
-            <div className="plot">
-              <Canvas
-                outcome={outcome}
-                working={working}
-                source={source}
-                model={model}
-                columns={columns}
-                onDrill={drilled}
-              />
+            {/* `aria-busy` while a run is in flight, so what is under it is reported as
+                changing rather than as the answer. */}
+            <div className="plot" aria-busy={running}>
+              {/* The inner one. What the renderer draws is the part most likely to meet a
+                  value nobody planned for, and losing the chart is a much smaller loss
+                  than losing the wells, the editor and the dashboard being arranged —
+                  all of which are outside it and still there. The next outcome clears it,
+                  so one chart that could not be drawn does not refuse the ones after it. */}
+              <Boundary
+                what="chart"
+                note="The spec is still in the editor and the panels beside it are untouched."
+                resetOn={outcome}
+              >
+                <Canvas
+                  outcome={outcome}
+                  working={working}
+                  source={source}
+                  model={model}
+                  columns={columns}
+                  onDrill={drilled}
+                />
+              </Boundary>
             </div>
 
             {/* The page tabs that used to sit here were markup and did nothing. Several
@@ -462,7 +435,7 @@ export default function App() {
                 />
               ) : null}
               <span className="pages__meta">
-                {outcome.kind === "chart" ? `${outcome.rows.length} rows` : "no rows"}
+                {outcome.kind === "chart" ? counted(outcome.rows.length, "row") : "no rows"}
               </span>
             </div>
           </main>
@@ -565,6 +538,21 @@ export default function App() {
           </aside>
         )}
       </div>
+
+      {/* The one region that carries the outcome. Everything this interface says appears by
+          being swapped into the tree, which a screen reader does not report, and the canvas
+          is where the answer to a question lands. Polite and one sentence: see `announced`
+          for why it is not the whole refusal.
+
+          Outside the view, not inside the Chart view's own markup, which is where it was
+          first put. A live region is only reported when its contents change while it is in
+          the document, so one that leaves with the view is one that announces nothing to
+          somebody who asked a question and went to look at a dashboard while it ran — and
+          on the readers that do announce an inserted region, it would say the same sentence
+          again on every return. Out here it is in the document for the life of the tab. */}
+      <p className="visually-hidden" role="status" aria-live="polite">
+        {announced(outcome, working)}
+      </p>
     </div>
   );
 }
@@ -694,7 +682,7 @@ function Canvas({
   onDrill,
 }: {
   outcome: Outcome;
-  working: "question" | "spec" | null;
+  working: Working;
   source: boolean;
   model: boolean;
   columns: Field[];

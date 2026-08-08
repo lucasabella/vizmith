@@ -3,6 +3,7 @@ import {
   WellRefusal,
   aliasFor,
   clear,
+  draftIn,
   inQuery,
   outputColumns,
   place,
@@ -205,5 +206,84 @@ describe("whether a column needs a join at all", () => {
     expect(qualified(COUNTRY, short)).toBe("customers.country");
     expect(qualified(COUNTRY)).toBe("vizmith.shop.customers.country");
     expect(qualified(CATEGORY, short)).toBe("vizmith.shop.products.category");
+  });
+});
+
+describe("what the editor is holding", () => {
+  const revenueText = () => JSON.stringify(revenue());
+
+  it("reads a spec out of the text both views write", () => {
+    expect(draftIn(revenueText())).toEqual(revenue());
+  });
+
+  it("holds nothing for text that is not JSON, so the wells go quiet", () => {
+    expect(draftIn("")).toBeNull();
+    expect(draftIn("{")).toBeNull();
+    expect(draftIn('{"query": {},')).toBeNull();
+  });
+
+  it("holds nothing for JSON that parses and is not a spec", () => {
+    // The bug. Every one of these used to arrive in the wells as a draft with a `chart`
+    // the checker had been told about and the value did not have, and reading it threw
+    // during render — which unmounts the tree, so the whole interface went blank.
+    expect(draftIn('{"a":1}')).toBeNull();
+    expect(draftIn("null")).toBeNull();
+    expect(draftIn("42")).toBeNull();
+    expect(draftIn('"a spec"')).toBeNull();
+    expect(draftIn("[]")).toBeNull();
+  });
+
+  it("holds nothing while the parts a panel reads are still missing", () => {
+    expect(draftIn('{"query":{"from":"orders","limit":1}}')).toBeNull();
+    expect(draftIn('{"query":{},"chart":{"mark":"bar"}}')).toBeNull();
+    expect(draftIn('{"chart":{"encoding":{}}}')).toBeNull();
+  });
+
+  it("holds nothing for a hand edit that took a line out of the middle of a spec", () => {
+    // The failure the top two keys do not cover, and the one this is actually likely to
+    // meet: editing JSON by hand means deleting a line, and a filter with no `column` is
+    // still JSON, still has a chart, and still throws on `filter.column.split`.
+    const spec = revenue();
+    const filtered = {
+      ...spec,
+      query: { ...spec.query, filters: [{ column: "orders.status", op: "equals", value: "paid" }] },
+    };
+
+    expect(draftIn(JSON.stringify(filtered))).not.toBeNull();
+    expect(draftIn(JSON.stringify({ ...filtered, query: { ...filtered.query, filters: [{ op: "equals" }] } }))).toBeNull();
+    expect(draftIn(JSON.stringify({ ...filtered, query: { ...filtered.query, filters: [{ column: "a" }] } }))).toBeNull();
+  });
+
+  it("holds nothing for a group_by item a panel cannot name", () => {
+    const spec = revenue();
+    const nameless = { ...spec, query: { ...spec.query, group_by: [{ truncate: "month" }] } };
+
+    expect(draftIn(JSON.stringify(nameless))).toBeNull();
+    // An alias is enough on its own: that is the name the well writes when there is one.
+    expect(
+      draftIn(JSON.stringify({ ...spec, query: { ...spec.query, group_by: [{ as: "country" }] } })),
+    ).not.toBeNull();
+  });
+
+  it("holds nothing where a list a panel walks is not a list", () => {
+    // What a spec written against another schema version looks like from here: the key is
+    // there, and it is an object rather than an array, so `.find` is not a function.
+    const spec = revenue();
+    const object = { ...spec, query: { ...spec.query, aggregates: { revenue: { fn: "sum" } } } };
+
+    expect(draftIn(JSON.stringify(object))).toBeNull();
+    expect(draftIn(JSON.stringify({ ...spec, query: { ...spec.query, filters: "none" } }))).toBeNull();
+    expect(draftIn(JSON.stringify({ ...spec, query: { ...spec.query, order_by: [3] } }))).toBeNull();
+  });
+
+  it("judges the shape and not the spec, which is the validator's job", () => {
+    // A spec with no measure, an unknown mark and a query that names nothing is a spec the
+    // validator will refuse and the wells can still draw. A second opinion in the browser
+    // is one that can disagree with the one that counts.
+    expect(draftIn('{"query":{},"chart":{"mark":"sculpture","encoding":{}}}')).not.toBeNull();
+    // A filter with an operator nothing recognises is the validator's to refuse by name.
+    expect(
+      draftIn('{"query":{"filters":[{"column":"a","op":"sideways"}]},"chart":{"encoding":{}}}'),
+    ).not.toBeNull();
   });
 });

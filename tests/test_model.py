@@ -1,9 +1,12 @@
+import datetime as dt
 import json
+from email.utils import format_datetime
 
 import httpx
 import pytest
 
-from vizmith.model import Completion, Endpoint, Model, ModelError
+from vizmith.ask import ATTEMPTS as ASK_ATTEMPTS
+from vizmith.model import BACKOFF_BUDGET, Completion, Endpoint, Model, ModelError
 
 KEY = "not-a-real-key-and-must-never-be-read-back"
 ENDPOINT = Endpoint(base_url="https://endpoint.invalid/v1", model="a-model", api_key=KEY, timeout=7.0)
@@ -18,9 +21,16 @@ ANSWER = {
 SIMPLE = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
 
 
-def model(handler) -> Model:
-    """The adapter over a transport that answers without a network."""
-    return Model(ENDPOINT, httpx.Client(transport=httpx.MockTransport(handler)))
+def model(handler, waits=None) -> Model:
+    """The adapter over a transport that answers without a network, and over a clock that
+    does not tick. The backoff is asserted by what it was asked to wait rather than by
+    waiting it, so a suite that covers three attempts still runs in milliseconds."""
+    slept = waits if waits is not None else []
+    return Model(
+        ENDPOINT,
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        sleep=slept.append,
+    )
 
 
 def answering(payload, status=200, capture=None):
@@ -36,6 +46,21 @@ def raising(error):
     def handler(request: httpx.Request) -> httpx.Response:
         raise error
 
+    return handler
+
+
+def refusing(status, headers=None, then=None):
+    """An endpoint that refuses with `status` until `then` answers instead, which is what a
+    rate limit that clears looks like from here. `then` of None never clears."""
+    sent = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if then is not None and len(sent) > then:
+            return httpx.Response(200, json=ANSWER)
+        return httpx.Response(status, json={"error": "slow down"}, headers=headers or {})
+
+    handler.sent = sent  # type: ignore[attr-defined]
     return handler
 
 
@@ -106,6 +131,175 @@ def test_a_connection_failure_is_a_model_error_rather_than_a_client_exception():
         model(raising(httpx.ConnectError("refused"))).complete("a question")
 
 
+def test_a_rate_limit_that_clears_is_answered_rather_than_ending_the_question():
+    """The bug this closes. A 429 is the normal condition on a hosted endpoint, and it used
+    to end the question on the spot: the person got "What the model said" with a rate limit
+    message in it, for a request that would have been answered a second later."""
+    endpoint = refusing(429, then=2)
+    waits = []
+
+    completion = model(endpoint, waits).complete("a question")
+
+    assert completion.text == "hello"
+    assert len(endpoint.sent) == 3, "the request was not sent again"
+    assert waits == [1.0, 2.0], "the waits do not double"
+
+
+def test_a_server_that_broke_is_sent_the_same_request_again():
+    endpoint = refusing(503, then=1)
+
+    assert model(endpoint).complete("a question").text == "hello"
+    assert len(endpoint.sent) == 2
+
+
+def test_a_rejected_request_is_not_sent_again():
+    """A 400 is about the request, and the request does not change between attempts. Sending
+    it again is a second bill for the same answer."""
+    endpoint = refusing(400)
+    waits = []
+
+    with pytest.raises(ModelError, match="answered 400"):
+        model(endpoint, waits).complete("a question")
+
+    assert len(endpoint.sent) == 1
+    assert waits == []
+
+
+def test_a_dropped_connection_is_sent_again():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) > 1:
+            return httpx.Response(200, json=ANSWER)
+        raise httpx.ReadError("dropped")
+
+    assert model(handler).complete("a question").text == "hello"
+    assert len(calls) == 2
+
+
+def test_a_timeout_is_not_sent_again():
+    """The timeout is the caller's own number and it has already been waited in full. Three
+    attempts at a sixty second setting is a three minute question, which is a worse answer
+    than saying the endpoint did not answer."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise httpx.ReadTimeout("timed out")
+
+    with pytest.raises(ModelError, match="did not answer within"):
+        model(handler).complete("a question")
+
+    assert len(calls) == 1
+
+
+def test_the_attempts_are_bounded_and_the_last_failure_says_how_many():
+    """One 429 and three of them are different things to be told, and the message is what
+    reaches the interface under "What the model said"."""
+    endpoint = refusing(429)
+
+    with pytest.raises(ModelError, match=r"answered 429.*sent 3 times") as failure:
+        model(endpoint).complete("a question")
+
+    assert len(endpoint.sent) == 3
+    assert failure.value.status == 429, "the status a caller reads survives the retries"
+
+
+def test_an_endpoint_that_says_how_long_to_wait_gets_that_long_rather_than_the_doubling():
+    """It is the one that knows when its limit resets. Doubling against it asks too early,
+    which is another 429."""
+    waits = []
+    model(refusing(429, headers={"Retry-After": "4"}, then=1), waits).complete("a question")
+
+    assert waits == [4.0]
+
+
+def test_a_retry_after_given_as_a_date_is_read_as_the_seconds_until_it():
+    """Both spellings are sent in the wild, and the date one is what a proxy tends to
+    write."""
+    when = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=5)
+    waits = []
+    model(refusing(429, headers={"Retry-After": format_datetime(when)}, then=1), waits).complete("q")
+
+    assert waits and 3.0 <= waits[0] <= 5.0
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["soon", "", "inf", "nan", "1e400", "-1", "1.5", "Wed, 99 Xxx 2099 07:28:00 GMT"],
+    ids=["prose", "empty", "inf", "nan", "overflow", "negative", "fractional", "not a date"],
+)
+def test_a_retry_after_nobody_can_parse_is_read_as_nothing_said(said):
+    """A header that is neither a count of seconds nor a date is not a reason to lose the
+    answer about the rate limit, so the backoff is the one this file would have chosen
+    anyway.
+
+    `inf` and `nan` are here because `float` reads them and the specification does not: a
+    count of seconds is digits. Read as a number, `inf` came back as a delay beyond the
+    budget and silently turned the retries off, from a header that said nothing at all."""
+    waits = []
+    model(refusing(429, headers={"Retry-After": said}, then=1), waits).complete("a question")
+
+    assert waits == [1.0]
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["0", "Thu, 01 Jan 1970 00:00:00 GMT"],
+    ids=["zero seconds", "a date already past"],
+)
+def test_an_endpoint_asking_for_no_wait_at_all_still_gets_the_backoff(said):
+    """What is asked for is a floor rather than an instruction. A `Retry-After` of zero —
+    or a date that a client whose clock runs fast reads as already past — would otherwise
+    remove the backoff and put three requests to a rate limited endpoint inside a
+    millisecond, which is worse for that endpoint than not retrying at all."""
+    waits = []
+    model(refusing(429, headers={"Retry-After": said}, then=2), waits).complete("a question")
+
+    assert waits == [1.0, 2.0]
+
+
+def test_a_retry_after_date_with_no_zone_is_still_read():
+    """`parsedate_to_datetime` returns a naive datetime for the `-0000` spelling, and
+    subtracting an aware one from it raises a TypeError — which is not a ModelError, so it
+    would leave this module and reach the person as a 500 rather than as a rate limit."""
+    when = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=5)
+    waits = []
+    naive = format_datetime(when).replace("+0000", "-0000")
+    model(refusing(429, headers={"Retry-After": naive}, then=1), waits).complete("a question")
+
+    assert waits and 3.0 <= waits[0] <= 5.0
+
+
+def test_a_wait_longer_than_the_budget_ends_the_question_rather_than_being_slept_through():
+    """Somebody is watching. An endpoint asking for a minute has said the question cannot be
+    answered while they wait, whatever it says after that."""
+    endpoint = refusing(429, headers={"Retry-After": "600"})
+    waits = []
+
+    with pytest.raises(ModelError, match="answered 429"):
+        model(endpoint, waits).complete("a question")
+
+    assert len(endpoint.sent) == 1
+    assert waits == []
+
+
+def test_the_budget_is_a_request_and_the_number_is_chosen_for_a_question():
+    """The scope worth stating, because it is not the obvious one. `ask` sends up to its own
+    ATTEMPTS requests for one question and the first question of a process pays a probe in
+    front of them, so what a person can be made to wait is several of these, not one."""
+    waits = []
+    with pytest.raises(ModelError):
+        model(refusing(429, headers={"Retry-After": str(int(BACKOFF_BUDGET) + 1)}), waits).complete("q")
+    assert waits == [], "a wait past the budget was slept anyway"
+
+    inside = []
+    model(refusing(429, headers={"Retry-After": str(int(BACKOFF_BUDGET))}, then=1), inside).complete("q")
+    assert inside == [BACKOFF_BUDGET]
+    assert BACKOFF_BUDGET * ASK_ATTEMPTS <= 20.0, "one question can be made to wait too long"
+
+
 def test_an_answer_without_a_completion_is_a_model_error():
     with pytest.raises(ModelError, match="without a completion"):
         model(answering({"choices": []})).complete("a question")
@@ -139,6 +333,19 @@ def test_a_probe_that_never_got_an_answer_raises_rather_than_reporting_no():
 
     with pytest.raises(ModelError):
         model(answering({"error": "overloaded"}, status=503)).constrains_output(SIMPLE)
+
+
+def test_a_rate_limit_is_not_evidence_that_an_endpoint_cannot_constrain_output():
+    """The distinction this method exists for, taken to the status that most looks like a
+    refusal and is not one. Answering False here is the expensive mistake: the caller
+    remembers "cannot constrain", stops sending the schema, and pays the fallback loop for
+    the rest of the process over a limit that cleared in a second."""
+    endpoint = refusing(429)
+
+    with pytest.raises(ModelError, match="answered 429"):
+        model(endpoint).constrains_output(SIMPLE)
+
+    assert len(endpoint.sent) == 3, "the probe gave up without sending it again"
 
 
 def test_nothing_reaches_a_service_without_configuration():
