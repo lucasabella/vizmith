@@ -1,5 +1,5 @@
 import { useState } from "react";
-import Chart from "./Chart";
+import Chart from "./Deferred";
 import Table from "./Table";
 import { overSeriesLimit, type Row, type Spec } from "./option";
 import { NoDrill, candidates, drill, type Clicked } from "../spec/drill";
