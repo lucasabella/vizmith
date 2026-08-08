@@ -49,6 +49,7 @@ from vizmith.critique import critique
 from vizmith.dashboards import Dashboards, Refused
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
+from vizmith.rationing import MODEL, QUERY, Exhausted, Rations
 from vizmith.relationships import Confirmations, graph, resolve, suggest
 from vizmith.sources import build
 from vizmith.spec import validate_spec
@@ -158,6 +159,53 @@ def damaged(request: Request, failure: Damaged) -> JSONResponse:
     500: the request was well formed, nothing is wrong with what was asked, and the endpoint
     can answer again as soon as the file named in the message is moved aside."""
     return JSONResponse(status_code=503, content={"errors": [str(failure)]})
+
+
+@app.exception_handler(Exhausted)
+def exhausted(request: Request, failure: Exhausted) -> JSONResponse:
+    """A ration that ran out, in the shape every other refusal arrives in.
+
+    429 with `Retry-After`, which is what a client that means well reads and backs off on.
+    Registered here rather than raised as an `HTTPException` so that the body is the same
+    `errors` list the validator and the source refusals use: the interface has one way to
+    show a refusal, and a second shape would be a second way."""
+    return JSONResponse(
+        status_code=429,
+        content={"errors": [str(failure)], "spoke": "rations"},
+        headers={"Retry-After": str(failure.retry_after)},
+    )
+
+
+@lru_cache
+def rations() -> Rations:
+    """What is left of what the costed endpoints may spend, for the life of the process.
+
+    One object rather than one per request, which is the whole point of it, and built on
+    first use rather than at import so that a test can put its own clock in front of it and
+    so that the environment `serve` sets is read after `serve` has set it."""
+    return Rations()
+
+
+def rationed(what: str):
+    """A dependency for an endpoint that costs something: a token now, a slot for as long
+    as it runs.
+
+    The slot is released in a `finally` on the far side of the `yield`, which FastAPI runs
+    after the endpoint has returned, so a handler that raised still gives its slot back. The
+    token is taken first and is not returned: what a bucket rations is requests made, and a
+    request that failed at the source was still paid for."""
+
+    def ration(request: Request):
+        allowance = rations()
+        client = request.client.host if request.client else "unknown"
+        allowance.spend(client, what)
+        allowance.enter()
+        try:
+            yield
+        finally:
+            allowance.leave()
+
+    return ration
 
 
 @lru_cache
@@ -330,7 +378,7 @@ def health() -> dict[str, str | bool]:
     }
 
 
-@app.get("/api/tables")
+@app.get("/api/tables", dependencies=[Depends(rationed(QUERY))])
 def tables(catalog: Annotated[Catalog, Depends(source)]):
     """Every table in the configured schema, as the profile the prompt path was given.
 
@@ -403,7 +451,7 @@ def shape(catalog: Annotated[Catalog, Depends(source)]):
     }
 
 
-@app.get("/api/tables/{name}")
+@app.get("/api/tables/{name}", dependencies=[Depends(rationed(QUERY))])
 def table(name: str, catalog: Annotated[Catalog, Depends(source)]):
     """One table's profile: the figures the prompt path was given for that table.
 
@@ -638,7 +686,7 @@ def execute_spec(spec: dict, catalog: Catalog):
     return {"spec": spec, "rows": rows}
 
 
-@app.post("/api/execute")
+@app.post("/api/execute", dependencies=[Depends(rationed(QUERY))])
 def execute(request: SpecRequest, catalog: Annotated[Catalog, Depends(source)]):
     """The rows a valid spec produces, with the spec that produced them. An invalid spec is
     refused with its errors and never reaches the source."""
@@ -648,7 +696,7 @@ def execute(request: SpecRequest, catalog: Annotated[Catalog, Depends(source)]):
     return execute_spec(request.spec, catalog)
 
 
-@app.post("/api/ask")
+@app.post("/api/ask", dependencies=[Depends(rationed(MODEL))])
 def question(
     request: QuestionRequest,
     catalog: Annotated[Catalog, Depends(source)],
@@ -685,7 +733,7 @@ def question(
     return execute_spec(answer.spec, catalog)
 
 
-@app.post("/api/critique")
+@app.post("/api/critique", dependencies=[Depends(rationed(MODEL))])
 def suggestion(
     request: SpecRequest,
     catalog: Annotated[Catalog, Depends(source)],

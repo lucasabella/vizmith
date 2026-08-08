@@ -76,6 +76,8 @@ Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Sources:
 
 Vizmith runs on your machine and serves a browser. The frontend talks to the backend over HTTP and nothing else, which keeps a desktop build possible later without touching application code.
 
+Four of those endpoints spend money — two make billed model calls, two run warehouse statements — and they are rationed: a rate per client and a cap on how many may be in flight, both set from the size of a full dashboard, because opening one is the largest burst anybody makes on purpose. Past a ceiling the answer is a 429 naming the ceiling, the variable that moves it and when to try again, so a loop somebody did not mean stops at the server rather than at a bill. `VIZMITH_MODEL_PER_MINUTE`, `VIZMITH_QUERY_PER_MINUTE` and `VIZMITH_IN_FLIGHT` move them, and `0` turns one off.
+
 ## Running it
 
 There is no PyPI release yet, so installing means building the wheel. That needs Node,

@@ -4,7 +4,7 @@ import { counted } from "./counted";
 /** Which part refused, as the server named it. It is the only thing that can: a question
  * passes through the source, the model and the source again, and from the browser they are
  * one request. */
-export type Spoke = "source" | "model" | "spec";
+export type Spoke = "source" | "model" | "spec" | "rations";
 
 /**
  * What the canvas is showing. A refusal carries the machine's own words and a sentence
@@ -32,6 +32,14 @@ export const SAID: Record<Spoke, { heading: string; plain: string }> = {
     heading: "What the model said",
     plain:
       "The model endpoint never answered, so no spec was written. Check the endpoint and the key, then ask again.",
+  },
+  rations: {
+    // The one refusal that is Vizmith's own. Nothing was asked of the model or the source,
+    // so a person reading "what the source said" would go and check a warehouse that was
+    // never touched. The server's message names the ceiling and the variable that moves it.
+    heading: "What this server would not spend",
+    plain:
+      "Nothing was asked of the model or the source. This is Vizmith's own limit on how often the endpoints that cost money may be used, so wait the moment it names, or raise the ceiling it names.",
   },
   spec: {
     heading: "What the spec check said",

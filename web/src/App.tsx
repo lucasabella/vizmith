@@ -681,10 +681,11 @@ function Correcting({
 }
 
 /** The badge reports the spec and nothing else. A source that refused a statement did not
- * make the spec invalid, and a model that never answered wrote none to judge. */
+ * make the spec invalid, a model that never answered wrote none to judge, and a request the
+ * server would not spend on never reached the thing that judges one. */
 function Badge({ outcome }: { outcome: Outcome }) {
   const spoke = outcome.kind === "refused" ? outcome.spoke : undefined;
-  if (outcome.kind === "nothing" || spoke === "model") {
+  if (outcome.kind === "nothing" || spoke === "model" || spoke === "rations") {
     return <span className="strip__badge">no spec yet</span>;
   }
   const valid = outcome.kind === "chart" || spoke === "source";

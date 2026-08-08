@@ -99,3 +99,20 @@ describe("what the canvas announces", () => {
     expect(announced({ kind: "nothing" }, null)).toBe("No chart yet.");
   });
 });
+
+describe("a refusal the server itself made", () => {
+  it("is announced as the server's own limit rather than as the source's", () => {
+    // A rationed request reached neither the model nor the warehouse, so the sentence
+    // beside it must not send somebody to check one. The server names which part refused;
+    // this is the browser holding a message for that name.
+    const said = SAID.rations;
+
+    expect(
+      announced(
+        { kind: "refused", spoke: "rations", lines: ["That is more than 20 model requests in a minute"], ...said },
+        null,
+      ),
+    ).toBe("What this server would not spend: That is more than 20 model requests in a minute");
+    expect(said.plain).toContain("Nothing was asked of the model or the source");
+  });
+});
