@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { deleteDashboard, execute, getDashboard, getDashboards, saveDashboard } from "../api";
 import Chart from "../chart/Deferred";
-import type { Row, Spec } from "../chart/option";
+import type { Row } from "../chart/option";
 import { overSeriesLimit } from "../chart/option";
 import { refusal, type Refusal } from "../outcome";
 import {
@@ -21,7 +21,7 @@ import {
   type Saved,
   type Tile,
 } from "../dashboard/dashboard";
-import { drawable, type Draft } from "../spec/spec";
+import { drawable, type Draft, type Spec } from "../spec/spec";
 import { counted } from "../counted";
 
 /**

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Spec } from "../chart/option";
+import type { Spec } from "../spec/spec";
 import Dashboards from "../views/Dashboards";
 import {
   COLUMNS,
@@ -23,7 +23,9 @@ import {
 } from "./dashboard";
 
 const spec = (title?: string): Spec => ({
+  spec_version: "1",
   title,
+  query: { from: "orders", limit: 500 },
   chart: {
     mark: "bar",
     encoding: {

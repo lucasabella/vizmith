@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Row, Spec } from "../chart/option";
+import type { Row } from "../chart/option";
+import type { Spec } from "./spec";
 import { NoDrill, candidates, drill } from "./drill";
 import type { Draft, Field } from "./spec";
 

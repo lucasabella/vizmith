@@ -5,7 +5,7 @@ What a change has to touch to be complete, per thing somebody would want to add.
 This is not the house style and it is not the gate — those are
 [CONTRIBUTING.md](../CONTRIBUTING.md), which says what makes a contribution *acceptable*.
 This page says what makes one *finished*, and it is per extension point rather than
-general, because the four things below have four different lists and a page that tried to
+general, because the five things below have five different lists and a page that tried to
 hold both would bury one.
 
 Two rules run through all of it.
@@ -28,9 +28,9 @@ red.
 
 ## Adding a mark
 
-A heatmap, a boxplot, a horizontal bar. Longest of the four lists, and the two steps whose
-absence is *silent* are steps 3 and 7 — a mark no rule can refuse, and a chart that draws
-nothing without raising.
+A heatmap, a boxplot, a horizontal bar. Longest of the five lists, and the two steps whose
+absence is *silent* are 3 and 6 — a mark no rule can refuse, and a chart that draws nothing
+without raising.
 
 1. **`src/vizmith/spec/v1/spec.schema.json`** — the `chart.mark` enum. The grammar. Nothing
    downstream is reachable until this allows the word.
@@ -47,15 +47,17 @@ nothing without raising.
    no evaluation can ever count. Nothing fails when you skip this. It is part of adding a
    mark rather than a follow-up.
 
-4. **`web/src/spec/spec.ts`, `MARKS`** — the browser's copy of the enum, as a tuple.
+4. **`web/src/spec/spec.ts`, `MARKS`** — the browser's one copy of the enum, as a tuple.
    `mirrors.test.ts` reads the schema and fails if this list and the schema's disagree, so
-   this step announces itself.
+   this step announces itself. There is no second copy in the renderer: `option.ts` imports
+   `Mark` from here.
 
-5. **`web/src/chart/option.ts`** — the renderer, which is three separate edits:
-   - the `mark` union on `Spec` (the renderer's own copy, also mirrored),
-   - `SERIES_TYPE`, the mark-to-ECharts-series map — also mirrored, counting `arc`, which is
-     a pie and a branch rather than a lookup,
-   - `markStyle`, and possibly a branch in `buildOption` the way an arc has one.
+5. **`web/src/chart/option.ts`** — the renderer, which is two edits:
+   - `SERIES_TYPE`, the mark-to-ECharts-series map. It is a `Record` keyed by the marks, so
+     step 4 makes this a compile error until it is filled in — except for `arc`, which is
+     excluded by name because a pie is a branch in `buildOption` rather than a lookup. A mark
+     that needs its own branch is the same case.
+   - `markStyle`, where the mark has geometry the design system fixes.
 
 6. **`web/src/chart/option.ts`'s `SeriesOption`, and `web/src/chart/Chart.tsx`'s
    `echarts.use([...])`** — the composed option type and the runtime registration. These two

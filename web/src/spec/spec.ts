@@ -6,12 +6,11 @@
  * same judge a model's answer goes through. A second opinion in the browser is one that
  * can disagree with the one that counts.
  *
- * The renderer's `Spec` is what a validated spec looks like on the way back. A draft is
- * what is on screen while it is being built, which is the same shape with a measure that
- * may not be there yet.
+ * The grammar's own types live here, and there is one of them. A `Spec` is what the API
+ * answers with and what the renderer draws; a `Draft` is the same object while it is being
+ * built, which is a spec whose measure may not be bound yet. They used to be two partial
+ * types in two files with `as unknown as` between them — see below.
  */
-
-import type { Channel, ChannelType, Spec } from "../chart/option";
 
 export type Join = {
   table: string;
@@ -40,27 +39,62 @@ export type Query = {
   limit: number;
 };
 
-export type Draft = {
+/** What a column is bound to, and how the axis it lands on should read it. The type is the
+ * grammar's rather than the profile's: a column is `integer` in a profile and
+ * `quantitative` here, because what the renderer needs to know is how to draw it. */
+export type Channel = { field: string; type: ChannelType; title?: string };
+
+/** No `y` is a chart with nothing to measure, which is a draft rather than a spec. The
+ * absence of `x` is different and is legal: it is the answer to a question with no
+ * dimension, and it draws the measure as one figure. */
+export type Encoding = { x?: Channel; y: Channel; color?: Channel };
+
+export type Chart = { mark: Mark; stack?: boolean; encoding: Encoding };
+
+/**
+ * One object, described once.
+ *
+ * This is what `/api/execute` answers with, what a dashboard tile stores, and what the
+ * renderer draws. It used to be two types in two files that each left out part of it — the
+ * renderer's had no `query` at all, not optional but absent — with `as unknown as` between
+ * them at six call sites. That cast is the one that exists because the direct one is
+ * refused, and it was doing real work in both directions: `drill.ts` cannot read
+ * `query.group_by` off a type that says there is no query.
+ *
+ * What it cost was that the split was invisible until somebody added a field to the
+ * grammar, at which point it landed in whichever of the two types was in front of them and
+ * the other one kept not knowing, with the casts making sure nothing said so.
+ */
+export type Spec = {
   spec_version: "1";
   title?: string;
   query: Query;
-  chart: { mark: Mark; stack?: boolean; encoding: { x?: Channel; y?: Channel; color?: Channel } };
+  chart: Chart;
 };
 
-/** A validated spec is a draft that has a measure. The renderer only ever sees one of
- * these, because it only ever draws what the API returned. */
-export const drawable = (draft: Draft): draft is Draft & { chart: { encoding: { y: Channel } } } =>
-  draft.chart.encoding.y !== undefined;
+/**
+ * A spec whose measure may not be bound yet, which is what is on screen while it is being
+ * built. That is the whole of the difference, so it is the whole of what is written down:
+ * a draft is a spec with a partial encoding and nothing else changed.
+ *
+ * A `Spec` is therefore already a `Draft` as far as the checker is concerned, and passing
+ * one where a draft is wanted needs no conversion. Going the other way is `drawable`.
+ */
+export type Draft = Omit<Spec, "chart"> & { chart: Omit<Chart, "encoding"> & { encoding: Partial<Encoding> } };
 
-/** A spec off the wire, as the thing being edited. The two are one spec in two views, so
- * the JSON and the wells cannot drift apart. */
-export const asDraft = (spec: Spec): Draft => spec as unknown as Draft;
-
-/** The way back, for a draft on its way to the endpoint that runs one. A cast for the same
- * reason `asDraft` is: they are one object in two views, and what the browser can check is
- * whether it is *shaped* like a spec — `drawable` — while whether it is legal is the
- * validator's, which is the judge this request is on its way to. */
-export const asSpec = (draft: Draft): Spec => draft as unknown as Spec;
+/**
+ * A draft that has a measure, which is a spec.
+ *
+ * The guard's whole job is to say the measure is present, and it used to narrow to a
+ * `Draft` with a `y` — a shape the renderer did not accept, so a caller that had just
+ * proved it went through a cast anyway to get back what the guard had established. It
+ * narrows to `Spec` now, and the renderer takes exactly that.
+ *
+ * It says nothing about whether the spec is *legal*. That is `/api/validate`, which is the
+ * judge a model's answer goes through and the only one; what the browser can answer is
+ * whether the thing in hand is shaped like a spec, which is a different question.
+ */
+export const drawable = (draft: Draft): draft is Spec => draft.chart.encoding.y !== undefined;
 
 const anObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -145,6 +179,9 @@ export type Well = (typeof WELLS)[number];
  */
 export const MARKS = ["bar", "line", "area", "point", "arc"] as const;
 export type Mark = (typeof MARKS)[number];
+
+export const CHANNEL_TYPES = ["nominal", "ordinal", "quantitative", "temporal"] as const;
+export type ChannelType = (typeof CHANNEL_TYPES)[number];
 
 export const FNS = ["sum", "avg", "min", "max", "count", "count_distinct"] as const;
 export type Fn = (typeof FNS)[number];

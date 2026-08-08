@@ -23,6 +23,7 @@ import { describe, expect, it } from "vitest";
 import { SERIES } from "./chart/option";
 import { COLUMNS, NAME_LIMIT, TILE_LIMIT, nameProblem } from "./dashboard/dashboard";
 import {
+  CHANNEL_TYPES,
   COMPARISONS,
   DIRECTIONS,
   FNS,
@@ -224,11 +225,17 @@ describe("the parts that can refuse", () => {
  * The grammar, which is the copy that matters most and was the one nothing held.
  *
  * `spec/v1/spec.schema.json` is the grammar and the only judge of a spec. The browser
- * writes several of its closed sets out again — a mark goes in a control, an operator goes
- * in a filter the wells build, a channel type picks an axis — and every one of them was a
- * union typed by hand with nothing failing when it disagreed. What disagreement looks like
- * is not a crash: it is a spec this interface wrote, accepted by the checker, accepted by
- * the wells, and refused by the validator after the round trip.
+ * writes its closed sets out again — a mark goes in a control, an operator goes in a filter
+ * the wells build, a channel type picks an axis — and every one of them was a union typed by
+ * hand with nothing failing when it disagreed. What disagreement looks like is not a crash:
+ * it is a spec this interface wrote, accepted by the checker, accepted by the wells, and
+ * refused by the validator after the round trip.
+ *
+ * There is one copy of each now, in `spec/spec.ts`, which is what this holds to the schema.
+ * The renderer had two more and has none: `option.ts` imports the grammar's types, and its
+ * two lookups are `Record`s keyed by them, so a mark or a channel type added here is a
+ * compile error in the renderer until it is drawn. That is stricter than a mirror and it is
+ * why the assertions that read this file as text are gone.
  *
  * Read as sets rather than in order, unlike the colour mirror above: the order of these is
  * the order a person reads them in a menu, which is a decision for the interface, while
@@ -236,7 +243,6 @@ describe("the parts that can refuse", () => {
  */
 describe("the grammar's closed sets, against the schema that is the grammar", () => {
   const schema = JSON.parse(read("../../src/vizmith/spec/v1/spec.schema.json"));
-  const option = read("./chart/option.ts");
 
   /** One enum, by the definition it belongs to. Read rather than assumed: a definition
    * renamed away answers `undefined` and fails as a missing mirror, rather than passing as
@@ -244,11 +250,9 @@ describe("the grammar's closed sets, against the schema that is the grammar", ()
   const enumOf = (definition: string, property: string): string[] =>
     schema.$defs[definition].properties[property].enum;
 
-  const same = (one: readonly string[], two: readonly string[]) =>
-    expect([...one].sort()).toEqual([...two].sort());
-
   it.each([
     ["chart.mark", enumOf("chart", "mark"), MARKS],
+    ["channel.type", enumOf("channel", "type"), CHANNEL_TYPES],
     ["aggregate.fn", enumOf("aggregate", "fn"), FNS],
     ["select_item.truncate", enumOf("select_item", "truncate"), UNITS],
     ["join.type", enumOf("join", "type"), JOIN_TYPES],
@@ -258,47 +262,6 @@ describe("the grammar's closed sets, against the schema that is the grammar", ()
     ["having.op", enumOf("having", "op"), COMPARISONS],
   ])("%s is what spec.ts holds", (_name, declared, held) => {
     expect(declared.length).toBeGreaterThan(0);
-    same(declared, held);
-  });
-
-  /**
-   * The renderer's own copies, read as text.
-   *
-   * `option.ts` cannot import these from `spec/spec.ts`, which imports its `Channel` and
-   * `Spec`: a value imported the other way is a cycle, and a type-only import that is
-   * erased at build time is a cycle a reader still has to hold in their head. So it keeps
-   * its own, and this is what keeps them true — which is the same bargain the chrome
-   * constants above struck, and the reason they are read as text too.
-   */
-  const union = (name: string): string[] => {
-    const declared = new RegExp(`export type ${name} =([^;]+);`).exec(option)?.[1] ?? "";
-    return [...declared.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-  };
-  const keys = (name: string): string[] => {
-    const body = new RegExp(`const ${name} = \\{([^}]*)\\}`).exec(option)?.[1] ?? "";
-    return [...body.matchAll(/(\w+):/g)].map((match) => match[1]);
-  };
-
-  it("draws the axis for every channel type the grammar has", () => {
-    // Two copies in the one file, and `AXIS_TYPE` is the one that matters: a channel type
-    // with no entry draws an axis of `undefined`, which ECharts reads as a category axis
-    // and a person reads as dates in the wrong order.
-    same(enumOf("channel", "type"), union("ChannelType"));
-    same(enumOf("channel", "type"), keys("AXIS_TYPE"));
-  });
-
-  it("has a series type for every mark, counting the one that is not a series", () => {
-    // `SERIES_TYPE` holds four of the five. An arc is a pie, which ECharts configures
-    // differently enough that it is a branch rather than a lookup, so it is named here
-    // rather than being allowed to be an omission nobody notices.
-    same(enumOf("chart", "mark"), [...keys("SERIES_TYPE"), "arc"]);
-  });
-
-  it("types the mark on its own Spec as the grammar's five", () => {
-    const declared = /\bmark: ((?:"[a-z]+"\s*\|?\s*)+);/.exec(option)?.[1] ?? "";
-    same(
-      enumOf("chart", "mark"),
-      [...declared.matchAll(/"([^"]+)"/g)].map((match) => match[1]),
-    );
+    expect([...declared].sort()).toEqual([...held].sort());
   });
 });

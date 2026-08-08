@@ -3,9 +3,9 @@ import Chart from "./Deferred";
 import Table from "./Table";
 import type { Drawn } from "./Chart";
 import { copy, csv, download, fileName } from "./exporting";
-import { overSeriesLimit, type Row, type Spec } from "./option";
+import { overSeriesLimit, type Row } from "./option";
 import { NoDrill, candidates, drill, type Clicked } from "../spec/drill";
-import { asDraft, type Draft, type Field } from "../spec/spec";
+import { type Field, type Spec } from "../spec/spec";
 
 /**
  * The visual card: the chart, and the table of what it was drawn from.
@@ -29,7 +29,7 @@ export default function Visual({
   spec: Spec;
   rows: Row[];
   columns: Field[];
-  onDrill: (draft: Draft) => void;
+  onDrill: (narrowed: Spec) => void;
 }) {
   const [view, setView] = useState<"chart" | "table">("chart");
   const [clicked, setClicked] = useState<Clicked | null>(null);
@@ -49,8 +49,9 @@ export default function Visual({
   }, [said]);
 
   const tooMany = overSeriesLimit(spec, rows);
-  const draft = asDraft(spec);
-  const dimensions = clicked === null ? [] : candidates(draft, columns);
+  // A spec is a draft the checker already accepts: the two are one type with one of them
+  // allowed a missing measure, so what used to be a cast here is nothing at all.
+  const dimensions = clicked === null ? [] : candidates(spec, columns);
 
   const narrow = (by: Field) => {
     if (clicked === null) return;

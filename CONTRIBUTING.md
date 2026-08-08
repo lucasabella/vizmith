@@ -69,7 +69,7 @@ the code already said.
 contribution acceptable is here — the gate, the rules that do not move, where a decision
 goes. What makes one *complete* is per extension point and lives there: the files a new
 mark, a new well, a new view, a new endpoint or a new source has to touch, in order, with
-the reason each is on the list. Adding a mark is seven steps across two languages, and the
+the reason each is on the list. Adding a mark is eight steps across two languages, and the
 two whose absence is silent — a mark no rule can refuse, and a series type that is used and
 not registered — are named as such.
 

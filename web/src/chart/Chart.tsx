@@ -8,7 +8,8 @@ import {
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { SURF, buildOption, clickedValue, label, type Row, type Spec } from "./option";
+import { SURF, buildOption, clickedValue, label, type Row } from "./option";
+import type { Spec } from "../spec/spec";
 import type { Clicked } from "../spec/drill";
 
 /**

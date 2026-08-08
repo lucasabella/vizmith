@@ -19,11 +19,10 @@ import {
   NO_VALUE,
   SERIES,
   SERIES_LIMIT,
-  type Channel,
   type Hovered,
   type Row,
-  type Spec,
 } from "./option";
+import type { Channel, Spec } from "../spec/spec";
 
 const FIXTURES = fileURLToPath(new URL("../../../tests/fixtures/specs/valid", import.meta.url));
 
@@ -69,7 +68,15 @@ const axisOf = (option: ReturnType<typeof buildOption>, which: "xAxis" | "yAxis"
     nameTextStyle: { color: string };
   };
 
-const spec = (chart: Spec["chart"], title = "Test"): Spec => ({ title, chart });
+// A whole spec, because a spec is one type now and the renderer takes the same object the
+// API answers with. The query is a real one and is not read here: what the renderer reads
+// is the encoding, which is the point of the assertion below about columns it was not given.
+const spec = (chart: Spec["chart"], title = "Test"): Spec => ({
+  spec_version: "1",
+  title,
+  query: { from: "orders", limit: 500 },
+  chart,
+});
 
 const named = (channel: Channel): string => channel.title ?? channel.field;
 
@@ -597,7 +604,9 @@ it("returns null for an empty result set", () => {
 
 describe("a question with no dimension", () => {
   const figure = (title?: string): Spec => ({
+    spec_version: "1",
     title,
+    query: { from: "orders", limit: 500 },
     chart: { mark: "bar", encoding: { y: { field: "revenue", type: "quantitative", title: "Revenue" } } },
   });
 

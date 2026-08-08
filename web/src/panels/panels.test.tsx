@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { ColumnProfile, TableProfile } from "../api";
 import Table from "../chart/Table";
 import Visual from "../chart/Visual";
-import type { Row, Spec } from "../chart/option";
+import type { Row } from "../chart/option";
+import type { Spec } from "../spec/spec";
 import { SERIES_LIMIT } from "../chart/option";
 import Fields, { Profile, Unread, nullRate } from "./Fields";
 import { fromProfiles, fromShape } from "./fields";
@@ -248,7 +249,9 @@ describe("the wells", () => {
 
 describe("the visual card", () => {
   const spec: Spec = {
+    spec_version: "1",
     title: "Revenue per country",
+    query: { from: "orders", limit: 500 },
     chart: {
       mark: "bar",
       encoding: {

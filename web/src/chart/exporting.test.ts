@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { csv, field, fileName } from "./exporting";
-import type { Row, Spec } from "./option";
+import type { Row } from "./option";
+import type { Spec } from "../spec/spec";
 
 /**
  * What leaves the tab, and what must not leave it intact.

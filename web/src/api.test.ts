@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ask, execute, getHealth, Refused } from "./api";
-import type { Spec } from "./chart/option";
+import type { Spec } from "./spec/spec";
 
 /**
  * The transport, on its own.

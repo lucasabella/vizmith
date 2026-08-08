@@ -11,8 +11,7 @@
  * column or the whole width and where it sits is where it sits in the list.
  */
 
-import type { Spec } from "../chart/option";
-import type { Draft } from "../spec/spec";
+import type { Spec } from "../spec/spec";
 
 /** Mirrors `COLUMNS` in `dashboards.py`. The grid a dashboard is arranged on. */
 export const COLUMNS = 2;
@@ -47,9 +46,9 @@ let minted = 0;
 
 /** A tile with an identity of its own. Minted here rather than derived from the spec,
  * because two tiles may hold equal specs and they are still two tiles. */
-export const tiled = (spec: Spec | Draft, width = 1): Tile => ({
+export const tiled = (spec: Spec, width = 1): Tile => ({
   id: `tile-${(minted += 1)}`,
-  spec: spec as Spec,
+  spec,
   width,
 });
 
@@ -104,13 +103,13 @@ export const editingIndex = (arrangement: Arrangement): number =>
  * correcting it, and adding it back would undo that without being asked. The arrangement
  * comes back unchanged and the caller says so.
  */
-export const putBack = (arrangement: Arrangement, spec: Spec | Draft): Arrangement => {
+export const putBack = (arrangement: Arrangement, spec: Spec): Arrangement => {
   const at = editingIndex(arrangement);
   if (at === -1) return { ...arrangement, editing: null };
   return {
     ...arrangement,
     tiles: arrangement.tiles.map((tile, index) =>
-      index === at ? { ...tile, spec: spec as Spec } : tile,
+      index === at ? { ...tile, spec } : tile,
     ),
     editing: null,
   };
@@ -121,7 +120,7 @@ export type Saved = { name: string; tiles: number };
 
 /** A tile added to the end, which is where a chart that was just made belongs: anywhere
  * else would move something a person arranged. */
-export const add = (tiles: Tile[], spec: Spec | Draft): Tile[] => [...tiles, tiled(spec)];
+export const add = (tiles: Tile[], spec: Spec): Tile[] => [...tiles, tiled(spec)];
 
 export const remove = (tiles: Tile[], index: number): Tile[] =>
   tiles.filter((_, at) => at !== index);

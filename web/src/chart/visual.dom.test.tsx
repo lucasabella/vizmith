@@ -2,7 +2,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Visual from "./Visual";
-import type { Row, Spec } from "./option";
+import type { Row } from "./option";
+import type { Spec } from "../spec/spec";
 import type { Draft, Field } from "../spec/spec";
 
 /**

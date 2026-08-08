@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Dashboards from "./Dashboards";
 import { NOTHING, tiled, type Arrangement } from "../dashboard/dashboard";
-import type { Spec } from "../chart/option";
+import type { Spec } from "../spec/spec";
 
 /**
  * The five async handlers, which were the least reachable code in the interface.

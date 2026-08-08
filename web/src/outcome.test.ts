@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Refused } from "./api";
-import { SERIES_LIMIT, type Spec } from "./chart/option";
+import { SERIES_LIMIT } from "./chart/option";
+import type { Spec } from "./spec/spec";
 import { announced, refusal, REJECTED, SAID, type Outcome } from "./outcome";
 
 const spec = (encoding: Spec["chart"]["encoding"]): Spec =>

@@ -6,7 +6,7 @@ import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";
 import Data from "./views/Data";
 import Dashboards from "./views/Dashboards";
-import { asSpec, draftIn, drawable, type Draft, type Field } from "./spec/spec";
+import { draftIn, drawable, type Draft, type Field, type Spec } from "./spec/spec";
 import Boundary from "./Boundary";
 import { counted } from "./counted";
 import { announced, refusal, type Outcome, type Working } from "./outcome";
@@ -210,14 +210,16 @@ export default function App() {
    */
   const edited = (next: Draft) => {
     setText(JSON.stringify(next, null, 2));
-    if (drawable(next)) send(() => execute(asSpec(next)));
+    if (drawable(next)) send(() => execute(next));
   };
 
-  /** A drill replaces the chart, and keeps the one it replaced. */
-  const drilled = (next: Draft) => {
+  /** A drill replaces the chart, and keeps the one it replaced. A drill narrows a chart
+   * that is already drawn, so what comes back has a measure and is a spec rather than a
+   * draft. */
+  const drilled = (next: Spec) => {
     setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
     setText(JSON.stringify(next, null, 2));
-    send(() => execute(asSpec(next)));
+    send(() => execute(next));
   };
 
   /**
@@ -730,7 +732,7 @@ function Canvas({
   source: boolean;
   model: boolean;
   columns: Field[];
-  onDrill: (draft: Draft) => void;
+  onDrill: (narrowed: Spec) => void;
 }) {
   // What is in flight comes first. The chart that is still on screen answered the
   // previous question, which is not the one being waited for.

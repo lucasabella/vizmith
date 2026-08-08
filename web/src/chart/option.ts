@@ -11,6 +11,7 @@ import type {
   TooltipComponentOption,
 } from "echarts/components";
 import type { ComposeOption } from "echarts/core";
+import type { Channel, ChannelType, Mark, Spec } from "../spec/spec";
 
 /**
  * The option this file builds, composed of the four series types the grammar's marks
@@ -33,39 +34,39 @@ export type EChartsOption = ComposeOption<
   | GridComponentOption
 >;
 
-export type ChannelType = "nominal" | "ordinal" | "quantitative" | "temporal";
-
-export type Channel = {
-  field: string;
-  type: ChannelType;
-  title?: string;
-};
-
-export type Spec = {
-  title?: string;
-  chart: {
-    mark: "bar" | "line" | "area" | "point" | "arc";
-    stack?: boolean;
-    // No x is a question with no dimension. The validator has already established that the
-    // query returns one row, and `Chart` draws the measure as a figure rather than a plot.
-    encoding: { x?: Channel; y: Channel; color?: Channel };
-  };
-};
-
 export type Value = string | number | boolean | null;
 export type Row = Record<string, Value>;
 
 /** Shown wherever a null reaches an axis or a legend. Left joins produce these. */
 export const NO_VALUE = "(no value)";
 
-const AXIS_TYPE = {
+/**
+ * How each channel type is drawn, and which ECharts series each mark compiles to.
+ *
+ * Both are `Record`s over the grammar's own types rather than object literals, so a mark or
+ * a channel type added to `spec.ts` — which `mirrors.test.ts` holds to the schema — is a
+ * compile error here until it is drawn. That is the check that used to be a text-parsing
+ * mirror over this file, and it is stricter: a channel type with no entry draws an axis of
+ * `undefined`, which ECharts reads as a category axis and a person reads as dates in the
+ * wrong order.
+ *
+ * An arc is the one mark that is not a series lookup. It is a pie, configured differently
+ * enough to be a branch in `buildOption`, so it is excluded by name rather than by being
+ * quietly absent.
+ */
+const AXIS_TYPE: Record<ChannelType, "category" | "value" | "time"> = {
   nominal: "category",
   ordinal: "category",
   quantitative: "value",
   temporal: "time",
-} as const;
+};
 
-const SERIES_TYPE = { bar: "bar", line: "line", area: "line", point: "scatter" } as const;
+const SERIES_TYPE: Record<Exclude<Mark, "arc">, "bar" | "line" | "scatter"> = {
+  bar: "bar",
+  line: "line",
+  area: "line",
+  point: "scatter",
+};
 
 /**
  * ECharts paints onto a canvas and cannot read a CSS variable, so the chrome the chart
@@ -426,7 +427,7 @@ const categoryLabel = (categories: string[]) => {
 
 /** Mark geometry the design system fixes. A stacked segment stays square, because a
  * rounded top halfway up a bar reads as the top of the bar. */
-function markStyle(mark: Spec["chart"]["mark"], stack?: boolean) {
+function markStyle(mark: Mark, stack?: boolean) {
   const END: [number, number, number, number] = [4, 4, 0, 0];
 
   if (mark === "bar") {

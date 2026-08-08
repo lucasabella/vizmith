@@ -1,5 +1,6 @@
 import { Refused, type Spoke } from "./api";
-import { overSeriesLimit, type Row, type Spec } from "./chart/option";
+import { overSeriesLimit, type Row } from "./chart/option";
+import type { Spec } from "./spec/spec";
 import { counted } from "./counted";
 
 /** Which part refused, as the server named it. Declared in `api.ts`, because it is the

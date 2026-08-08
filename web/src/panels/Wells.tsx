@@ -87,7 +87,6 @@ export default function Wells({
     },
   });
 
-  const encoding = draft?.chart.encoding;
   const required = draft !== null && ranksRequired(draft);
   const missing = required && draft.query.limit_by === undefined;
 
@@ -117,12 +116,16 @@ export default function Wells({
 
           {well === "Values" ? (
             <div className="well__slot">
-              {encoding?.y ? (
+              {/* The null is shed by the guard rather than by a cast. `encoding?.y` alone
+                  told the checker nothing about `draft`, so the three controls under here
+                  asserted it away — an assertion about a null in the middle of a file whose
+                  other casts were about a type. */}
+              {draft !== null && draft.chart.encoding.y ? (
                 <span className="chip">
                   <select
                     className="chip__pick"
                     value={aggregateOf(draft)}
-                    onChange={(event) => onChange(reaggregate(draft as Draft, event.target.value as Fn))}
+                    onChange={(event) => onChange(reaggregate(draft, event.target.value as Fn))}
                     aria-label="Aggregate"
                   >
                     {FNS.map((fn) => (
@@ -131,10 +134,10 @@ export default function Wells({
                       </option>
                     ))}
                   </select>
-                  <span className="chip__name">{encoding.y.field}</span>
+                  <span className="chip__name">{draft.chart.encoding.y.field}</span>
                   <button
                     className="chip__off"
-                    onClick={() => onChange(clear(draft as Draft, "Values"))}
+                    onClick={() => onChange(clear(draft, "Values"))}
                     aria-label="Remove from Values"
                   >
                     ×
@@ -182,19 +185,21 @@ export default function Wells({
 
           {well === "Filters" ? (
             <div className="well__slot">
-              {(draft?.query.filters ?? []).map((filter, at) => (
-                <span key={`${filter.column}-${at}`} className="chip">
-                  <span className="chip__name">{filter.column.split(".").slice(-1)[0]}</span>
-                  <span className="chip__said">{filter.op.replace(/_/g, " ")}</span>
-                  <button
-                    className="chip__off"
-                    onClick={() => onChange(clear(draft as Draft, "Filters", at))}
-                    aria-label="Remove from Filters"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
+              {draft === null
+                ? null
+                : (draft.query.filters ?? []).map((filter, at) => (
+                    <span key={`${filter.column}-${at}`} className="chip">
+                      <span className="chip__name">{filter.column.split(".").slice(-1)[0]}</span>
+                      <span className="chip__said">{filter.op.replace(/_/g, " ")}</span>
+                      <button
+                        className="chip__off"
+                        onClick={() => onChange(clear(draft, "Filters", at))}
+                        aria-label="Remove from Filters"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
               <div className={dropClass(over === well, false)} {...zone(well)}>
                 Drop a field here
               </div>

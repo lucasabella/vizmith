@@ -1,4 +1,5 @@
-import type { Row, Spec, Value } from "./option";
+import type { Row, Value } from "./option";
+import type { Spec } from "../spec/spec";
 
 /**
  * Three ways a chart leaves the tab that drew it: the spec, the rows, the picture.

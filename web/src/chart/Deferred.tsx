@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import type { Drawn } from "./Chart";
-import type { Row, Spec } from "./option";
+import type { Row } from "./option";
+import type { Spec } from "../spec/spec";
 import type { Clicked } from "../spec/drill";
 
 /**

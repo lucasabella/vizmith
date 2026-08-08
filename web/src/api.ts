@@ -6,7 +6,8 @@
  * the resolver's. The panels show what came back and add no opinion about it.
  */
 
-import type { Row, Spec } from "./chart/option";
+import type { Row } from "./chart/option";
+import type { Spec } from "./spec/spec";
 import { asStored, type Dashboard, type Saved, type Tile } from "./dashboard/dashboard";
 import type { Join } from "./spec/spec";
 
