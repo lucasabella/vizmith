@@ -1,6 +1,8 @@
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
 from conftest import DUCKDB, FixtureCatalog, needs_warehouse
 from test_catalog import Ticks
 
@@ -134,6 +136,103 @@ def test_a_table_whose_modified_time_moved_is_profiled_again(catalog, tmp_path):
     kept.read(catalog, "orders")
 
     assert len(catalog.statements) > len(statements)
+
+
+def test_a_table_nothing_is_stored_for_scans_without_waiting_for_its_freshness(catalog, tmp_path):
+    """A table this file has never seen is going to be profiled whatever the source says
+    about its freshness — there is nothing for the answer to serve — so waiting for that
+    answer before starting the scan is a round trip per table in front of a cold read, for a
+    decision nobody makes.
+
+    Held rather than timed. The source will not answer the freshness question until this
+    test lets it, so the scan either starts anyway or the read deadlocks; a clock would be
+    asserting on whatever else the machine was doing.
+
+    It also holds the correctness that makes this a concurrent start and not a reordering:
+    the token is asked for no later than the scan begins. A write landing between the two
+    leaves a profile newer than its token, so the next freshness answer differs and the
+    table is profiled again — late by one read. Taken *after* the scan, that same write is
+    stored as current and missing, and nothing notices until the table changes again."""
+    held = _Withheld(catalog)
+    reading = ThreadPoolExecutor(max_workers=1).submit(
+        Profiles(tmp_path / "profiles.json").read, held, "orders"
+    )
+
+    assert held.scanned.wait(10), "the scan waited for a freshness answer that never came"
+    assert held.asked_before_the_scan is True, "the token was taken after the scan it keys"
+
+    held.answer.set()
+    assert reading.result(timeout=10).table.endswith("orders")
+
+
+def test_a_source_that_cannot_say_when_a_table_changed_reports_it_rather_than_going_quiet(
+    catalog, tmp_path
+):
+    """Asked on a thread of its own, so what it raised has to be carried back. Swallowed, it
+    would turn every table into one that cannot be cached — a profile is never stored against
+    no token — and the symptom of that is a warehouse bill rather than an error."""
+
+    class Refusing(_Passthrough):
+        def modified(self, name):
+            raise RuntimeError("DESCRIBE DETAIL is not supported here")
+
+    with pytest.raises(RuntimeError, match="not supported here"):
+        Profiles(tmp_path / "profiles.json").read(Refusing(catalog), "orders")
+
+
+class _Passthrough:
+    """Everything the catalog does, forwarded, so a subclass overrides one method."""
+
+    def __init__(self, catalog):
+        self._catalog = catalog
+        self.dialect = catalog.dialect
+        self.scope = catalog.scope
+
+    def tables(self):
+        return self._catalog.tables()
+
+    def describe(self, name):
+        return self._catalog.describe(name)
+
+    def relationships(self):
+        return self._catalog.relationships()
+
+    def modified(self, name):
+        return self._catalog.modified(name)
+
+    def run(self, sql, parameters=None):
+        return self._catalog.run(sql, parameters)
+
+
+class _Withheld(_Passthrough):
+    """A source that will not answer the freshness question until the test lets it, and
+    writes down whether it had been asked by the time the scan began.
+
+    Both halves matter. Withholding the answer is what proves the scan does not wait for
+    it — a read that did would never reach a statement. Recording the order is what proves
+    the token was taken no later than the scan, which is the half that keeps the cache
+    honest."""
+
+    def __init__(self, catalog):
+        super().__init__(catalog)
+        self.answer = threading.Event()
+        self.asked = threading.Event()
+        self.scanned = threading.Event()
+        self.asked_before_the_scan: bool | None = None
+
+    def modified(self, name):
+        self.asked.set()
+        self.answer.wait(10)
+        return super().modified(name)
+
+    def run(self, sql, parameters=None):
+        if self.asked_before_the_scan is None:
+            # Waited on rather than sampled: the thread has been started by now, and the
+            # only reason it would not have run is that this machine has not scheduled it
+            # yet. A source that asks after the scan never sets this and times out to False.
+            self.asked_before_the_scan = self.asked.wait(10)
+        self.scanned.set()
+        return super().run(sql, parameters)
 
 
 def test_a_lower_threshold_does_not_read_samples_collected_under_a_higher_one(catalog, tmp_path):

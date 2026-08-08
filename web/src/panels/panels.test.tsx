@@ -5,7 +5,8 @@ import Table from "../chart/Table";
 import Visual from "../chart/Visual";
 import type { Row, Spec } from "../chart/option";
 import { SERIES_LIMIT } from "../chart/option";
-import Fields, { Profile, nullRate } from "./Fields";
+import Fields, { Profile, Unread, nullRate } from "./Fields";
+import { fromProfiles, fromShape } from "./fields";
 import Wells from "./Wells";
 import { draftIn, place, type Draft, type Field } from "../spec/spec";
 
@@ -33,7 +34,7 @@ const profile = (columns: ColumnProfile[]): TableProfile => ({
  * expanded. A static render only reaches the closed state, so the open one is built by
  * rendering the column node through a profile with a single column. */
 const tree = (columns: ColumnProfile[]) =>
-  drawn(<Fields tables={[profile(columns)]} failure={null} onDrag={() => {}} />);
+  drawn(<Fields tables={fromProfiles([profile(columns)])} failure={null} onDrag={() => {}} />);
 
 describe("the fields tree", () => {
   it("lists a table with its row count", () => {
@@ -59,6 +60,42 @@ describe("the fields tree", () => {
     // The profile is one interaction in, which a static render does not reach. What this
     // holds is that a closed tree is names and counts and no values.
     expect(tree([column()])).not.toContain("Netherlands");
+  });
+});
+
+describe("the tree before anything has been profiled", () => {
+  const shaped = fromShape([
+    { table: "vizmith.shop.customers", columns: [{ name: "country", type: "string" }] },
+  ]);
+  const outline = drawn(<Fields tables={shaped} failure={null} onDrag={() => {}} />);
+
+  it("draws the tree from the shape alone", () => {
+    // What is on screen while the profiles are still being read, which on a schema nobody
+    // has profiled used to be 25 seconds of spinner. A static render reaches the closed
+    // tree, so what it proves is that a table row needs no profile to be drawn; the column
+    // rows under it are one interaction in, and `fields.test.ts` holds their contents.
+    expect(outline).toContain("customers");
+    expect(outline).not.toContain("Reading the schema");
+  });
+
+  it("says nothing about a row count it has not read, rather than saying zero", () => {
+    // A zero is a claim about the data. This is a claim about what has been read, and they
+    // are different sentences.
+    expect(outline).not.toContain("0 rows");
+    expect(outline).not.toContain("rows");
+  });
+
+  it("says a column's figures have not been read rather than drawing them as absent", () => {
+    // The panel is what proves what the model was allowed to see. Every figure drawn as
+    // absent — no nulls, no distinct values, no vocabulary — is the strongest claim it can
+    // make about a column, and it would be making it about one it knows nothing about.
+    // The element the tree draws for it, reached directly the way `Profile` is: a static
+    // render stops at the closed row.
+    const open = drawn(<Unread />);
+
+    expect(open).toContain("have not been read yet");
+    expect(open).not.toContain("too many distinct values");
+    expect(open).not.toContain("nulls");
   });
 });
 

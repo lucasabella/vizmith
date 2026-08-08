@@ -39,6 +39,7 @@ from vizmith.ask import SCHEMA, ask
 from vizmith.catalog import (
     DECLARED,
     METADATA_WORKERS,
+    UNSUPPORTED,
     Catalog,
     Held,
     Relationship,
@@ -349,6 +350,57 @@ def tables(catalog: Annotated[Catalog, Depends(source)]):
         return {"tables": [table.as_dict() for table in profiles(catalog)]}
     except RuntimeError as failure:
         return refused("source", failure)
+
+
+@app.get("/api/shape")
+def shape(catalog: Annotated[Catalog, Depends(source)]):
+    """Every table in the configured schema, as its name, its columns and their types, and
+    nothing else.
+
+    This is what the Fields panel is actually drawn from, and it costs no statement. A table
+    row is a name and a count, a column row is a name and a type, and dragging one into a
+    well needs the type and nothing more — `spec.ts` reads no other figure to infer an
+    aggregate or a truncation unit. The profile figures appear only when somebody opens a
+    column, so the tree a person interacts with is `describe`, which is a metadata read.
+
+    What that removes is the wait in front of the first paint. `/api/tables` answers only
+    once every table has been profiled, so a schema nobody has profiled put its whole cold
+    read — modelled at about 25 seconds and 456 billed statements over 152 tables — in front
+    of the first table name on screen. The profiles still cost what they cost, and the panel
+    still replaces itself with them when they land. What changes is that nobody watches them
+    arrive, and that nothing is billed before there is something to look at.
+
+    Run through the same pool width the relationship graph uses, because it is the same call
+    against the same control plane: nothing bills for a description and no cluster queues
+    one, so what bounds it is the source's own rate limit. #122 argued for a wider pool here
+    than there; two widths for one operation is two numbers to tune and one of them wrong,
+    and the second caller pays nothing anyway because the source holds a description.
+
+    Columns whose type the catalog calls unsupported are left out, which is what a profile
+    does with them. The panel is drawn from this and then from the profiles, so a column
+    that appeared here and vanished there would be the tree losing a row as it filled in.
+
+    No row, no figure, no sample. `describe` is metadata about a table, and this endpoint
+    has no path to a statement."""
+    try:
+        names = catalog.tables()
+        with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
+            described = tuple(pool.map(catalog.describe, names))
+    except RuntimeError as failure:
+        return refused("source", failure)
+    return {
+        "tables": [
+            {
+                "table": table.name,
+                "columns": [
+                    {"name": column.name, "type": column.type}
+                    for column in table.columns
+                    if column.type != UNSUPPORTED
+                ],
+            }
+            for table in described
+        ]
+    }
 
 
 @app.get("/api/tables/{name}")

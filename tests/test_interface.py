@@ -678,3 +678,48 @@ def test_the_rail_says_which_view_is_on_screen_as_navigation(page):
 
     assert page.get_by_role("button", name="Dashboards").get_attribute("aria-current") == "page"
     assert page.get_by_role("button", name="Chart", exact=True).first.get_attribute("aria-current") is None
+
+
+@needs_built_frontend
+def test_the_fields_panel_fills_before_anything_has_been_profiled(page):
+    """#122. `/api/tables` answers only once every table has been profiled, so a schema
+    nobody has profiled put its whole cold read — modelled at 25 seconds and 456 billed
+    statements over 152 tables — in front of the first table name on screen.
+
+    The panel is drawn from the shape first, which costs no statement, and the profiles fill
+    in the figures behind it. Both halves are driven here because both are the point: the
+    tree is usable early, and it does not claim a figure it has not read."""
+    page.wait_for_selector(".tree__table", timeout=DRAWN)
+    names = page.locator(".tree__table .tree__name").all_inner_texts()
+
+    assert "orders" in names
+    assert len(names) == 8, names
+
+    # And the profiles land behind it, which is what a row count is.
+    page.wait_for_function(
+        "document.querySelectorAll('.tree__count').length > 0 &&"
+        " [...document.querySelectorAll('.tree__count')].every(c => c.innerText.includes('rows'))",
+        timeout=DRAWN,
+    )
+    counts = page.locator(".tree__count").all_inner_texts()
+    assert all("rows" in count for count in counts), counts
+    assert not any(count.startswith("0 rows") for count in counts), counts
+
+
+@needs_built_frontend
+def test_the_shape_request_costs_the_source_no_statement(page):
+    """The half of #122 that is a bill rather than a wait. A person who opens the interface
+    and closes it again should have paid for nothing: the tree is metadata, and the profiles
+    are what cost, so the shape has to reach the source without a statement.
+
+    Asserted against the API rather than the DOM, because what is being tested is what the
+    server was asked for."""
+    answered = []
+    page.on("response", lambda response: answered.append(response.url))
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector(".tree__table", timeout=DRAWN)
+
+    assert any(url.endswith("/api/shape") for url in answered), answered
+    assert any(url.endswith("/api/tables") for url in answered), answered
+    # One request for the schema's shape and one for its profiles, not a request per table.
+    assert len([url for url in answered if "/api/tables/" in url]) == 0, answered

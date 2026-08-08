@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { critique, getTables, Refused, type Suggestion, type TableProfile } from "./api";
+import { critique, getShape, getTables, Refused, type Suggestion } from "./api";
+import { fromProfiles, fromShape, merged, type TableFields } from "./panels/fields";
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";
@@ -39,7 +40,7 @@ export default function App() {
   const [fieldsOpen, setFieldsOpen] = useState(true);
   const [json, setJson] = useState(false);
   const [text, setText] = useState("");
-  const [tables, setTables] = useState<TableProfile[] | null>(null);
+  const [tables, setTables] = useState<TableFields[] | null>(null);
   const [schemaFailure, setSchemaFailure] = useState<string | null>(null);
   const [dragging, setDragging] = useState<Field | null>(null);
   // What is in flight. Not an Outcome: running is the absence of one so far.
@@ -76,17 +77,38 @@ export default function App() {
       .catch(() => setBackend(null));
   }, []);
 
-  // The schema, once, when there is a source to read it from. Every table's profile
-  // rather than the list alone: the panel shows a column's profile, the wells need its
-  // type to infer anything, and the server profiled all of them on the first request
-  // anyway. The same figures the model is given, from the same endpoint — in one request,
-  // rather than a listing and one request per table after it, which asked the source when
-  // each table last changed a second time.
+  // The schema, in two requests, when there is a source to read it from.
+  //
+  // The shape first, because it is what the panel is actually drawn from: a table row is a
+  // name and a count, a column row is a name and a type, and a drag reads the type and
+  // nothing else. It costs no statement, so it comes back in the time a metadata read takes.
+  // The profiles follow and fill in the figures, which is the wait that used to sit in front
+  // of the first table name — modelled at 25 seconds and 456 billed statements on a schema
+  // of 152 tables, all of it before anybody saw a word.
+  //
+  // Not the fan-out this replaced. One extra request for the whole schema, and the bulk
+  // profile request behind it is exactly the one that was there before, so nothing here asks
+  // the source when a table last changed a second time.
+  //
+  // Both write through the same state, and the profiles win: `merged` keeps a table the
+  // shape knows and the profiles could not read, which is what a view looks like from here.
   useEffect(() => {
     if (!source) return;
     let live = true;
+    let outline: TableFields[] = [];
+    getShape()
+      .then((body) => {
+        if (!live) return;
+        outline = fromShape(body.tables);
+        // Only where the profiles have not already landed. They are the better answer, and
+        // a slow shape request arriving second must not take the figures back off screen.
+        setTables((filled) => filled ?? outline);
+      })
+      // A shape that failed is not reported: the profiles are the request that has to
+      // work, and two failures on one panel would be one refusal argued twice.
+      .catch(() => {});
     getTables()
-      .then((body) => live && setTables(body.tables))
+      .then((body) => live && setTables(merged(outline, fromProfiles(body.tables))))
       .catch((error: Error) => live && setSchemaFailure(error.message));
     return () => {
       live = false;
