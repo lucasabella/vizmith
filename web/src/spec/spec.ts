@@ -13,21 +13,19 @@
 
 import type { Channel, ChannelType, Spec } from "../chart/option";
 
-export type Mark = "bar" | "line" | "area" | "point" | "arc";
-
 export type Join = {
   table: string;
-  type?: "inner" | "left";
+  type?: JoinType;
   on: { left: string; right: string }[];
 };
 
 export type Item = { column: string; truncate?: Unit; as?: string };
 export type Aggregate = { fn: Fn; column?: string; as: string };
-export type Filter = { column: string; op: string; value?: unknown };
+export type Filter = { column: string; op: Op; value?: unknown };
 /** A condition on a measure, which names an aggregate alias rather than a column because
  * what it compares is the aggregated value. `filters` is the other one and applies before
  * the rows are grouped. */
-export type Having = { aggregate: string; op: string; value: string | number };
+export type Having = { aggregate: string; op: Comparison; value: string | number };
 
 export type Query = {
   from: string;
@@ -37,8 +35,8 @@ export type Query = {
   group_by?: Item[];
   aggregates?: Aggregate[];
   having?: Having[];
-  order_by?: { column: string; direction?: "asc" | "desc" }[];
-  limit_by?: { column: string; by: string; limit: number; direction?: "asc" | "desc" };
+  order_by?: { column: string; direction?: Direction }[];
+  limit_by?: { column: string; by: string; limit: number; direction?: Direction };
   limit: number;
 };
 
@@ -129,11 +127,45 @@ export const draftIn = (text: string): Draft | null => {
 export const WELLS = ["Axis", "Legend", "Values", "Top N", "Filters"] as const;
 export type Well = (typeof WELLS)[number];
 
+/**
+ * The grammar's closed sets, as values rather than as unions written by hand.
+ *
+ * Every one of these is an `enum` in `spec/v1/spec.schema.json`, which is the grammar and
+ * the only judge of it. They are written out again here because the browser has to name a
+ * mark in a control and put an operator in a filter it builds, and `mirrors.test.ts` reads
+ * the schema and holds each list to it — so a value added on one side and not the other
+ * fails in the browser's own suite rather than as a 400 nobody expected.
+ *
+ * As tuples rather than as types, for the same reason: a type is gone at run time and
+ * cannot be compared with a file. What it buys beyond the mirror is that the three
+ * operators this interface writes into specs — `is_not_null` from a Filters drop, `is_null`
+ * and `=` from a drill — are checked literals now. `op` was typed `string`, so a typo in
+ * one of them was a spec the checker accepted, the wells accepted, and the validator
+ * refused, after the round trip.
+ */
+export const MARKS = ["bar", "line", "area", "point", "arc"] as const;
+export type Mark = (typeof MARKS)[number];
+
 export const FNS = ["sum", "avg", "min", "max", "count", "count_distinct"] as const;
 export type Fn = (typeof FNS)[number];
 
 export const UNITS = ["year", "quarter", "month", "week", "day", "hour"] as const;
 export type Unit = (typeof UNITS)[number];
+
+export const JOIN_TYPES = ["inner", "left"] as const;
+export type JoinType = (typeof JOIN_TYPES)[number];
+
+export const DIRECTIONS = ["asc", "desc"] as const;
+export type Direction = (typeof DIRECTIONS)[number];
+
+/** The operators that take a value and compare it, which is the whole of what `having`
+ * allows: a condition on a measure is a comparison, and `in` over an aggregate is not a
+ * question the grammar asks. `filters` allows these and four more. */
+export const COMPARISONS = ["=", "!=", "<", "<=", ">", ">="] as const;
+export type Comparison = (typeof COMPARISONS)[number];
+
+export const OPS = [...COMPARISONS, "in", "not_in", "is_null", "is_not_null"] as const;
+export type Op = (typeof OPS)[number];
 
 /** The column types a profile reports, which is what a dragged column carries. */
 export type Field = { table: string; column: string; type: string };

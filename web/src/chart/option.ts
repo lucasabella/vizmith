@@ -251,7 +251,7 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
     textStyle: { fontFamily: MONO, fontSize: 11.5, color: INK },
     // The rows go in with the mark, because a temporal axis carries instants and the
     // value behind one is in the result set rather than in the mark.
-    formatter: (params: unknown) => markText(spec, params as Mark, rows),
+    formatter: (params: unknown) => markText(spec, params as Hovered, rows),
   } as const;
 
   if (mark === "arc") {
@@ -342,15 +342,19 @@ function legend(names: string[], titled: boolean) {
 }
 
 /** What a mark stands for. The shape ECharts hands a tooltip formatter, narrowed to the
- * three fields this one reads. */
-export type Mark = { name: string; seriesName?: string; value: Value | Value[] };
+ * three fields this one reads.
+ *
+ * Named for the hover rather than for the mark, because `Mark` in `spec/spec.ts` is the
+ * grammar's mark — one of five words a spec may use — and two unrelated types under one
+ * name in a codebase this size is a name that has to be read twice every time. */
+export type Hovered = { name: string; seriesName?: string; value: Value | Value[] };
 
 /**
  * The text in a tooltip: the category, the series when a colour channel made one, and
  * the measure. Values are the ones in the result set, printed as they arrived, because a
  * tooltip that rounds is a tooltip that has to be checked somewhere else.
  */
-export function markText(spec: Spec, mark: Mark, rows: Row[] = []): string {
+export function markText(spec: Spec, mark: Hovered, rows: Row[] = []): string {
   const { x, y, color } = spec.chart.encoding;
   // A time or value axis carries the pair, a category axis carries the measure alone and
   // names the category on the axis.

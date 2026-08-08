@@ -20,7 +20,7 @@ import {
   SERIES,
   SERIES_LIMIT,
   type Channel,
-  type Mark,
+  type Hovered,
   type Row,
   type Spec,
 } from "./option";
@@ -58,8 +58,8 @@ const seriesOf = (option: ReturnType<typeof buildOption>) =>
 
 /** What ECharts would show on hover, taken from the option rather than from the formatter
  * on its own, so a formatter that is never wired in fails here. */
-const hover = (option: ReturnType<typeof buildOption>, mark: Mark) =>
-  (option?.tooltip as { formatter: (mark: Mark) => string }).formatter(mark);
+const hover = (option: ReturnType<typeof buildOption>, mark: Hovered) =>
+  (option?.tooltip as { formatter: (mark: Hovered) => string }).formatter(mark);
 
 const axisOf = (option: ReturnType<typeof buildOption>, which: "xAxis" | "yAxis") =>
   option?.[which] as {
@@ -409,7 +409,7 @@ describe("tooltip", () => {
 
   it("says the same thing whether it is called through the option or directly", () => {
     const chart = spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } });
-    const mark: Mark = { name: "A", value: 1 };
+    const mark: Hovered = { name: "A", value: 1 };
 
     expect(hover(buildOption(chart, [{ country: "A", revenue: 1 }]), mark)).toBe(markText(chart, mark));
   });
