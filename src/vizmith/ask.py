@@ -58,6 +58,16 @@ rows are grouped and names a column; a having applies after and names one of the
 aggregate aliases. "Countries with revenue over a million" is
 having: [{"aggregate": "revenue", "op": ">", "value": 1000000}].
 
+A value the tables do not hold can still be charted, where it is one operation over two of
+the ones they do. Anywhere a column goes — in select, in group_by, in an aggregate — write
+"expression": {"left": L, "op": O, "right": R} instead of "column", with "as" saying what to
+call the result. Each side is a column or a number, and the operator is +, -, * or /. So
+revenue against a schema holding a unit price and a quantity is {"fn": "sum", "expression":
+{"left": "items.price", "op": "*", "right": "items.quantity"}, "as": "revenue"}. One
+operation and no nesting: neither side can be another expression, so a question needing two
+of them is one this grammar cannot ask, and saying so is better than an answer that is
+almost it. Use a column where the tables have one; this is for the value they do not hold.
+
 Filters are joined with AND: every one of them has to hold. Where the question wants a row
 that satisfies any of several conditions, write one filter as {"any": [condition,
 condition]} and the conditions inside it are joined with OR. "Orders that are pending or

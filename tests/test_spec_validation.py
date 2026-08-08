@@ -50,6 +50,18 @@ EXPECTED_ERROR = {
         "('column', 'op', 'value' were unexpected)"
     ),
     "any_of_one_condition.json": "query/filters/0/any: [{'column': 'status', 'op': '=', 'value': 'pending'}] is too short",
+    "computed_column_and_a_column.json": (
+        "query.aggregates: 'doubled' has both a 'column' and an 'expression', and only one "
+        "of them can be what it reads"
+    ),
+    "computed_column_of_two_numbers.json": (
+        "query.aggregates: 'constant' computes 2 * 3, which names no column and is the same "
+        "number in every row"
+    ),
+    "truncate_on_a_computed_column.json": (
+        "query.group_by: 'difference' computes a number, and 'truncate' rounds a date to a "
+        "unit, so there is nothing here for it to round"
+    ),
     "format_on_a_dimension.json": (
         "chart.encoding.x: 'format' says how a number reads, and 'country' is bound as "
         "'nominal'. Only a quantitative channel carries one"

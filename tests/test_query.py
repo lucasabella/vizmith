@@ -537,3 +537,115 @@ def test_a_disjunction_of_null_checks_needs_no_value_either(catalog):
 
     assert "IS NULL OR" in sql
     assert 100 in parameters.values() and 200 in parameters.values()
+
+
+PER_ITEM = FIXTURES / "valid" / "value_per_item_by_status.json"
+
+
+def computed(spec: dict, expression: dict) -> dict:
+    """The fixture's measure, taken over the expression given rather than over a column."""
+    spec["query"]["aggregates"][0] = {"fn": "sum", "expression": expression, "as": "revenue"}
+    return spec
+
+
+def test_a_computed_column_compiles_to_one_bracketed_operation(catalog):
+    """Bracketed because it lands inside an aggregate and inside a GROUP BY term, and
+    `sum(a + b)` and `sum(a) + b` are two questions with the same text between brackets."""
+    spec = computed(load(REVENUE_BY_COUNTRY), {"left": "orders.total", "op": "*", "right": "orders.item_count"})
+
+    sql, _ = build(spec, catalog)
+
+    assert re.search(r'sum\(\S*"total" \* \S*"item_count"\)', sql), sql
+    assert sql.count("(") == sql.count(")")
+
+
+def test_a_number_in_an_expression_is_bound_like_every_other_value(catalog):
+    """The rule the whole builder keeps. A literal written into the statement would be the
+    one value in a query that the source reads as text this server wrote."""
+    spec = computed(load(REVENUE_BY_COUNTRY), {"left": "orders.total", "op": "*", "right": 1.21})
+
+    sql, parameters = build(spec, catalog)
+
+    assert "1.21" not in sql
+    assert 1.21 in parameters.values()
+
+
+def test_a_number_on_the_left_is_a_different_question_from_one_on_the_right(catalog):
+    """'-' and '/' do not commute, which is the whole reason an operand may be either."""
+    spec = computed(load(REVENUE_BY_COUNTRY), {"left": 1, "op": "-", "right": "orders.total"})
+
+    sql, parameters = build(spec, catalog)
+
+    marker = next(name for name, value in parameters.items() if value == 1)
+    assert sql.index(marker) < sql.index('"total"')
+
+
+def test_dividing_by_nothing_has_no_answer_rather_than_the_source_s_opinion(catalog):
+    """The dialects disagree about a zero divisor — a NULL here, an error there — and a
+    chart whose bars depend on which warehouse ran it is the failure this design is about."""
+    spec = computed(load(REVENUE_BY_COUNTRY), {"left": "orders.total", "op": "/", "right": "orders.item_count"})
+
+    sql, _ = build(spec, catalog)
+
+    assert "NULLIF(" in sql
+    rows = execute(spec, catalog)
+    assert rows, "the fixture returned nothing, so this proves nothing"
+
+
+def test_a_computed_measure_runs_and_answers_what_the_arithmetic_says(catalog):
+    """The fixture, executed. `avg(total / item_count)` against the same rows, worked out
+    twice: once by the warehouse through the spec, once here from the rows themselves."""
+    per_item = {row["status"]: row["per_item"] for row in execute(load(PER_ITEM), catalog)}
+
+    lines = execute(
+        {
+            "spec_version": "1",
+            "query": {
+                "from": "orders",
+                "filters": [{"column": "total", "op": "is_not_null"}],
+                "select": [
+                    {"column": "orders.status", "as": "status"},
+                    {"column": "orders.total", "as": "total"},
+                    {"column": "orders.item_count", "as": "item_count"},
+                ],
+                # Above the fixture's row count on purpose: the two queries have to read
+                # the same rows, and a cap that cut one of them would be comparing an
+                # average of everything with an average of the first few thousand.
+                "limit": 10_000,
+            },
+            "chart": {
+                "mark": "point",
+                "encoding": {
+                    "x": {"field": "status", "type": "nominal"},
+                    "y": {"field": "total", "type": "quantitative"},
+                },
+            },
+        },
+        catalog,
+    )
+
+    counted: dict[str, list[float]] = {}
+    for row in lines:
+        if row["item_count"]:
+            counted.setdefault(row["status"], []).append(float(row["total"]) / row["item_count"])
+    worked_out = {status: sum(each) / len(each) for status, each in counted.items()}
+
+    assert set(per_item) == set(worked_out)
+    for status, average in worked_out.items():
+        assert per_item[status] == pytest.approx(average, rel=1e-6)
+
+
+def test_a_computed_column_can_be_grouped_by_and_named_by_its_alias(catalog):
+    """An expression has no column name to fall back on, so the alias is the output column
+    and everything that references one — the order, the chart's channels — reads it."""
+    spec = load(REVENUE_BY_COUNTRY)
+    spec["query"]["group_by"] = [
+        {"expression": {"left": "orders.total", "op": "-", "right": "orders.item_count"}, "as": "spread"}
+    ]
+    spec["query"]["order_by"] = [{"column": "revenue", "direction": "desc"}]
+    spec["chart"]["encoding"]["x"] = {"field": "spread", "type": "quantitative"}
+
+    sql, _ = build(spec, catalog)
+
+    assert output_columns(spec["query"]) == ["spread", "revenue"]
+    assert re.search(r'GROUP BY \(\S*"total" - \S*"item_count"\)', sql), sql

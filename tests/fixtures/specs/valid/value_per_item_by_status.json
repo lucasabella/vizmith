@@ -1,0 +1,26 @@
+{
+  "spec_version": "1",
+  "title": "Average value per item, by status",
+  "query": {
+    "from": "orders",
+    "filters": [{ "column": "total", "op": "is_not_null" }],
+    "group_by": [{ "column": "status", "as": "status" }],
+    "aggregates": [
+      {
+        "fn": "avg",
+        "expression": { "left": "orders.total", "op": "/", "right": "orders.item_count" },
+        "as": "per_item"
+      },
+      { "fn": "count", "as": "order_count" }
+    ],
+    "order_by": [{ "column": "per_item", "direction": "desc" }],
+    "limit": 20
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "status", "type": "nominal" },
+      "y": { "field": "per_item", "type": "quantitative", "format": { "kind": "currency", "symbol": "€" } }
+    }
+  }
+}

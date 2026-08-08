@@ -202,6 +202,8 @@ class _Builder:
         ]
 
     def _item(self, item: dict) -> str:
+        if "expression" in item:
+            return self._expression(item["expression"])
         column = self._column(item["column"])
         unit = item.get("truncate")
         # A unit is one of the grammar's own keywords rather than a value, and a source
@@ -211,8 +213,37 @@ class _Builder:
         return self._dialect.truncate.format(unit=unit, column=column) if unit else column
 
     def _aggregate(self, aggregate: dict) -> str:
-        column = self._column(aggregate["column"]) if "column" in aggregate else "*"
+        if "expression" in aggregate:
+            column = self._expression(aggregate["expression"])
+        else:
+            column = self._column(aggregate["column"]) if "column" in aggregate else "*"
         return AGGREGATES[aggregate["fn"]].format(column=column)
+
+    def _expression(self, expression: dict) -> str:
+        """A computed column, bracketed.
+
+        Bracketed because it is compiled into an aggregate, a GROUP BY term and a HAVING
+        clause, and `sum(a + b)` and `sum(a) + b` are different questions with the same
+        text either side of one pair of brackets.
+
+        Division is guarded rather than left to the source. The dialects disagree about a
+        zero divisor — a NULL here, an error there, an infinity somewhere else — and a chart
+        whose bars depend on which warehouse ran the query is the failure this whole design
+        is about. `NULLIF` says the one thing they all agree on: dividing by nothing has no
+        answer, and a row with no answer draws as a gap rather than as a number. It is a
+        function call the builder writes, not one the grammar can ask for.
+        """
+        left = self._operand(expression["left"])
+        right = self._operand(expression["right"])
+        if expression["op"] == "/":
+            return f"({left} / NULLIF({right}, 0))"
+        return f"({left} {expression['op']} {right})"
+
+    def _operand(self, operand) -> str:
+        """One side. A reference is resolved to a quoted column and a number is bound, the
+        same as every other value in a query: what keeps a value out of the statement text
+        is the binding and not the validator having looked at it."""
+        return self._column(operand) if isinstance(operand, str) else self._bind(operand)
 
     def _having(self) -> str:
         """Conditions on the measures, after the rows are grouped.

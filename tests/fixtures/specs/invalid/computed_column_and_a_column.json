@@ -1,0 +1,24 @@
+{
+  "spec_version": "1",
+  "title": "A measure that reads two things",
+  "query": {
+    "from": "orders",
+    "group_by": [{ "column": "status", "as": "status" }],
+    "aggregates": [
+      {
+        "fn": "sum",
+        "column": "orders.total",
+        "expression": { "left": "orders.total", "op": "*", "right": 2 },
+        "as": "doubled"
+      }
+    ],
+    "limit": 20
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "status", "type": "nominal" },
+      "y": { "field": "doubled", "type": "quantitative" }
+    }
+  }
+}

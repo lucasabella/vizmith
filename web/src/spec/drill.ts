@@ -24,6 +24,7 @@ import {
   aliasFor,
   channelType,
   inQuery,
+  nameOf,
   outputColumns,
   qualified,
   truncateFor,
@@ -73,6 +74,15 @@ export function drill(spec: Spec, rows: Row[], clicked: Clicked, by: Field): Spe
         "mean one of them rather than all of it. Drilling a truncated date is not supported.",
     );
   }
+  if (item.column === undefined) {
+    // The axis is computed, so there is no column behind the label to filter on. The
+    // narrowed question would have to filter on the result of the arithmetic, which the
+    // grammar cannot say and which is a different question from the one that was clicked.
+    throw new NoDrill(
+      `The axis is worked out from other columns, so there is nothing to filter on. ` +
+        "Drilling a computed column is not supported.",
+    );
+  }
   if (qualified(by, spec.query) === item.column) {
     throw new NoDrill(`'${by.column}' is the column that was clicked, so it would draw one mark.`);
   }
@@ -83,9 +93,9 @@ export function drill(spec: Spec, rows: Row[], clicked: Clicked, by: Field): Spe
       ? { column: item.column, op: "is_null" }
       : { column: item.column, op: "=", value };
 
-  const alias = item.as ?? short(item.column);
+  const alias = nameOf(item);
   const group_by = (spec.query.group_by ?? []).filter(
-    (each) => (each.as ?? short(each.column)) !== alias,
+    (each) => nameOf(each) !== alias,
   );
   const renamed = aliasFor(by, outputColumns({ ...spec.query, group_by }));
   const replacement: Item = { column: qualified(by, spec.query), as: renamed };
@@ -159,7 +169,7 @@ function retargeted(query: Draft["query"], was: string, now: string) {
 function itemFor(draft: Draft, channel: "x" | "color"): Item | undefined {
   const field = draft.chart.encoding[channel]?.field;
   if (field === undefined) return undefined;
-  return (draft.query.group_by ?? []).find((item) => (item.as ?? short(item.column)) === field);
+  return (draft.query.group_by ?? []).find((item) => nameOf(item) === field);
 }
 
 /** What the narrowed chart is called. The clicked value is in it, because a chart whose

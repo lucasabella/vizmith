@@ -30,6 +30,7 @@ import {
   FORMAT_KINDS,
   JOIN_TYPES,
   MARKS,
+  OPERATORS,
   OPS,
   UNITS,
   namesTable,
@@ -286,6 +287,7 @@ describe("the grammar's closed sets, against the schema that is the grammar", ()
     ["order_by.direction", enumOf("order_by", "direction"), DIRECTIONS],
     ["limit_by.direction", schema.$defs.query.properties.limit_by.properties.direction.enum, DIRECTIONS],
     ["condition.op", enumOf("condition", "op"), OPS],
+    ["expression.op", enumOf("expression", "op"), OPERATORS],
     ["having.op", enumOf("having", "op"), COMPARISONS],
   ])("%s is what spec.ts holds", (_name, declared, held) => {
     expect(declared.length).toBeGreaterThan(0);

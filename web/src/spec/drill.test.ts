@@ -145,6 +145,19 @@ describe("clicking a mark", () => {
     );
   });
 
+  it("refuses a computed axis, where there is no column behind the label", () => {
+    // The narrowed question would have to filter on the result of the arithmetic, which
+    // the grammar cannot say — and which is a different question from the one clicked.
+    const computed = chart();
+    computed.query.group_by = [
+      { expression: { left: "orders.total", op: "-", right: "orders.item_count" }, as: "country" },
+    ];
+
+    expect(() => drill(spec(computed), rows, { category: "Germany" }, STATUS)).toThrow(
+      /worked out from other columns/,
+    );
+  });
+
   it("refuses a mark the result set no longer holds", () => {
     expect(() => drill(spec(chart()), rows, { category: "Atlantis" }, STATUS)).toThrow(NoDrill);
   });

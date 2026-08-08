@@ -435,15 +435,55 @@
         }
       }
     },
-    "select_item": {
+    "operand": {
+      "description": "One side of a computed column: a column reference, or a number bound as a parameter like every other value. A number on the left is legal because '-' and '/' are not commutative, so '1 - rate' is a question and '(1 - rate)' written the other way round is a different one.",
+      "type": [
+        "string",
+        "number"
+      ],
+      "if": {
+        "type": "string"
+      },
+      "then": {
+        "$ref": "#/$defs/column_ref"
+      }
+    },
+    "expression": {
+      "description": "A computed column: one operation over two operands, and nothing else. No nesting, no function calls, no operator the source might read as one. A warehouse holds facts and not derived measures, so a question about revenue against a schema holding unit price and quantity could not be asked at all; this is what makes it askable without giving the model an expression language, which is the shortest path back to generated code being executed.",
       "type": "object",
       "required": [
-        "column"
+        "left",
+        "op",
+        "right"
       ],
+      "additionalProperties": false,
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/operand"
+        },
+        "op": {
+          "enum": [
+            "+",
+            "-",
+            "*",
+            "/"
+          ]
+        },
+        "right": {
+          "$ref": "#/$defs/operand"
+        }
+      }
+    },
+    "select_item": {
+      "description": "A column, or a computed one. An item that computes says what to call the result, because there is no column name to fall back on and the alias is what the chart binds a channel to.",
+      "type": "object",
       "additionalProperties": false,
       "properties": {
         "column": {
           "$ref": "#/$defs/column_ref"
+        },
+        "expression": {
+          "$ref": "#/$defs/expression"
         },
         "truncate": {
           "enum": [
@@ -458,10 +498,25 @@
         "as": {
           "$ref": "#/$defs/identifier"
         }
+      },
+      "if": {
+        "required": [
+          "expression"
+        ]
+      },
+      "then": {
+        "required": [
+          "as"
+        ]
+      },
+      "else": {
+        "required": [
+          "column"
+        ]
       }
     },
     "aggregate": {
-      "description": "count with no column is a row count. Every other function needs a column, expressed as a conditional so the error names the missing property.",
+      "description": "count with no column is a row count. Every other function aggregates a column or a computed one, expressed as a conditional so the error names the missing property rather than reporting that nothing matched.",
       "type": "object",
       "required": [
         "fn",
@@ -482,6 +537,9 @@
         "column": {
           "$ref": "#/$defs/column_ref"
         },
+        "expression": {
+          "$ref": "#/$defs/expression"
+        },
         "as": {
           "$ref": "#/$defs/identifier"
         }
@@ -496,6 +554,11 @@
               "const": "count"
             }
           }
+        },
+        "not": {
+          "required": [
+            "expression"
+          ]
         }
       },
       "then": {

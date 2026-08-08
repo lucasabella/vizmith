@@ -62,6 +62,8 @@ def _semantic_errors(spec: dict) -> list[str]:
                 f"{' and '.join(repr(t) for t in named)}, so qualify it with more segments"
             )
 
+    errors += _computed_errors(query)
+
     for filter_ in conditions(query):
         if filter_["op"] in ("is_null", "is_not_null") and "value" in filter_:
             errors.append(
@@ -181,6 +183,47 @@ def _semantic_errors(spec: dict) -> list[str]:
     return errors
 
 
+def _computed_errors(query: dict) -> list[str]:
+    """What the schema cannot say about a computed column.
+
+    Three things, and each is a spec that validates against the shape and means something
+    nobody asked for. An item carrying both a `column` and an `expression` compiles as one
+    of the two and silently drops the other — the schema sees two properties it allows and
+    has nothing to say about them together. `truncate` rounds a date to a unit and an
+    expression is a number, so a unit on one is a key the builder ignores. And an operation
+    over two numbers is a constant: `2 * 3` compiles, runs, and draws a column of sixes,
+    which is the quiet kind of wrong this project exists to avoid.
+    """
+    errors = []
+    for where, items in (
+        ("query.select", query.get("select", [])),
+        ("query.group_by", query.get("group_by", [])),
+        ("query.aggregates", query.get("aggregates", [])),
+    ):
+        for item in items:
+            expression = item.get("expression")
+            if expression is None:
+                continue
+            named = item["as"]
+            if "column" in item:
+                errors.append(
+                    f"{where}: '{named}' has both a 'column' and an 'expression', and only "
+                    "one of them can be what it reads. Keep whichever it means"
+                )
+            if "truncate" in item:
+                errors.append(
+                    f"{where}: '{named}' computes a number, and 'truncate' rounds a date to "
+                    "a unit, so there is nothing here for it to round"
+                )
+            if not any(True for _ in operands(item)):
+                errors.append(
+                    f"{where}: '{named}' computes {expression['left']} {expression['op']} "
+                    f"{expression['right']}, which names no column and is the same number in "
+                    "every row"
+                )
+    return errors
+
+
 def _relative_errors(filter_: dict) -> list[str]:
     """What the schema cannot say about a relative value without answering in the language
     of `if` and `then`.
@@ -221,7 +264,11 @@ def output_columns(query: dict) -> list[str]:
     group_by item by its alias or the last segment of its column, then every aggregate
     alias. The validator checks references against this list and the builder compiles the
     list into the SELECT, so the result set contract has one definition rather than two
-    that can disagree."""
+    that can disagree.
+
+    An item that computes has no column to fall back on, which is why the schema makes its
+    alias required: `a * b` has no name of its own and something has to be what the chart
+    binds a channel to."""
     names = [
         item.get("as") or item["column"].rsplit(".", 1)[-1]
         for item in [*query.get("select", []), *query.get("group_by", [])]
@@ -251,11 +298,30 @@ def conditions(query: dict):
         yield from filter_.get("any", [filter_])
 
 
+def operands(item: dict):
+    """The column references a computed item holds, which is one, two, or none: an operand
+    is a column or a number, and a number is bound rather than resolved. Nothing here knows
+    whether the item computes; an item that does not has no `expression` and yields nothing,
+    which is what lets every caller ask the same question of every item."""
+    expression = item.get("expression")
+    if expression is None:
+        return
+    for side in ("left", "right"):
+        if isinstance(expression[side], str):
+            yield expression[side]
+
+
 def _column_refs(query: dict):
     yield from ((f["column"], "query.filters") for f in conditions(query))
-    yield from ((s["column"], "query.select") for s in query.get("select", []))
-    yield from ((g["column"], "query.group_by") for g in query.get("group_by", []))
-    yield from ((a["column"], "query.aggregates") for a in query.get("aggregates", []) if "column" in a)
+    for where, items in (
+        ("query.select", query.get("select", [])),
+        ("query.group_by", query.get("group_by", [])),
+        ("query.aggregates", query.get("aggregates", [])),
+    ):
+        for item in items:
+            if "column" in item:
+                yield item["column"], where
+            yield from ((reference, where) for reference in operands(item))
     for join in query.get("joins", []):
         for on in join["on"]:
             yield on["left"], "query.joins.on"

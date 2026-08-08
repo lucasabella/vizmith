@@ -15,6 +15,7 @@ import {
   anyOf,
   clear,
   inQuery,
+  nameOf,
   place,
   ranksRequired,
   reaggregate,
@@ -308,7 +309,7 @@ function Channel({
   }
 
   const item = (draft.query.group_by ?? []).find(
-    (each) => (each.as ?? each.column.split(".").slice(-1)[0]) === bound.field,
+    (each) => nameOf(each) === bound.field,
   );
 
   return (

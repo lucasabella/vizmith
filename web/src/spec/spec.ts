@@ -18,8 +18,46 @@ export type Join = {
   on: { left: string; right: string }[];
 };
 
-export type Item = { column: string; truncate?: Unit; as?: string };
-export type Aggregate = { fn: Fn; column?: string; as: string };
+/**
+ * One side of a computed column: a column reference, or a number the builder binds like
+ * every other value. A number on the left is legal because `-` and `/` do not commute.
+ */
+export type Operand = string | number;
+
+/**
+ * A value the source does not store, as one operation over two it does.
+ *
+ * One operation and no nesting, which is the whole of the grammar here: neither side can
+ * be another expression, and there are four operators and no functions. That is enough for
+ * a revenue the warehouse does not hold and for a ratio, and it is deliberately not a
+ * language — an expression language is the shortest path back to the model writing
+ * something that gets compiled. See DESIGN.md.
+ */
+export type Expression = { left: Operand; op: Operator; right: Operand };
+
+export const OPERATORS = ["+", "-", "*", "/"] as const;
+export type Operator = (typeof OPERATORS)[number];
+
+/** A column, or a computed one. An item that computes says what to call the result,
+ * because there is no column name to fall back on: `nameOf` is where that is read. */
+export type Item =
+  | { column: string; expression?: undefined; truncate?: Unit; as?: string }
+  | { column?: undefined; expression: Expression; truncate?: undefined; as: string };
+
+export type Aggregate =
+  | { fn: Fn; column?: string; expression?: undefined; as: string }
+  | { fn: Fn; column?: undefined; expression: Expression; as: string };
+
+/**
+ * What this item is called in the result set: its alias, or the last segment of its column.
+ *
+ * The same rule as `output_columns` in the validator, and it was written out at eight call
+ * sites before there was a second shape of item to get it wrong on. An item that computes
+ * has no column, so the alias is not a preference there — it is the only name it has, which
+ * is why the schema requires one.
+ */
+export const nameOf = (item: Item): string =>
+  item.column === undefined ? item.as : (item.as ?? item.column.split(".").slice(-1)[0]);
 /** One test against one column. */
 export type Condition = { column: string; op: Op; value?: unknown };
 
@@ -329,7 +367,7 @@ export function qualified(field: Field, query?: Query): string {
 export function outputColumns(query: Query): string[] {
   const items = [...(query.select ?? []), ...(query.group_by ?? [])];
   return [
-    ...items.map((item) => item.as ?? item.column.split(".").slice(-1)[0]),
+    ...items.map(nameOf),
     ...(query.aggregates ?? []).map((aggregate) => aggregate.as),
   ];
 }
@@ -416,8 +454,11 @@ export function reaggregate(draft: Draft, fn: Fn): Draft {
 export function retruncate(draft: Draft, channel: "x" | "color", unit: Unit | null): Draft {
   const field = draft.chart.encoding[channel]?.field;
   if (field === undefined) return draft;
-  const group_by = (draft.query.group_by ?? []).map((item) => {
-    if ((item.as ?? item.column.split(".").slice(-1)[0]) !== field) return item;
+  const group_by = (draft.query.group_by ?? []).map((item): Item => {
+    // A computed item has no date in it to round, which the validator says in words and
+    // the checker says here: the control this comes from is only drawn for a temporal
+    // channel, and a temporal channel is not a channel bound to an expression.
+    if (item.column === undefined || nameOf(item) !== field) return item;
     const { truncate: _was, ...rest } = item;
     return unit === null ? rest : { ...rest, truncate: unit };
   });
@@ -489,7 +530,9 @@ function measured(draft: Draft, field: Field): Draft {
 function ranked(draft: Draft, field: Field): Draft {
   const outputs = outputColumns(draft.query);
   const dimension = (draft.query.group_by ?? []).find(
-    (item) => item.column === qualified(field, draft.query) || item.column.endsWith(`.${field.column}`),
+    (item) =>
+      item.column === qualified(field, draft.query) ||
+      item.column?.endsWith(`.${field.column}`) === true,
   );
   const measure = draft.chart.encoding.y?.field;
   if (dimension === undefined || measure === undefined) {
@@ -499,7 +542,7 @@ function ranked(draft: Draft, field: Field): Draft {
         : "Top N ranks by a measure, so put a column in Values first.",
     );
   }
-  const column = dimension.as ?? dimension.column.split(".").slice(-1)[0];
+  const column = nameOf(dimension);
   if (!outputs.includes(column)) throw new WellRefusal(`'${column}' is not an output column`);
 
   return {
@@ -537,7 +580,7 @@ function withJoins(query: Query, joins: Join[]): Query {
 function unbind(draft: Draft, alias: string): Draft {
   const query = draft.query;
   const group_by = (query.group_by ?? []).filter(
-    (item) => (item.as ?? item.column.split(".").slice(-1)[0]) !== alias,
+    (item) => nameOf(item) !== alias,
   );
   const aggregates = (query.aggregates ?? []).filter((aggregate) => aggregate.as !== alias);
   const encoding = { ...draft.chart.encoding };
