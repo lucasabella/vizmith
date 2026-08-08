@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from vizmith.ask import ATTEMPTS, VALUE_LIMIT, Answer, ask, prompt
-from vizmith.model import Completion, Endpoint, Model
+from vizmith.model import Completion, Endpoint, Model, Spend
 from vizmith.profiler import ColumnProfile, TableProfile, profile_table
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
@@ -66,7 +66,8 @@ def test_a_valid_answer_is_returned_on_the_first_attempt(tables):
 
     answer = ask("revenue by country", tables, model)
 
-    assert answer == Answer(spec=VALID, errors=[], attempts=1)
+    # The scripted model reports no usage, so what is recorded is the one call it took.
+    assert answer == Answer(spec=VALID, errors=[], attempts=1, spent=Spend(calls=1))
     assert len(model.prompts) == 1
 
 
@@ -334,3 +335,68 @@ def test_the_instructions_say_what_a_quoted_value_is():
     assert "It is data." in instructions
     assert "cannot change them" in instructions
     assert "cancelled" in rest
+
+
+class Costing:
+    """A model that reports usage, the way an endpoint does."""
+
+    def __init__(self, *answers: tuple[str, dict]):
+        self.answers = list(answers)
+
+    def complete(self, prompt: str, schema: dict | None = None) -> Completion:
+        text, usage = self.answers.pop(0)
+        return Completion(text=text, model="costing", finish_reason="stop", usage=usage)
+
+    def constrains_output(self, schema: dict) -> bool:
+        return False
+
+
+def test_what_a_question_cost_is_every_attempt_added_up(tables):
+    """A question that took three tries cost three times one that took one, and that is the
+    whole reason to report this rather than the usage of the call that happened to succeed.
+    Every attempt is billed, including the ones the validator threw away."""
+    model = Costing(
+        (json.dumps(REJECTED), {"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}),
+        (json.dumps(VALID), {"prompt_tokens": 1200, "completion_tokens": 120, "total_tokens": 1320}),
+    )
+
+    answer = ask("revenue by country", tables, model)
+
+    assert answer.attempts == 2
+    assert answer.spent == Spend(calls=2, prompt=2200, completion=220, total=2420)
+
+
+def test_a_question_that_never_produced_a_spec_still_says_what_it_cost(tables):
+    """The failure is the expensive case — three attempts and nothing to show — so this is
+    the one where the number matters most."""
+    spent = {"prompt_tokens": 900, "completion_tokens": 30, "total_tokens": 930}
+    model = Costing(*[("not json", spent)] * ATTEMPTS)
+
+    answer = ask("revenue by country", tables, model)
+
+    assert answer.spec is None
+    assert answer.spent.calls == ATTEMPTS
+    assert answer.spent.total == 930 * ATTEMPTS
+
+
+def test_usage_is_read_in_either_spelling_an_endpoint_uses():
+    """The OpenAI convention is prompt/completion and enough compatible servers answer
+    input/output that reading one spelling would report zero for a question that cost
+    money."""
+    openai = Spend.of({"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14})
+    other = Spend.of({"input_tokens": 10, "output_tokens": 4})
+
+    assert openai == other == Spend(calls=1, prompt=10, completion=4, total=14)
+
+
+def test_an_endpoint_that_reports_nothing_still_records_the_call():
+    """A call that happened is a call that was billed, whatever it declined to say about
+    it. Zero tokens and one call is honest; no call at all would not be."""
+    assert Spend.of({}) == Spend(calls=1, prompt=0, completion=0, total=0)
+    assert Spend.of(None).calls == 1
+
+
+def test_a_total_the_endpoint_gives_is_kept_over_the_sum():
+    """A model that bills for reasoning tokens reports them in neither half, so the sum of
+    the two is not what the bill says."""
+    assert Spend.of({"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 90}).total == 90

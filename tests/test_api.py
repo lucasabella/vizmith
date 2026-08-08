@@ -9,7 +9,7 @@ import httpx
 import pytest
 from conftest import needs_warehouse
 from fastapi.testclient import TestClient
-from test_ask import ScriptedModel
+from test_ask import Costing, ScriptedModel
 from test_model import ENDPOINT
 from test_spec_validation import EXPECTED_ERROR
 
@@ -1374,7 +1374,14 @@ def test_a_spec_the_rules_do_not_refuse_comes_back_with_nothing_to_say(asking, c
 
     body = client.post("/api/critique", json={"spec": load(SCANS_PER_LOCATION)}).json()
 
-    assert body == {"findings": [], "spec": None, "errors": []}
+    assert body == {
+        "findings": [],
+        "spec": None,
+        "errors": [],
+        # Nothing was asked, so nothing was spent, and the number says so rather than being
+        # absent: a caller reading a cost should not have to tell "free" from "not reported".
+        "cost": {"calls": 0, "prompt": 0, "completion": 0, "total": 0},
+    }
     assert scripted.prompts == []
 
 
@@ -1547,3 +1554,32 @@ def test_a_named_host_is_answered_and_only_the_named_one(catalog, monkeypatch):
 
     assert TestClient(app, base_url="http://vizmith.internal:8000").get("/api/tables").status_code == 200
     assert TestClient(app, base_url="http://other.internal:8000").get("/api/tables").status_code == 403
+
+
+def test_a_question_answers_with_what_it_cost(asking, catalog):
+    """The central claim of this design is that sending metadata rather than data keeps
+    token cost bounded, and the number that shows it was measured on every request and
+    thrown away. It comes back beside the rows now, so the audience most able to check the
+    claim can."""
+    scripted = Costing((json.dumps(load(REVENUE_BY_COUNTRY)), {"prompt_tokens": 4200, "completion_tokens": 180}))
+    client = asking()
+    app.dependency_overrides[model] = lambda: scripted
+
+    body = client.post("/api/ask", json={"question": "revenue by country"}).json()
+
+    assert body["cost"] == {"calls": 1, "prompt": 4200, "completion": 180, "total": 4380}
+    assert body["rows"], "the cost arrives beside the answer, not instead of it"
+
+
+def test_a_question_that_failed_says_what_it_cost_to_fail(asking, catalog):
+    """Three attempts and nothing to show is the expensive case, so it is the one where a
+    person most wants the number. It rides on the refusal rather than being dropped."""
+    scripted = Costing(*[("not a spec", {"prompt_tokens": 4200, "completion_tokens": 20})] * ATTEMPTS)
+    client = asking()
+    app.dependency_overrides[model] = lambda: scripted
+
+    answered = client.post("/api/ask", json={"question": "revenue by country"})
+
+    assert answered.status_code == 400
+    assert answered.json()["cost"]["calls"] == ATTEMPTS
+    assert answered.json()["cost"]["total"] == ATTEMPTS * 4220

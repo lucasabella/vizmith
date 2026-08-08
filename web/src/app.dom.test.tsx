@@ -47,7 +47,7 @@ const TYPED = {
 /** Every request the interface makes, answered — except `/api/execute`, which is held so a
  * test decides the order the answers come back in. */
 function serving() {
-  const waiting: ((rows: object[]) => void)[] = [];
+  const waiting: ((answer: object[] | { rows: object[]; cost?: object }) => void)[] = [];
 
   const fetching = vi.fn((url: string, options?: RequestInit) => {
     const path = String(url);
@@ -57,8 +57,18 @@ function serving() {
     if (path.endsWith("/api/execute")) {
       const sent = JSON.parse(String(options?.body ?? "{}"));
       return new Promise((settle) => {
-        waiting.push((rows) =>
-          settle({ ok: true, json: () => Promise.resolve({ spec: sent.spec, rows }) } as Response),
+        waiting.push((answer) =>
+          settle({
+            ok: true,
+            // An answer is rows, and may carry what the question cost. A test that only
+            // cares about the rows passes an array, which is what most of them do.
+            json: () =>
+              Promise.resolve(
+                Array.isArray(answer)
+                  ? { spec: sent.spec, rows: answer }
+                  : { spec: sent.spec, ...answer },
+              ),
+          } as Response),
         );
       });
     }
@@ -71,7 +81,7 @@ function serving() {
 const answered = (body: unknown) =>
   Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
 
-let waiting: ((rows: object[]) => void)[];
+let waiting: ((answer: object[] | { rows: object[]; cost?: object }) => void)[];
 
 beforeEach(() => {
   const serve = serving();
@@ -177,5 +187,38 @@ describe("what the canvas announces", () => {
 
     waiting[0](rows(1));
     await waitFor(() => expect(said()).toBe("One figure."));
+  });
+});
+
+describe("what a question cost", () => {
+  it("is shown beside the row count, with the attempts named", async () => {
+    // The claim the project is built on is that a profile rather than rows keeps token cost
+    // bounded, and the number that shows it was measured on every request and thrown away.
+    // Three attempts is the case worth naming: it cost three times what one attempt does.
+    await started();
+    await typeAndRun();
+    waiting[0]({
+      rows: rows(1),
+      cost: { calls: 3, prompt: 12000, completion: 600, total: 12600 },
+    });
+
+    expect(await screen.findByText(/12,600 tokens on this question, over 3 attempts/)).toBeDefined();
+  });
+
+  it("goes away when the next answer reached no model", async () => {
+    // Running a spec by hand reaches no model, so a cost left under it would be a figure
+    // about a question the chart on screen is not the answer to.
+    await started();
+    await typeAndRun();
+    waiting[0]({ rows: rows(1), cost: { calls: 1, prompt: 4000, completion: 200, total: 4200 } });
+    await screen.findByText(/4,200 tokens/);
+
+    // The same spec again, through the editor that is already open: `typeAndRun` toggles
+    // the panel, so pressing Run is the second run rather than a second visit.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Run spec" }));
+    await waitFor(() => expect(waiting).toHaveLength(2));
+    waiting[1]({ rows: rows(1) });
+
+    await waitFor(() => expect(screen.queryByText(/tokens/)).toBeNull());
   });
 });

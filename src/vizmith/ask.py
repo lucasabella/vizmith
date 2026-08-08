@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from vizmith.catalog import Relationship
-from vizmith.model import Model
+from vizmith.model import Model, Spend
 from vizmith.profiler import TableProfile
 from vizmith.relevance import select
 from vizmith.spec import SCHEMA_PATH, validate_spec
@@ -75,11 +75,15 @@ off partway through a series."""
 
 @dataclass(frozen=True)
 class Answer:
-    """A validated spec, or the errors from the last attempt when there is none."""
+    """A validated spec, or the errors from the last attempt when there is none.
+
+    `spent` is every attempt added up, including the ones that were rejected: what was paid
+    for is the loop and not the answer that came out of it."""
 
     spec: dict | None
     errors: list[str] = field(default_factory=list)
     attempts: int = 0
+    spent: Spend = field(default_factory=Spend)
 
 
 def prompt(
@@ -163,6 +167,7 @@ def ask(
     """
     chosen = select(question, tables, relationships)
     errors: list[str] = []
+    spent = Spend()
     for attempt in range(1, attempts + 1):
         written = prompt(
             question,
@@ -171,16 +176,17 @@ def ask(
             constrained=constrained,
             withheld=chosen.withheld,
         )
-        text = model.complete(written, SCHEMA if constrained else None).text
+        completion = model.complete(written, SCHEMA if constrained else None)
+        spent += Spend.of(completion.usage)
         try:
-            spec = json.loads(text)
+            spec = json.loads(completion.text)
         except json.JSONDecodeError as failure:
             errors = [f"the answer was not JSON: {failure}"]
             continue
         errors = validate_spec(spec)
         if not errors:
-            return Answer(spec=spec, attempts=attempt)
-    return Answer(spec=None, errors=errors, attempts=attempts)
+            return Answer(spec=spec, attempts=attempt, spent=spent)
+    return Answer(spec=None, errors=errors, attempts=attempts, spent=spent)
 
 
 def block(table: TableProfile) -> str:

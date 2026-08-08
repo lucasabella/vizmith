@@ -106,7 +106,24 @@ export const execute = (spec: Spec): Promise<{ spec: Spec; rows: Row[] }> =>
  * findings present means a rule refused something and nothing survived the rules as a
  * replacement, which `errors` says. Nothing is applied here: the suggestion is a second
  * spec beside the one on screen, and running it is `execute` like any other. */
-export type Suggestion = { findings: string[]; spec: Spec | null; errors: string[] };
+/**
+ * What a model call cost, in tokens and in billed requests.
+ *
+ * Every attempt of the retry loop added up, not the one that worked: what a person paid
+ * for was the loop. `calls` is that loop made visible — a question that took three tries
+ * costing three times one that took one is the thing worth showing.
+ *
+ * Zero calls means the model was not asked, which is the common case for a critique and is
+ * different from a call that reported no usage.
+ */
+export type Cost = { calls: number; prompt: number; completion: number; total: number };
+
+export type Suggestion = {
+  findings: string[];
+  spec: Spec | null;
+  errors: string[];
+  cost?: Cost;
+};
 
 export const critique = (spec: Spec): Promise<Suggestion> =>
   json("/api/critique", {

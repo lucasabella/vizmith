@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { critique, getShape, getTables, Refused, type Suggestion } from "./api";
+import { critique, getShape, getTables, Refused, type Cost, type Suggestion } from "./api";
 import { fromProfiles, fromShape, merged, type TableFields } from "./panels/fields";
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
@@ -57,6 +57,13 @@ export default function App() {
   // every run, because a finding is about the spec that was sent and the next chart is a
   // different spec.
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  // What the last model request cost, and which request it was. The claim this design is
+  // built on is that sending metadata rather than data keeps token cost bounded, and the
+  // number that shows it was measured on every request and never left the server. Held for
+  // the last request rather than accumulated: a running total for the tab would answer a
+  // question nobody asked and would hide the one that matters, which is what this question
+  // cost.
+  const [spent, setSpent] = useState<{ cost: Cost; what: string } | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   // The dashboard being arranged. It lives here rather than in the view, because adding
   // the chart on screen to it means going back to the Chart view to build the next one,
@@ -159,6 +166,11 @@ export default function App() {
       });
       const body = await response.json();
       if (!latest()) return;
+      // A question reports what it cost, whether or not it produced a spec — three attempts
+      // and nothing to show is the expensive case. Running a spec by hand reaches no model,
+      // so it carries no cost and clears the last one rather than leaving it under a chart
+      // it is not about.
+      setSpent(body.cost ? { cost: body.cost as Cost, what: "this question" } : null);
       if (response.ok) {
         setOutcome({ kind: "chart", spec: body.spec, rows: body.rows });
         if (question !== null) setText(JSON.stringify(body.spec, null, 2));
@@ -241,7 +253,9 @@ export default function App() {
     setSuggesting(true);
     setSuggestion(null);
     try {
-      setSuggestion(await critique(outcome.spec));
+      const said = await critique(outcome.spec);
+      setSuggestion(said);
+      if (said.cost && said.cost.calls > 0) setSpent({ cost: said.cost, what: "this suggestion" });
     } catch (error) {
       // In the same shape a suggestion arrives in, so the strip has one thing to draw. The
       // server's own words where there are any: a message written here would be a second
@@ -458,6 +472,7 @@ export default function App() {
               ) : null}
               <span className="pages__meta">
                 {outcome.kind === "chart" ? counted(outcome.rows.length, "row") : "no rows"}
+                {spent === null ? null : <Spent cost={spent.cost} what={spent.what} />}
               </span>
             </div>
           </main>
@@ -631,6 +646,32 @@ function SecondOpinion({
       <button className="btn btn--quiet" onClick={onDismiss}>
         Never mind
       </button>
+    </span>
+  );
+}
+
+/**
+ * What the last model request cost, beside what it produced.
+ *
+ * The number is here because the first argument this project makes is that sending a
+ * profile rather than rows keeps token cost bounded, and until now the figure that
+ * demonstrates it was measured on every request and thrown away — so the claim was asked
+ * for on trust by the audience most able to check it.
+ *
+ * Attempts are named rather than folded into the total, because they are the part that
+ * surprises: a question the validator rejected twice cost three times one it accepted, and
+ * a person watching one number go up has no way to know which happened. The breakdown
+ * between prompt and completion is in the title, since it is the second question and not
+ * the first.
+ */
+function Spent({ cost, what }: { cost: Cost; what: string }) {
+  const tokens = cost.total.toLocaleString();
+  return (
+    <span
+      className="pages__spent"
+      title={`${cost.prompt.toLocaleString()} in the prompt, ${cost.completion.toLocaleString()} in the answer`}
+    >
+      {`· ${tokens} tokens on ${what}${cost.calls > 1 ? `, over ${cost.calls} attempts` : ""}`}
     </span>
   );
 }

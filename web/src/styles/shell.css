@@ -644,6 +644,13 @@ button:focus-visible {
   color: var(--ink);
 }
 
+/* What the last model request cost, beside the row count. Quiet, and one line: it is a
+   figure somebody checks rather than one they watch. */
+.pages__spent {
+  margin-left: 6px;
+  color: var(--ink-3);
+}
+
 .pages__meta {
   margin-left: auto;
   display: flex;

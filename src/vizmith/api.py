@@ -729,8 +729,18 @@ def question(
     except ModelError as failure:
         return refused("model", failure)
     if answer.spec is None:
-        return JSONResponse(status_code=400, content={"errors": answer.errors})
-    return execute_spec(answer.spec, catalog)
+        return JSONResponse(
+            status_code=400, content={"errors": answer.errors, "cost": answer.spent.as_dict()}
+        )
+    # What the question cost, beside what it produced. The central claim of this design is
+    # that sending metadata rather than data keeps token cost bounded, and the number that
+    # demonstrates it was in hand on every request and thrown away. A question that took
+    # three attempts costing three times one that took one is the thing worth seeing, which
+    # is why this is the loop's total and carries the count of calls that made it.
+    ran = execute_spec(answer.spec, catalog)
+    if isinstance(ran, dict):
+        ran["cost"] = answer.spent.as_dict()
+    return ran
 
 
 @app.post("/api/critique", dependencies=[Depends(rationed(MODEL))])
