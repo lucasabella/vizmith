@@ -331,7 +331,7 @@ def test_the_assistant_stops_saying_approximately_where_the_figure_is_a_count(du
 @needs_server
 @pytest.mark.parametrize("path", sorted(FIXTURES.glob("*.json")), ids=lambda path: path.stem)
 def test_every_spec_that_ships_runs_against_a_real_server(path):
-    """The bar ROADMAP.md sets for a dialect. It needs the fixture dataset loaded into the
+    """The bar DESIGN.md sets for a dialect. It needs the fixture dataset loaded into the
     schema `VIZMITH_POSTGRES_SCHEMA` names, and it is also what settles the parameter style:
     every spec carries a bound row cap."""
     rows = execute(json.loads(path.read_text()), PostgresCatalog(service=LIVE_SERVICE, schema=LIVE_SCHEMA))

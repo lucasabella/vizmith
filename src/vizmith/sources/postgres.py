@@ -16,7 +16,7 @@ which drops ", approximately" from a bound it quotes.
 The cost is stated rather than avoided: an exact distinct count per column is the scan the
 "a profile is cheap by requirement" rule exists to prevent, and on this source that rule
 cannot be kept. `pg_stats.n_distinct` is the free planner statistic somebody will reach for
-and this connector does not use it; the reasons are in ROADMAP.md.
+and this connector does not use it; the reasons are in DESIGN.md.
 
 **There is no freshness token.** `modified` is None, so the profile cache is off. The
 candidates and why each fails are in the method.

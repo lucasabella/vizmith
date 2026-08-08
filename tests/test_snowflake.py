@@ -359,7 +359,7 @@ def live() -> SnowflakeCatalog:
 @needs_account
 @pytest.mark.parametrize("path", sorted(FIXTURES.glob("*.json")), ids=lambda path: path.stem)
 def test_every_spec_that_ships_runs_against_a_real_account(path):
-    """The bar ROADMAP.md sets for a dialect: the one that ships is the only one a user's
+    """The bar DESIGN.md sets for a dialect: the one that ships is the only one a user's
     chart depends on. It needs the fixture dataset loaded into the account, which is what
     the schema setting should name.
 

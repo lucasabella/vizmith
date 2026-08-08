@@ -133,7 +133,7 @@ def test_a_value_comes_back_as_the_type_the_manifest_reported():
 
 @pytest.mark.parametrize("type_name", ["DATE", "TIMESTAMP", "TIMESTAMP_NTZ"])
 def test_a_temporal_value_is_an_object_rather_than_the_text_the_api_sent(type_name):
-    """The one shape a result set holds for a temporal column, per ROADMAP.md. The
+    """The one shape a result set holds for a temporal column, per DESIGN.md. The
     statement API answers in text, so without this a chart drawn from a warehouse gets a
     string where the same chart drawn from anywhere else gets a date."""
     value = _value("2024-01-01" if type_name == "DATE" else "2024-01-01T09:30:00.000", type_name)
@@ -891,7 +891,7 @@ def test_the_modified_time_moves_when_the_data_changes():
     assert before is not None, "the source reports no modified time, so nothing can be cached"
     assert after != before, (
         f"the modified time did not move in {MODIFIED_WAIT} seconds after a write, so it cannot "
-        f"key the profile cache and ROADMAP.md's entry on it is wrong"
+        f"key the profile cache and DESIGN.md's entry on it is wrong"
     )
 
 

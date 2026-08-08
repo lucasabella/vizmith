@@ -44,7 +44,7 @@ jobs:
 
       # Both versions are named rather than left to the runner's default. The fixture
       # reproducibility test compares committed Parquet against a fresh write, and that
-      # is tied to the DuckDB version that wrote it, per ROADMAP.md. An interpreter that
+      # is tied to the DuckDB version that wrote it, per DESIGN.md. An interpreter that
       # floats underneath changes which duckdb wheel gets installed and fails that test
       # for a reason that has nothing to do with the change under review.
       - uses: actions/setup-python@v7
@@ -128,7 +128,7 @@ jobs:
   # reasons that belong to the runner rather than to the change under review, and a flake
   # inside the suite would read as the suite failing. It is here at all because the class
   # of bug it catches is invisible to everything else: every other frontend test is a
-  # static render, and the state bug #59 shipped passed all of them. See ROADMAP.md.
+  # static render, and the state bug #59 shipped passed all of them. See DESIGN.md.
   interface:
     runs-on: ubuntu-latest
     steps:

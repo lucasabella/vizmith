@@ -186,7 +186,7 @@ def test_a_valid_fixture_executes_against_the_warehouse(path, live_catalog, cata
     # A column that is a date here and a string there is what makes a renderer ask which
     # source drew the chart, which is the question the catalog interface exists to remove.
     assert shapes(rows) == shapes(offline), (
-        "the two sources disagree about what a value is, against ROADMAP.md's result set contract"
+        "the two sources disagree about what a value is, against DESIGN.md's result set contract"
     )
 
 

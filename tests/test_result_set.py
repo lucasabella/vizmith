@@ -1,6 +1,6 @@
 """One shape per type, whatever source produced the rows.
 
-The result set contract in ROADMAP.md says what a column is called, in what order, and
+The result set contract in DESIGN.md says what a column is called, in what order, and
 what a value is. This file is the last of those three: for every type in the catalog's
 closed set, the shape a value arrives in, asserted against each catalog that ships.
 

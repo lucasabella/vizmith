@@ -11,7 +11,7 @@
  * alternatives were the model, which makes a click slow and unrepeatable, and reading it
  * off the profiles, which is deterministic and occasionally baffling. A menu costs one
  * click and is the only one of the three where what happens next is visible before it
- * happens. See ROADMAP.md.
+ * happens. See DESIGN.md.
  */
 
 import type { Row, Spec, Value } from "../chart/option";

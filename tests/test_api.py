@@ -582,7 +582,7 @@ def test_a_temporal_value_arrives_as_iso_8601_text(client):
     """JSON has no date, so text is the shape a temporal value crosses the wire in, and
     the contract says which text: what `isoformat` writes, with no zone on the end of it.
     That is what the renderer parses, so a second encoder that wrote a different one would
-    move every mark on a time axis rather than fail. See ROADMAP.md."""
+    move every mark on a time axis rather than fail. See DESIGN.md."""
     body = client.post("/api/execute", json={"spec": load(ORDERS_PER_MONTH)}).json()
 
     assert body["rows"]
