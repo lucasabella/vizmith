@@ -265,7 +265,8 @@ class Catalog(Protocol):
 # time it finished, and the next request re-read the front of the schema while the back of
 # it was still warm — 152 billed DESCRIBE DETAIL statements for a schema nobody changed.
 # A read taken while a burst is running joins that burst and lives as long as it does, so
-# one request cannot expire halfway through the next however large the schema is.
+# one request cannot expire halfway through the next — for a cold read up to the ceiling
+# below, which is where the guarantee stops rather than being unconditional.
 FRESHNESS_HOLD = 30.0
 
 # The most a burst may reach from its first read to its last. A burst runs for as long as
@@ -277,6 +278,14 @@ FRESHNESS_HOLD = 30.0
 # in use, and for at most FRESHNESS_HOLD after it goes quiet. Four times the hold, which
 # leaves room for a cold read of a schema several times larger than the ones measured and
 # still says a stale answer is a matter of minutes rather than of a restart.
+#
+# Two things it costs, both of them chosen. A burst dies whole, so the request that lands
+# just after the ceiling re-reads every table at once rather than a few at a time — spikier
+# than the old per-entry window, and about a quarter of its statements over the same two
+# minutes, which is the trade. And a cold read that takes longer than this rolls the burst
+# while it is still running, which is the failure this whole change is about, reappearing
+# for a schema several times larger than any that has been measured. Both are reasons to
+# raise the number rather than to hold answers per entry again.
 FRESHNESS_CEILING = 120.0
 
 # How long a table's shape — its columns and the keys it declares — is held before the
@@ -309,11 +318,18 @@ class Held:
     already asks it once per table; what this removes is the next request asking the same
     thing about the same tables a second later, which is what a person browsing produces.
 
-    The window covers a burst rather than an answer. A burst is a run of reads with no gap
-    of `hold` or more between them, and every answer taken in one is held for as long as
-    that burst runs — which is what keeps a cold read of a large schema from expiring at the
-    front while it is still working on the back. It cannot run longer than `ceiling` from
-    its first read to its last, and that is the bound on how stale an answer can be.
+    The window covers a burst rather than an answer. A burst is a run of reads of the source
+    with no gap of `hold` or more between them, and every answer taken in one is held for as
+    long as that burst runs — which is what keeps a cold read of a large schema from
+    expiring at the front while it is still working on the back. It cannot run longer than
+    `ceiling` from its first read to its last, and that is the bound on how stale an answer
+    can be: a read is dated from when it was asked for rather than from when it returned, so
+    a slow round trip does not buy an answer extra life.
+
+    Only a read of the source extends a burst. A request answered entirely from the hold
+    renews nothing, so the window is `hold` after the last time the source was actually
+    asked and not after the last time somebody looked — which is the conservative direction
+    and the one that keeps browsing from holding an answer open indefinitely.
 
     **Shape.** Describing every table is what the relationship graph is made of, and the
     graph is rebuilt from nothing by every join path resolved — which is every drag of a
@@ -426,9 +442,12 @@ class Held:
         asks each table once anyway: what arrives at the same moment is several tables,
         not several copies of one.
 
-        The burst is joined when the answer is stored rather than when it was asked for,
-        because reading the source is what a burst is made of: a request whose reads run
-        back to back keeps its own burst running for as long as it is reading."""
+        The burst a read joins is the one that was running when it *started*, not when it
+        returned. Both of those matter and they are not the same instant: a `DESCRIBE
+        DETAIL` queued on a cold warehouse takes tens of seconds, so joining on the reply
+        would let a burst lapse underneath a read that began inside it — the case #103 names
+        outright — and would date the answer from the reply while it describes the table as
+        it was at the request."""
         asked = self._clock()
         with self._lock:
             held = self._held.get(name)
@@ -437,7 +456,7 @@ class Held:
 
         answer = self._catalog.modified(name)
         with self._lock:
-            self._held[name] = (self._joined(self._clock()), answer)
+            self._held[name] = (self._joined(asked, self._clock()), answer)
             described = self._described.get(name)
             if described is not None and described[1] != answer:
                 del self._described[name]
@@ -452,14 +471,26 @@ class Held:
             and now - self._began < self._ceiling
         )
 
-    def _joined(self, now: float) -> int:
-        """The burst a read taken at `now` belongs to, beginning one where the last has
-        stopped running, and holding the running one open where it has not. Called under
-        the lock."""
-        if not self._running(now):
+    def _joined(self, asked: float, answered: float) -> int:
+        """The burst a read that started at `asked` and returned at `answered` belongs to,
+        beginning one where the last had stopped running by the time it started, and holding
+        the running one open where it had not. Called under the lock.
+
+        A burst spans from its first question to its last answer, and the two ends are the
+        two different things they are used for. `_began` is the earliest question, because
+        an answer describes the table as it was when it was asked for, and the ceiling is a
+        bound on how old a served answer may be. `_last` is the latest answer, because what
+        says a burst is still running is that work was still happening.
+
+        Both move outwards rather than being assigned, since reads finish out of order:
+        several threads profile at once, and a slow one that started first stores last."""
+        if not self._running(asked):
             self._burst += 1
-            self._began = now
-        self._last = now
+            self._began = asked
+            self._last = answered
+            return self._burst
+        self._began = min(self._began, asked)
+        self._last = max(self._last, answered)
         return self._burst
 
     def _token(self, name: str, asked: float):

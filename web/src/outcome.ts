@@ -1,4 +1,4 @@
-import type { Row, Spec } from "./chart/option";
+import { overSeriesLimit, type Row, type Spec } from "./chart/option";
 import { counted } from "./counted";
 
 /** Which part refused, as the server named it. It is the only thing that can: a question
@@ -59,14 +59,22 @@ export function announced(outcome: Outcome, working: Working): string {
   if (working !== null) {
     return working === "question" ? "Answering the question." : "Running the spec.";
   }
-  if (outcome.kind === "chart") {
-    // The one shape that is not a chart. The grammar answers a question with no dimension
-    // as a figure, and calling it a row count is what the meta line under it used to do.
-    const figure = outcome.spec.chart.encoding.x === undefined && outcome.rows.length === 1;
-    return figure ? "One figure." : `A chart of ${counted(outcome.rows.length, "row")}.`;
-  }
   if (outcome.kind === "refused") {
     return [outcome.heading, outcome.lines[0]].filter(Boolean).join(": ");
   }
-  return "No chart yet.";
+  if (outcome.kind !== "chart") return "No chart yet.";
+
+  // A 200 is not a chart. Two things the renderer refuses after the server has answered,
+  // and both are what the canvas draws instead — announcing "a chart of 10 rows" over the
+  // top of "there are eight colours to tell them apart with" is the region reporting a
+  // request rather than a screen. The predicates are the renderer's own, imported rather
+  // than restated, because a second copy is one that can disagree with what was drawn.
+  const tooMany = overSeriesLimit(outcome.spec, outcome.rows);
+  if (tooMany !== null) return `What the renderer said: ${tooMany}`;
+  if (outcome.rows.length === 0) return "No rows to draw.";
+  // The one shape that is not a chart either. The grammar answers a question with no
+  // dimension as a figure, and calling it a row count is what the meta line used to do.
+  // `Chart.tsx` decides it the same way: no `x`, and something to read off.
+  if (outcome.spec.chart.encoding.x === undefined) return "One figure.";
+  return `A chart of ${counted(outcome.rows.length, "row")}.`;
 }

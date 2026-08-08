@@ -83,7 +83,11 @@ def served(fixture_db):
     machine, and the port is only ever read back from the socket."""
     from conftest import FixtureCatalog
 
-    app.dependency_overrides[source] = lambda: FixtureCatalog(fixture_db)
+    # One catalog for the server, which is what `source()` in `api.py` is: an lru_cache, so
+    # a running Vizmith holds one connector for the process. A factory here built a fresh
+    # one per request, which is not what the interface is being driven against.
+    catalog = FixtureCatalog(fixture_db)
+    app.dependency_overrides[source] = lambda: catalog
     # A model that answers without a network, so the flows that need one are driven here
     # rather than skipped. It always answers the same spec: what these tests are about is
     # what the interface does with an answer, not which answer a model gives.
@@ -245,13 +249,31 @@ def test_a_dashboard_survives_leaving_the_view_and_a_reload(page):
     # #166: a tile drew "No rows to draw" once, for a spec that returns thirty, and nobody
     # could reproduce it. This is the assertion rather than the hunt — the flow it was seen
     # in is this one, and both specs return rows, so an empty tile here is either that race
-    # or a real regression. Waited on rather than sampled: the selector above matches as
-    # soon as one tile has drawn, and what this is about is the other one.
+    # or a real regression.
+    #
+    # Waited on rather than sampled, and waited on the right thing: the selector above
+    # matches as soon as one tile has drawn, and "no tile is still running" matches before
+    # the renderer has made its canvas, because that happens in an effect after the paint.
+    # What every tile has to reach is one of the three things it can end at.
     page.wait_for_function(
-        "document.querySelectorAll('.grid__cell .grid__working').length === 0", timeout=DRAWN
+        """() => {
+            const bodies = [...document.querySelectorAll('.grid__cell .grid__body')];
+            return (
+              bodies.length === 2 &&
+              bodies.every((body) => body.querySelector('canvas, .figure, .empty, .grid__refusal'))
+            );
+        }""",
+        timeout=DRAWN,
     )
-    assert page.locator(".grid__cell canvas").count() == 2
-    assert page.locator(".grid__cell .empty").count() == 0, "a tile drew nothing for a spec that returns rows"
+    # What each tile settled on, so a failure says which one and on what rather than only
+    # that a number was wrong. This is the report #166 did not have.
+    settled = page.eval_on_selector_all(
+        ".grid__cell",
+        "cells => cells.map(cell => cell.querySelector('.grid__title').innerText + ': ' +"
+        " (cell.querySelector('.grid__body').textContent || 'a canvas'))",
+    )
+    assert page.locator(".grid__cell canvas").count() == 2, settled
+    assert page.locator(".grid__cell .empty").count() == 0, settled
 
 
 @needs_built_frontend
@@ -601,6 +623,27 @@ def test_json_that_is_not_a_spec_leaves_the_interface_standing(page):
     page.get_by_role("button", name="Chart", exact=True).first.click()
     page.get_by_role("button", name="{ } JSON").click()
     assert page.locator("textarea.spec__text").input_value() == '{"a":1}', "the editor was lost"
+
+
+@needs_built_frontend
+def test_a_line_deleted_out_of_a_spec_leaves_the_interface_standing(page):
+    """The same failure, at the shape it is actually likely to arrive in. `{"a":1}` is the
+    example the report started from; what somebody editing by hand really does is delete a
+    line out of a spec that works, and a filter with no `column` still parses, still has a
+    chart, and still throws on `filter.column.split`.
+
+    Driven in the wells rather than in the editor, because the wells are what read those
+    fields: the panel is switched to after the paste, which is the gesture that used to end
+    in a blank page."""
+    hand_edited = json.loads(spec(REVENUE_BY_COUNTRY))
+    del hand_edited["query"]["filters"][0]["column"]
+
+    paste_spec(page, json.dumps(hand_edited))
+    page.wait_for_selector(".refusal", timeout=DRAWN)
+    page.get_by_role("button", name="{ } JSON").click()
+
+    assert page.locator(".wells").is_visible(), "the wells went with the tab"
+    assert "Drag a column from Fields" in page.locator(".wells__note").inner_text()
 
 
 @needs_built_frontend

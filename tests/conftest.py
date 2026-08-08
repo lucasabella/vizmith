@@ -63,6 +63,23 @@ TYPES = {
 }
 
 
+# What serialises a statement against the fixture database.
+#
+# One lock for every catalog rather than one per catalog, which is the correction #166 came
+# out of. A DuckDB connection is a single cursor, and the whole suite shares one session
+# scoped connection; a lock held on the instance therefore serialises nothing the moment two
+# catalogs exist over it, which is what the interface fixture used to build — one per
+# request. Two tiles of a dashboard fetch at once, two threads interleaved `execute` and
+# `fetchall` on that one cursor, and one of them got the other's rows or none: "No rows to
+# draw" for a spec that returns thirty, reproducible about once in four runs.
+#
+# The shipping catalogs do not have this shape. `source()` in `api.py` builds one catalog
+# for the process, and each connector's `run` says it is callable from several threads and
+# is what makes that true. So the fault was the double's, and the fix keeps the double
+# honest about the promise the interface it stands in for makes.
+_STATEMENTS = threading.Lock()
+
+
 class FixtureCatalog:
     """The catalog the deterministic tests run against: the committed fixture data in
     DuckDB, described without a workspace. Records every statement it is asked to execute,
@@ -75,10 +92,6 @@ class FixtureCatalog:
         # and rebuild the name, so a spec naming another catalog was answered with this one.
         self.scope = Scope(levels=("catalog", "schema"), values=("vizmith", "shop"))
         self._connection = connection
-        # A DuckDB connection is one cursor, so two threads sharing it read each other's
-        # rows. Profiling a schema calls run in parallel, so the double serialises rather
-        # than being the only catalog that cannot be shared.
-        self._lock = threading.Lock()
         self.statements = []
         # What this catalog says about when each table last changed, by short name. A test
         # writes one to make a table look rewritten. `modified=None` is a source with no
@@ -137,7 +150,7 @@ class FixtureCatalog:
         return self.modified_times.get(self.scope.qualify(name).rsplit(".", 1)[-1], self._modified)
 
     def run(self, sql, parameters=None):
-        with self._lock:
+        with _STATEMENTS:
             self.statements.append(sql)
             rows = self._connection.execute(sql, parameters or {}).fetchall()
         # DuckDB answers in Python objects, and a decimal column comes back as a Decimal

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Spec } from "./chart/option";
+import { SERIES_LIMIT, type Spec } from "./chart/option";
 import { announced, REJECTED, SAID, type Outcome } from "./outcome";
 
 const spec = (encoding: Spec["chart"]["encoding"]): Spec =>
@@ -33,9 +33,36 @@ describe("what the canvas announces", () => {
   });
 
   it("calls the one shape that is not a chart what it is", () => {
-    // No dimension, one row. The grammar treats this specially and so does the drawing;
-    // "a chart of 1 row" is the description this whole shape exists to avoid.
+    // No dimension. The grammar treats this specially and so does the drawing; "a chart of
+    // 1 row" is the description this whole shape exists to avoid. The predicate is
+    // `Chart.tsx`'s — no `x`, and something to read off — rather than a second one that
+    // can disagree with what was drawn.
     expect(announced(chart(1, figure), null)).toBe("One figure.");
+    expect(announced(chart(3, figure), null)).toBe("One figure.");
+  });
+
+  it("says a query answered nothing rather than calling it a chart of no rows", () => {
+    // A 200 with an empty result set draws "No rows to draw", and announcing "a chart of 0
+    // rows" over the top of it is the region reporting a request rather than a screen.
+    expect(announced(chart(0), null)).toBe("No rows to draw.");
+    expect(announced(chart(0, figure), null)).toBe("No rows to draw.");
+  });
+
+  it("says what the renderer refused, which is also drawn instead of a chart", () => {
+    const coloured = spec({
+      x: { field: "country", type: "nominal" },
+      y: { field: "revenue", type: "quantitative" },
+      color: { field: "category", type: "nominal" },
+    });
+    const many: Outcome = {
+      kind: "chart",
+      spec: coloured,
+      rows: Array.from({ length: SERIES_LIMIT + 2 }, (_, at) => ({ category: `c${at}` })),
+    };
+
+    const said = announced(many, null);
+    expect(said).toContain("What the renderer said:");
+    expect(said).toContain(`${SERIES_LIMIT} colours`);
   });
 
   it("says which part refused and its first line, not the whole list", () => {

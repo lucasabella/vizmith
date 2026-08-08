@@ -40,14 +40,20 @@ PROBE_PROMPT = "Answer with the smallest object the schema allows."
 # How many times one request is sent before the caller hears about it, what is waited
 # between the attempts, and what all that waiting may add up to.
 #
-# The total is capped because somebody is watching: a question that spends a minute in
-# backoff has failed as far as the person who asked it is concerned, whatever the endpoint
-# eventually says. Backing off with no jitter is deliberate — one desktop process asking
-# one endpoint is not a herd, and a deterministic wait is one a test can assert.
+# The budget is per request, and the number is chosen for what a *question* costs, which is
+# not the same thing: `ask` sends up to `ask.ATTEMPTS` requests for one question, and the
+# first question of a process pays a probe in front of them. Six seconds a request is
+# therefore up to twenty-four across a question that goes badly at every step, which is
+# about the most a person will sit in front of a blank canvas before deciding it is broken.
+# A budget spent on one request instead would have been that four times over.
+#
+# The waits themselves are 1s then 2s, which never approaches the budget on their own; what
+# the budget is really bounding is a `Retry-After` an endpoint asks for. Backing off with no
+# jitter is deliberate — one desktop process asking one endpoint is not a herd, and a
+# deterministic wait is one a test can assert.
 ATTEMPTS = 3
 BACKOFF = 1.0
-BACKOFF_CAP = 8.0
-BACKOFF_BUDGET = 20.0
+BACKOFF_BUDGET = 6.0
 
 # The one status that is a rate limit rather than a rejected request. It is named because
 # two decisions turn on it: it is worth sending again, and it is not evidence about whether
@@ -85,11 +91,11 @@ class ModelError(Exception):
     status where there was one, and None where the request never got an answer.
 
     `again` says whether sending the same request could plausibly do better: a rate limit,
-    a server that broke, a connection that dropped. It is decided where the error is
-    raised rather than read back off the status later, because two of the cases have no
-    status at all and one that does — an answer that came back malformed — is a failure
-    the same request would reproduce. `after` is what the endpoint asked to be waited, in
-    seconds, where it said.
+    a server that broke, a connection that dropped. It is decided where the error is raised
+    rather than read back off the status later, because the status does not carry it — two
+    of those three cases have no status at all, and so does an answer that came back
+    malformed, which is a failure the same request would reproduce. `after` is what the
+    endpoint asked to be waited, in seconds, where it said.
     """
 
     def __init__(
@@ -253,15 +259,20 @@ def _backoff(error: ModelError, attempt: int, waited: float) -> float | None:
     """How long to wait before sending the request again, or None where it should not be
     sent again.
 
-    An endpoint that says how long to wait is obeyed rather than doubled against, since it
-    is the one that knows when the limit resets. What that costs is that a `Retry-After`
-    longer than what is left of the budget ends the question here rather than being slept
-    through — which is the right way round, because the alternative is a person watching a
-    blank canvas for a minute on the endpoint's word.
+    An endpoint that says how long to wait is waited, since it is the one that knows when
+    its limit resets. It is a floor rather than an instruction: `Retry-After: 0`, and a date
+    a client whose clock is a few seconds fast reads as already past, would otherwise remove
+    the backoff altogether and send three requests to a rate limited endpoint inside a
+    millisecond — which is worse for that endpoint than not retrying at all. So the wait is
+    the longer of what was asked for and what this would have waited anyway.
+
+    What that costs is that a `Retry-After` longer than what is left of the budget ends the
+    question here rather than being slept through, which is the right way round: the
+    alternative is a person watching a blank canvas for a minute on the endpoint's word.
     """
     if not error.again or attempt >= ATTEMPTS:
         return None
-    delay = error.after if error.after is not None else min(BACKOFF * 2 ** (attempt - 1), BACKOFF_CAP)
+    delay = max(BACKOFF * 2 ** (attempt - 1), error.after or 0.0)
     return None if waited + delay > BACKOFF_BUDGET else delay
 
 
@@ -289,18 +300,26 @@ def _retry_after(headers) -> float | None:
     The header is either a count of seconds or an HTTP date, and both are sent in the wild.
     Anything else is read as nothing said rather than as a failure: a header nobody can
     parse is not a reason to lose the answer about the rate limit.
+
+    The count is digits and nothing else, which is what the specification says it is. That
+    matters here rather than being pedantry, because `float` also reads `inf` and `nan` and
+    `1e400`: an endpoint sending any of those got a delay this file would then either sleep
+    or treat as beyond the budget, from a header that says nothing at all. A date in the
+    past is zero seconds, and what stops a zero from removing the backoff is `_backoff`,
+    which floors it rather than obeying it.
     """
     said = headers.get("retry-after")
     if said is None:
         return None
-    try:
-        return max(0.0, float(said))
-    except ValueError:
-        pass
+    if said.strip().isdigit():
+        return float(said.strip())
     try:
         when = parsedate_to_datetime(said)
     except (TypeError, ValueError):
         return None
+    # A date with no zone is UTC by the specification's own reading, and `parsedate` returns
+    # one for the `-0000` spelling. Subtracting an aware datetime from a naive one raises a
+    # TypeError, which is not a ModelError and would leave this module as a 500.
     if when.tzinfo is None:
         when = when.replace(tzinfo=dt.UTC)
     return max(0.0, (when - dt.datetime.now(dt.UTC)).total_seconds())

@@ -5,7 +5,8 @@ from email.utils import format_datetime
 import httpx
 import pytest
 
-from vizmith.model import Completion, Endpoint, Model, ModelError
+from vizmith.ask import ATTEMPTS as ASK_ATTEMPTS
+from vizmith.model import BACKOFF_BUDGET, Completion, Endpoint, Model, ModelError
 
 KEY = "not-a-real-key-and-must-never-be-read-back"
 ENDPOINT = Endpoint(base_url="https://endpoint.invalid/v1", model="a-model", api_key=KEY, timeout=7.0)
@@ -205,9 +206,9 @@ def test_the_attempts_are_bounded_and_the_last_failure_says_how_many():
     assert failure.value.status == 429, "the status a caller reads survives the retries"
 
 
-def test_an_endpoint_that_says_how_long_to_wait_is_obeyed_rather_than_doubled_against():
-    """It is the one that knows when its limit resets. Doubling against it either asks too
-    early, which is another 429, or too late, which is a person watching for no reason."""
+def test_an_endpoint_that_says_how_long_to_wait_gets_that_long_rather_than_the_doubling():
+    """It is the one that knows when its limit resets. Doubling against it asks too early,
+    which is another 429."""
     waits = []
     model(refusing(429, headers={"Retry-After": "4"}, then=1), waits).complete("a question")
 
@@ -224,13 +225,51 @@ def test_a_retry_after_given_as_a_date_is_read_as_the_seconds_until_it():
     assert waits and 3.0 <= waits[0] <= 5.0
 
 
-def test_a_retry_after_nobody_can_parse_is_read_as_nothing_said():
-    """A header that is neither a count nor a date is not a reason to lose the answer about
-    the rate limit, so the backoff is the one this file would have chosen anyway."""
+@pytest.mark.parametrize(
+    "said",
+    ["soon", "", "inf", "nan", "1e400", "-1", "1.5", "Wed, 99 Xxx 2099 07:28:00 GMT"],
+    ids=["prose", "empty", "inf", "nan", "overflow", "negative", "fractional", "not a date"],
+)
+def test_a_retry_after_nobody_can_parse_is_read_as_nothing_said(said):
+    """A header that is neither a count of seconds nor a date is not a reason to lose the
+    answer about the rate limit, so the backoff is the one this file would have chosen
+    anyway.
+
+    `inf` and `nan` are here because `float` reads them and the specification does not: a
+    count of seconds is digits. Read as a number, `inf` came back as a delay beyond the
+    budget and silently turned the retries off, from a header that said nothing at all."""
     waits = []
-    model(refusing(429, headers={"Retry-After": "soon"}, then=1), waits).complete("a question")
+    model(refusing(429, headers={"Retry-After": said}, then=1), waits).complete("a question")
 
     assert waits == [1.0]
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["0", "Thu, 01 Jan 1970 00:00:00 GMT"],
+    ids=["zero seconds", "a date already past"],
+)
+def test_an_endpoint_asking_for_no_wait_at_all_still_gets_the_backoff(said):
+    """What is asked for is a floor rather than an instruction. A `Retry-After` of zero —
+    or a date that a client whose clock runs fast reads as already past — would otherwise
+    remove the backoff and put three requests to a rate limited endpoint inside a
+    millisecond, which is worse for that endpoint than not retrying at all."""
+    waits = []
+    model(refusing(429, headers={"Retry-After": said}, then=2), waits).complete("a question")
+
+    assert waits == [1.0, 2.0]
+
+
+def test_a_retry_after_date_with_no_zone_is_still_read():
+    """`parsedate_to_datetime` returns a naive datetime for the `-0000` spelling, and
+    subtracting an aware one from it raises a TypeError — which is not a ModelError, so it
+    would leave this module and reach the person as a 500 rather than as a rate limit."""
+    when = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=5)
+    waits = []
+    naive = format_datetime(when).replace("+0000", "-0000")
+    model(refusing(429, headers={"Retry-After": naive}, then=1), waits).complete("a question")
+
+    assert waits and 3.0 <= waits[0] <= 5.0
 
 
 def test_a_wait_longer_than_the_budget_ends_the_question_rather_than_being_slept_through():
@@ -244,6 +283,21 @@ def test_a_wait_longer_than_the_budget_ends_the_question_rather_than_being_slept
 
     assert len(endpoint.sent) == 1
     assert waits == []
+
+
+def test_the_budget_is_a_request_and_the_number_is_chosen_for_a_question():
+    """The scope worth stating, because it is not the obvious one. `ask` sends up to its own
+    ATTEMPTS requests for one question and the first question of a process pays a probe in
+    front of them, so what a person can be made to wait is several of these, not one."""
+    waits = []
+    with pytest.raises(ModelError):
+        model(refusing(429, headers={"Retry-After": str(int(BACKOFF_BUDGET) + 1)}), waits).complete("q")
+    assert waits == [], "a wait past the budget was slept anyway"
+
+    inside = []
+    model(refusing(429, headers={"Retry-After": str(int(BACKOFF_BUDGET))}, then=1), inside).complete("q")
+    assert inside == [BACKOFF_BUDGET]
+    assert BACKOFF_BUDGET * ASK_ATTEMPTS <= 20.0, "one question can be made to wait too long"
 
 
 def test_an_answer_without_a_completion_is_a_model_error():

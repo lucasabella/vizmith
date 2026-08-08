@@ -17,7 +17,9 @@ import Boundary, { Broken } from "./Boundary";
  */
 describe("what is left when a render throws", () => {
   const drawn = (error: Error) =>
-    renderToStaticMarkup(<Broken what="chart" error={error} onRetry={() => {}} />);
+    renderToStaticMarkup(
+      <Broken what="chart" note="The spec is still in the editor." error={error} onRetry={() => {}} />,
+    );
 
   it("says the machine's own words, because the person who hit it can report them", () => {
     expect(drawn(new Error("Cannot read properties of undefined"))).toContain(
@@ -39,7 +41,7 @@ describe("what is left when a render throws", () => {
 
   it("draws its children while nothing has thrown", () => {
     const markup = renderToStaticMarkup(
-      <Boundary what="interface">
+      <Boundary what="interface" note="This starts the interface over.">
         <p>the chart</p>
       </Boundary>,
     );

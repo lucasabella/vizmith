@@ -386,8 +386,14 @@ export default function App() {
             <div className="plot" aria-busy={running}>
               {/* The inner one. What the renderer draws is the part most likely to meet a
                   value nobody planned for, and losing the chart is a much smaller loss
-                  than losing the wells, the editor and the dashboard being arranged. */}
-              <Boundary what="chart">
+                  than losing the wells, the editor and the dashboard being arranged —
+                  all of which are outside it and still there. The next outcome clears it,
+                  so one chart that could not be drawn does not refuse the ones after it. */}
+              <Boundary
+                what="chart"
+                note="The spec is still in the editor and the panels beside it are untouched."
+                resetOn={outcome}
+              >
                 <Canvas
                   outcome={outcome}
                   working={working}
@@ -398,14 +404,6 @@ export default function App() {
                 />
               </Boundary>
             </div>
-
-            {/* The one region that carries the outcome. Everything this interface says
-                appears by being swapped into the tree, which a screen reader does not
-                report, and the canvas is where the answer to a question lands. Polite and
-                one sentence: see `announced` for why it is not the whole refusal. */}
-            <p className="visually-hidden" role="status" aria-live="polite">
-              {announced(outcome, working)}
-            </p>
 
             {/* The page tabs that used to sit here were markup and did nothing. Several
                 charts at once is the Dashboards view now, and a control that looks like it
@@ -540,6 +538,21 @@ export default function App() {
           </aside>
         )}
       </div>
+
+      {/* The one region that carries the outcome. Everything this interface says appears by
+          being swapped into the tree, which a screen reader does not report, and the canvas
+          is where the answer to a question lands. Polite and one sentence: see `announced`
+          for why it is not the whole refusal.
+
+          Outside the view, not inside the Chart view's own markup, which is where it was
+          first put. A live region is only reported when its contents change while it is in
+          the document, so one that leaves with the view is one that announces nothing to
+          somebody who asked a question and went to look at a dashboard while it ran — and
+          on the readers that do announce an inserted region, it would say the same sentence
+          again on every return. Out here it is in the document for the life of the tab. */}
+      <p className="visually-hidden" role="status" aria-live="polite">
+        {announced(outcome, working)}
+      </p>
     </div>
   );
 }

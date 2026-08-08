@@ -130,3 +130,38 @@ def test_scans_are_timestamped_finer_than_a_day(fixture_db):
         "WHERE scanned_at::DATE = (SELECT min(scanned_at)::DATE FROM vizmith.shop.shipment_scans)"
     ).fetchone()[0]
     assert within_a_day > 1
+
+
+def test_two_catalogs_over_one_connection_do_not_read_each_others_rows(fixture_db):
+    """#166, which is a defect in this harness rather than in Vizmith.
+
+    A DuckDB connection is a single cursor, and the whole suite shares one. `FixtureCatalog`
+    held its lock on the instance, which serialises nothing the moment two of them exist
+    over that connection — and the interface fixture built one per request, so two tiles of
+    a dashboard fetching at once interleaved `execute` and `fetchall` on one cursor. One of
+    them came back with the other's rows or with none, which is a tile drawing "No rows to
+    draw" for a spec that returns thirty, about once in four runs of the browser suite.
+
+    A statement per thread against four catalogs, each asking a question with a different
+    answer, and every answer has to be its own. Serialised, this is deterministic; it fails
+    within a few rounds without."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from conftest import FixtureCatalog
+
+    asking = {
+        "orders": "SELECT count(*) FROM vizmith.shop.orders",
+        "customers": "SELECT count(*) FROM vizmith.shop.customers",
+        "products": "SELECT count(*) FROM vizmith.shop.products",
+        "returns": "SELECT count(*) FROM vizmith.shop.returns",
+    }
+    catalogs = {name: FixtureCatalog(fixture_db) for name in asking}
+    alone = {name: catalogs[name].run(sql) for name, sql in asking.items()}
+    assert len({rows[0][0] for rows in alone.values()}) == len(asking), "the questions share an answer"
+
+    rounds = [name for _ in range(30) for name in asking]
+    with ThreadPoolExecutor(max_workers=len(asking)) as pool:
+        together = list(pool.map(lambda name: (name, catalogs[name].run(asking[name])), rounds))
+
+    wrong = [(name, rows) for name, rows in together if rows != alone[name]]
+    assert wrong == [], "a statement came back with another statement's rows"

@@ -414,7 +414,13 @@ def test_a_burst_that_is_still_reading_keeps_what_it_read_at_the_start_of_it(cat
 def test_a_burst_ends_when_the_reading_does(catalog):
     """What keeps a burst from being the cache the profile file exists to refuse. It runs
     while the gaps between reads are shorter than the hold, and one gap longer than that
-    ends it, whatever came before."""
+    ends it, whatever came before.
+
+    A guard rather than a discriminator, and worth saying so: a burst can only lapse once
+    the newest read in it is older than the hold, so every miss here is a miss the window
+    this replaced would also have had. What it holds is that a burst does end — that reading
+    steadily cannot keep one open forever, which is what the ceiling below covers from the
+    other side."""
     source, clock = held(catalog)
     source.modified("vizmith.shop.orders")
 
@@ -424,6 +430,66 @@ def test_a_burst_ends_when_the_reading_does(catalog):
     catalog.modified_times["orders"] = "2"
 
     assert source.modified("vizmith.shop.orders") == "2", "a burst outlived the reading"
+
+
+def test_a_slow_read_is_dated_from_when_it_was_asked_for(catalog):
+    """A `DESCRIBE DETAIL` queued on a cold warehouse takes tens of seconds, and what comes
+    back describes the table as it was when the statement ran. Dating the answer from the
+    reply would buy it the round trip in extra life on top of the ceiling, and would let a
+    burst lapse underneath a read that began inside it — which is the case #103 names.
+
+    The clock moves during the source call here, which is what a slow statement is."""
+    source, clock = held(catalog, hold=30.0, ceiling=40.0)
+    slow = catalog.modified
+
+    def crawling(name):
+        answer = slow(name)
+        clock.now += 30.0
+        return answer
+
+    catalog.modified = crawling
+    source.modified("vizmith.shop.orders")
+    catalog.modified = slow
+
+    # Asked for at 0 and answered at 30, against a ceiling of 40 and a hold of 30. At 45 the
+    # hold is satisfied — the last answer was 15 seconds ago — so the only thing that can
+    # refuse this is the ceiling, and it can only refuse it if the burst is dated from the
+    # question. Dated from the reply the burst is 15 seconds old here and the answer stands.
+    clock.now += 15.0
+    catalog.freshness_checks.clear()
+    catalog.modified_times["orders"] = "2"
+
+    assert source.modified("vizmith.shop.orders") == "2"
+    assert catalog.freshness_checks == ["vizmith.shop.orders"], "the answer outlived the ceiling"
+
+
+def test_a_read_that_started_inside_a_burst_joins_it_however_long_it_takes(catalog):
+    """The other half of the same anchoring, and #103's own words for what it wants: a read
+    that starts inside a window inherits it. Joined on the reply, a read that began while
+    the burst was running and returned after the gap had reached the hold would open a new
+    burst and throw away everything the request before it had paid for."""
+    source, clock = held(catalog, hold=10.0)
+    tables = catalog.tables()
+    for name in tables[:3]:
+        source.modified(name)
+
+    # A read that starts at 8, inside the window, and answers at 20, outside it.
+    clock.now += 8.0
+    answered = catalog.modified
+
+    def crawling(name):
+        answer = answered(name)
+        clock.now += 12.0
+        return answer
+
+    catalog.modified = crawling
+    source.modified(tables[3])
+    catalog.modified = answered
+    catalog.freshness_checks.clear()
+
+    for name in tables[:3]:
+        source.modified(name)
+    assert catalog.freshness_checks == [], "a slow read ended the burst it started inside"
 
 
 def test_a_burst_cannot_hold_an_answer_past_the_ceiling(catalog):

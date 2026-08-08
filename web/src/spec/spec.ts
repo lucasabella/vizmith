@@ -56,6 +56,13 @@ export const asDraft = (spec: Spec): Draft => spec as unknown as Draft;
 const anObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** A list of records, or absent. What is refused is a key that is present and is something
+ * else, because that is what a panel iterates and reads fields off. */
+const aListOfRecords = (value: unknown): value is Record<string, unknown>[] | undefined =>
+  value === undefined || (Array.isArray(value) && value.every(anObject));
+
+const aString = (value: unknown): boolean => typeof value === "string";
+
 /**
  * The text in `{ } JSON`, as the draft both views read, or as nothing.
  *
@@ -66,14 +73,20 @@ const anObject = (value: unknown): value is Record<string, unknown> =>
  * answering the second one here does not put a second validator in the browser.
  *
  * It matters because editing JSON by hand means passing through states that are not a
- * spec, and `{"a":1}` is one of them: it parses, it is an object, and it has no `chart`.
- * Every consumer reads `draft.chart.encoding` or `draft.query.limit_by` without asking,
- * which for that value is a `TypeError` thrown during render — and a throw during render
- * unmounts the tree in React 19, so the whole interface goes rather than the panel.
+ * spec. Every consumer reads `draft.chart.encoding`, `draft.query.filters` and the fields
+ * of what those hold, without asking, and a `TypeError` thrown during render unmounts the
+ * tree in React 19 — so the whole interface goes rather than the panel.
  *
- * So the parts a consumer dereferences have to be there, and their contents are the
- * validator's business. What it costs is that a spec being typed goes quiet in the wells
- * sooner, which is what a half typed spec should do to them.
+ * The line this draws is what the panels walk, which is more than the top two keys. A
+ * hand edit that deletes one line out of a committed fixture — `"column"` from a filter,
+ * say — leaves JSON that parses, has a chart, and throws on `filter.column.split`. So the
+ * lists have to be lists, and the fields a panel writes into the markup have to be text
+ * where they are there at all.
+ *
+ * What it stops short of is contents. A mark nothing recognises, a filter with no `op`, a
+ * query naming a table that does not exist: all of those reach the wells and then the
+ * validator, which refuses them by name. What it costs is that a spec being typed goes
+ * quiet in the wells sooner, which is what a half typed spec should do to them.
  */
 export const draftIn = (text: string): Draft | null => {
   let parsed: unknown;
@@ -83,9 +96,23 @@ export const draftIn = (text: string): Draft | null => {
     return null;
   }
   if (!anObject(parsed)) return null;
-  return anObject(parsed.query) && anObject(parsed.chart) && anObject(parsed.chart.encoding)
-    ? (parsed as unknown as Draft)
-    : null;
+  const { query, chart } = parsed;
+  if (!anObject(query) || !anObject(chart) || !anObject(chart.encoding)) return null;
+
+  const lists = ["select", "group_by", "aggregates", "filters", "order_by"];
+  if (!lists.every((key) => aListOfRecords(query[key]))) return null;
+
+  const items = [...((query.select ?? []) as never[]), ...((query.group_by ?? []) as never[])];
+  const filters = (query.filters ?? []) as Record<string, unknown>[];
+  return (
+    // A select or group_by item is written into a well by its alias where it has one and
+    // by the last segment of its column otherwise, so one of the two has to be text.
+    items.every((item: Record<string, unknown>) => aString(item.column) || aString(item.as)) &&
+    // A filter chip splits the column and rewrites the operator, so both of those do.
+    filters.every((filter) => aString(filter.column) && aString(filter.op))
+      ? (parsed as unknown as Draft)
+      : null
+  );
 };
 
 export const WELLS = ["Axis", "Legend", "Values", "Top N", "Filters"] as const;
