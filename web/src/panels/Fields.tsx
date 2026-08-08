@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { ColumnProfile, TableProfile } from "../api";
+import type { ColumnProfile } from "../api";
 import type { Field } from "../spec/spec";
+import type { ColumnFields, TableFields } from "./fields";
 
 /**
  * The tables, their columns, and what the profile says about a column.
@@ -15,13 +16,21 @@ import type { Field } from "../spec/spec";
  *
  * A column whose type the catalog reports as unsupported is not in the profile and is
  * therefore not in this tree. That is deliberate: a profile describes what can be charted.
+ *
+ * It is filled twice. The shape arrives first and costs no statement, so a table name and a
+ * column type are on screen in the time a metadata read takes rather than in the time
+ * profiling a schema takes; the profiles land behind it and fill in the figures. What that
+ * asks of this file is that every row draws from the half that has arrived and says which
+ * half that is — a count that is not read yet shows nothing rather than a zero, and a
+ * column that is not profiled yet says so rather than showing an empty sample list, because
+ * a blank where a vocabulary goes reads as a column with no values.
  */
 export default function Fields({
   tables,
   failure,
   onDrag,
 }: {
-  tables: TableProfile[] | null;
+  tables: TableFields[] | null;
   failure: string | null;
   onDrag: (field: Field | null) => void;
 }) {
@@ -38,10 +47,7 @@ export default function Fields({
   if (tables === null) {
     return (
       <div className="fields">
-        <p className="fields__note">
-          Reading the schema. The first read profiles every column, which is the same work a
-          first question does.
-        </p>
+        <p className="fields__note">Reading the schema.</p>
       </div>
     );
   }
@@ -77,7 +83,7 @@ function TableNode({
   onToggle,
   onDrag,
 }: {
-  table: TableProfile;
+  table: TableFields;
   open: boolean;
   onToggle: () => void;
   onDrag: (field: Field | null) => void;
@@ -89,7 +95,10 @@ function TableNode({
           {open ? "▾" : "▸"}
         </span>
         <span className="tree__name">{last(table.table)}</span>
-        <span className="tree__count">{count(table.row_count)}</span>
+        {/* The count comes from a pass over the table, so it arrives with the profile and
+            not with the shape. Nothing is better than a zero: a zero is a claim about the
+            data, and this is a claim about what has been read. */}
+        <span className="tree__count">{table.row_count === null ? "" : count(table.row_count)}</span>
       </button>
       {open
         ? table.columns.map((column) => (
@@ -106,7 +115,7 @@ function ColumnNode({
   onDrag,
 }: {
   table: string;
-  column: ColumnProfile;
+  column: ColumnFields;
   onDrag: (field: Field | null) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -139,8 +148,25 @@ function ColumnNode({
         <span className="tree__name">{column.name}</span>
         <span className="tree__type">{column.type}</span>
       </div>
-      {open ? <Profile column={column} /> : null}
+      {open ? column.profile === null ? <Unread /> : <Profile column={column.profile} /> : null}
     </div>
+  );
+}
+
+/**
+ * A column the shape knows and the profiles have not reached yet.
+ *
+ * Not an empty profile, which is what drawing `Profile` against absent figures would be.
+ * Every one of them — no nulls, no distinct values, no vocabulary — is the strongest claim
+ * this panel can make about a column, and this is the panel whose whole job is to prove
+ * what the model was allowed to see. "Not read yet" and "read, and there is nothing" are
+ * different sentences and only one of them is true here.
+ */
+export function Unread() {
+  return (
+    <p className="profile__none profile__none--waiting">
+      The figures for this column have not been read yet.
+    </p>
   );
 }
 

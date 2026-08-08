@@ -104,6 +104,84 @@ def test_a_get_answers_with_the_profile_of_every_table_in_the_configured_schema(
     assert all(table["columns"] and table["row_count"] for table in tables)
 
 
+def test_the_shape_answers_with_every_table_and_column_and_costs_no_statement(client, catalog):
+    """What the Fields panel is drawn from before anything has been profiled.
+
+    A table row is a name, a column row is a name and a type, and dragging one into a well
+    reads the type and nothing else — so the tree a person interacts with is `describe`,
+    which is a metadata read. The whole point is the last assertion: nothing billed."""
+    catalog.statements.clear()
+    response = client.get("/api/shape")
+
+    assert response.status_code == 200
+    tables = response.json()["tables"]
+    assert [table["table"] for table in tables] == catalog.tables()
+    assert all(table["columns"] for table in tables)
+    assert catalog.statements == [], "the shape of the schema cost a billed statement"
+
+
+def test_the_shape_carries_no_figure_a_profile_would_have(client):
+    """A name and a type per column, and nothing else. Not a narrower profile: a row count,
+    a null rate or a sample list here would be a second path to the figures the panel says
+    came from the profiler, and one of the two would eventually be wrong."""
+    tables = client.get("/api/shape").json()["tables"]
+
+    for table in tables:
+        assert set(table) == {"table", "columns"}
+        for column in table["columns"]:
+            assert set(column) == {"name", "type"}
+
+
+def test_the_shape_lists_the_columns_the_profiles_will_list(client, catalog):
+    """The panel draws this and then replaces it with the profiles, so a column that
+    appeared here and vanished there would be the tree losing a row as it filled in. The
+    unsupported types are the ones that differ, and `shipment_scans` has one."""
+    shape = {table["table"]: table for table in client.get("/api/shape").json()["tables"]}
+    profiled = {table["table"]: table for table in client.get("/api/tables").json()["tables"]}
+
+    assert set(shape) == set(profiled)
+    for name, table in shape.items():
+        listed = [column["name"] for column in table["columns"]]
+        assert listed == [column["name"] for column in profiled[name]["columns"]], name
+        described = catalog.describe(name)
+        assert len(listed) <= len(described.columns), "the shape invented a column"
+
+
+def test_the_shape_is_answered_before_anything_is_profiled(client, catalog):
+    """The wait this removes. `/api/tables` answers only once every table is profiled, so a
+    schema nobody has profiled put its whole cold read in front of the first table name on
+    screen. This is what the panel asks for first, and it owes the profiles nothing."""
+    tables = client.get("/api/shape").json()["tables"]
+
+    assert tables
+    assert catalog.statements == [], "the shape waited for a profile"
+
+
+def test_a_source_that_refuses_to_describe_is_reported_rather_than_raised(catalog):
+    """The same refusal shape every other failure after validation uses, so the interface
+    keeps one way to show one."""
+
+    class Refusing:
+        dialect = catalog.dialect
+        scope = catalog.scope
+
+        def tables(self):
+            return catalog.tables()
+
+        def describe(self, name):
+            raise RuntimeError("the metastore said no")
+
+    app.dependency_overrides[source] = lambda: Refusing()
+    try:
+        response = TestClient(app, base_url="http://127.0.0.1:8000").get("/api/shape")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 502
+    assert response.json()["spoke"] == "source"
+    assert "the metastore said no" in response.json()["errors"][0]
+
+
 def test_a_get_returns_the_profile_the_prompt_path_was_given(catalog):
     """The panel's claim is that these are the figures the model saw, so the test is that
     the endpoint's answer is in the prompt, not that it looks like a plausible profile."""

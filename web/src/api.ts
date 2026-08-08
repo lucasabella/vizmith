@@ -23,6 +23,11 @@ export type ColumnProfile = {
 
 export type TableProfile = { table: string; row_count: number; columns: ColumnProfile[] };
 
+/** A table as `describe` alone knows it: a name, and its columns with their types. Not a
+ * narrower profile — there is no figure in here that a profile would have, because a figure
+ * costs a pass over the table and this endpoint costs none. */
+export type TableShape = { table: string; columns: { name: string; type: string }[] };
+
 export type Relationship = {
   left_table: string;
   left_column: string;
@@ -55,6 +60,12 @@ async function json<T>(url: string, options?: RequestInit): Promise<T> {
  * and asking for them back paid a second freshness check per table, each of which is a
  * statement the warehouse bills for. */
 export const getTables = (): Promise<{ tables: TableProfile[] }> => json("/api/tables");
+
+/** The schema's shape, which is what the panel is drawn from first. It costs no statement,
+ * so it answers in the time a metadata read takes rather than in the time profiling a
+ * schema takes — which on a schema nobody has profiled is the difference between a table
+ * name on screen and 25 seconds of spinner. `getTables` follows and replaces it. */
+export const getShape = (): Promise<{ tables: TableShape[] }> => json("/api/shape");
 
 /** One table, for a caller that wants one. The panel is filled by the request above. */
 export const getProfile = (name: string): Promise<TableProfile> =>
