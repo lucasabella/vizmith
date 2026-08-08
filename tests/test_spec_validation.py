@@ -64,6 +64,9 @@ EXPECTED_ERROR = {
     "figure_with_colour.json": (
         "chart.encoding: 'color' needs an 'x', because one figure has nothing to colour"
     ),
+    "having_names_a_measure_the_query_lacks.json": (
+        "query.having: 'profit' is not one of this query's aggregate aliases"
+    ),
     "relative_value_with_a_key_it_does_not_read.json": (
         "query.filters: a relative value of 'now' takes neither, so 'unit' does nothing "
         "here and the filter does not mean what it says"

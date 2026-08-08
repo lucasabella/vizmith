@@ -182,7 +182,7 @@ class _Builder:
         select = ", ".join(
             f"{expression} AS {self._quoted(name)}" for name, expression in zip(names, self._expressions())
         )
-        body = f"SELECT {select} FROM {self._from()}{self._where()}{self._group_by()}"
+        body = f"SELECT {select} FROM {self._from()}{self._where()}{self._group_by()}{self._having()}"
 
         if limit_by:
             ranked = self._ranked(limit_by)
@@ -213,6 +213,41 @@ class _Builder:
     def _aggregate(self, aggregate: dict) -> str:
         column = self._column(aggregate["column"]) if "column" in aggregate else "*"
         return AGGREGATES[aggregate["fn"]].format(column=column)
+
+    def _having(self) -> str:
+        """Conditions on the measures, after the rows are grouped.
+
+        The aggregate's expression is repeated rather than its alias referred to, because
+        the dialects disagree about whether an output alias is in scope in HAVING —
+        PostgreSQL says no, Spark and BigQuery say yes — and a grammar that compiled
+        somewhere and not elsewhere is not one this builder should emit.
+
+        It applies inside the query's own GROUP BY, which is also where it applies when
+        `limit_by` wraps that query in a `base` term. That is the decision, and it is the
+        one that keeps `having` meaning one thing: it compares the measures this query
+        produces, at the grouping this query declares. So on a chart with a colour channel
+        it tests each drawn mark rather than each series, because a mark is what a row of
+        this query is. Testing a series as a whole is a different question — it is about
+        the ranked total — and the grammar cannot ask it yet.
+        """
+        conditions = []
+        for condition in self._query.get("having", []):
+            alias = condition["aggregate"]
+            # The validator refuses an alias that is not the query's own, and the builder
+            # does not take that on trust: what it compiles is never an assumption nobody
+            # checked. The same rule `_ranked` keeps.
+            aggregate = next(
+                (a for a in self._query.get("aggregates", []) if a["as"] == alias), None
+            )
+            if aggregate is None:
+                raise ValueError(
+                    f"query.having: '{alias}' is not one of the query's aggregate aliases, "
+                    "and a condition on a measure needs a measure to be about"
+                )
+            conditions.append(
+                f"{self._aggregate(aggregate)} {condition['op']} {self._bind(condition['value'])}"
+            )
+        return f" HAVING {' AND '.join(conditions)}" if conditions else ""
 
     def _ranked(self, limit_by: dict) -> str:
         """The top N values of the outer dimension, ranked over the grouped rows. A plain

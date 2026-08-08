@@ -1,6 +1,7 @@
 import copy
 import datetime as dt
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -375,3 +376,91 @@ def test_a_relative_filter_runs_against_the_source_and_narrows_the_rows(catalog)
 
     assert inside, "a window containing the fixture data returned nothing"
     assert after == [], "a window after the fixture data returned rows"
+
+
+def having(spec: dict, *conditions: dict) -> dict:
+    spec["query"]["having"] = list(conditions)
+    return spec
+
+
+def test_a_condition_on_a_measure_compiles_to_having_after_the_group_by(catalog):
+    """The gap #110 names. Every filter compiled to WHERE, so a condition was applied before
+    aggregation and "countries with revenue over a million" could not be written at all —
+    not refused with a reason, absent from the grammar."""
+    spec = having(
+        load(REVENUE_BY_COUNTRY), {"aggregate": "revenue", "op": ">", "value": 1000000}
+    )
+
+    sql, parameters = build(spec, catalog)
+
+    assert " HAVING " in sql
+    assert sql.index("GROUP BY") < sql.index("HAVING")
+    assert 1000000 in parameters.values(), "the threshold was written into the statement"
+    assert "1000000" not in sql
+
+
+def test_a_condition_on_a_measure_repeats_the_aggregate_rather_than_its_alias(catalog):
+    """The dialects disagree about whether an output alias is in scope in HAVING —
+    PostgreSQL says no, Spark and BigQuery say yes — so the expression is repeated and the
+    grammar compiles the same everywhere."""
+    spec = having(load(REVENUE_BY_COUNTRY), {"aggregate": "revenue", "op": ">=", "value": 1})
+
+    sql, _ = build(spec, catalog)
+
+    # The clause itself, not everything after it: ORDER BY refers to the alias quite
+    # legitimately, because by then the select list has been produced.
+    clause = re.split(r" (?:ORDER BY|LIMIT)|\)", sql[sql.index("HAVING") :])[0]
+    assert "sum(" in clause
+    assert '"revenue"' not in clause, "HAVING referred to an output alias"
+
+
+def test_several_conditions_on_measures_are_all_required(catalog):
+    spec = having(
+        load(REVENUE_BY_COUNTRY),
+        {"aggregate": "revenue", "op": ">", "value": 10},
+        {"aggregate": "revenue", "op": "<", "value": 1000000},
+    )
+
+    sql, _ = build(spec, catalog)
+
+    assert sql[sql.index("HAVING") :].count(" AND ") == 1
+
+
+def test_a_condition_on_a_measure_applies_at_the_grouping_the_query_declares(catalog):
+    """The decision #110 says has to be made. `limit_by` wraps the query in a `base` term,
+    and whether the condition applies inside it or to the ranked result changes which series
+    survive. It applies inside, which is what keeps `having` meaning one thing: it compares
+    the measures this query produces, at the grouping this query declares."""
+    spec = having(
+        load(MULTI_SERIES), {"aggregate": "revenue", "op": ">", "value": 100}
+    )
+
+    sql, _ = build(spec, catalog)
+
+    assert "WITH base AS (" in sql, "the fixture no longer ranks, so this proves nothing"
+    assert sql.index("HAVING") < sql.index("), ranked AS ("), "the condition escaped base"
+
+
+def test_a_condition_on_a_measure_narrows_the_rows_the_source_returns(catalog):
+    """Driven rather than asserted on the SQL, because a HAVING the source will not take is
+    one this compiles happily and the warehouse refuses."""
+    spec = load(REVENUE_BY_COUNTRY)
+    everything = execute(spec, catalog)
+    biggest = max(row["revenue"] for row in everything)
+
+    narrowed = execute(having(load(REVENUE_BY_COUNTRY), {"aggregate": "revenue", "op": ">=", "value": biggest}), catalog)
+
+    assert len(everything) > 1
+    assert len(narrowed) == 1, "the condition on the measure did not narrow the rows"
+    assert narrowed[0]["revenue"] == biggest
+
+
+def test_a_measure_the_query_does_not_produce_is_refused_by_the_builder_too(catalog):
+    """The validator refuses it first. The builder does not take that on trust, which is the
+    rule `_ranked` already keeps: what it compiles into SQL is never an assumption nobody
+    checked."""
+    spec = load(REVENUE_BY_COUNTRY)
+    spec["query"]["having"] = [{"aggregate": "profit", "op": ">", "value": 1}]
+
+    with pytest.raises(ValueError, match="profit"):
+        build(spec, catalog)

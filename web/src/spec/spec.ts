@@ -24,6 +24,10 @@ export type Join = {
 export type Item = { column: string; truncate?: Unit; as?: string };
 export type Aggregate = { fn: Fn; column?: string; as: string };
 export type Filter = { column: string; op: string; value?: unknown };
+/** A condition on a measure, which names an aggregate alias rather than a column because
+ * what it compares is the aggregated value. `filters` is the other one and applies before
+ * the rows are grouped. */
+export type Having = { aggregate: string; op: string; value: string | number };
 
 export type Query = {
   from: string;
@@ -32,6 +36,7 @@ export type Query = {
   select?: Item[];
   group_by?: Item[];
   aggregates?: Aggregate[];
+  having?: Having[];
   order_by?: { column: string; direction?: "asc" | "desc" }[];
   limit_by?: { column: string; by: string; limit: number; direction?: "asc" | "desc" };
   limit: number;
@@ -99,7 +104,7 @@ export const draftIn = (text: string): Draft | null => {
   const { query, chart } = parsed;
   if (!anObject(query) || !anObject(chart) || !anObject(chart.encoding)) return null;
 
-  const lists = ["select", "group_by", "aggregates", "filters", "order_by"];
+  const lists = ["select", "group_by", "aggregates", "having", "filters", "order_by"];
   if (!lists.every((key) => aListOfRecords(query[key]))) return null;
 
   const items = [...((query.select ?? []) as never[]), ...((query.group_by ?? []) as never[])];
