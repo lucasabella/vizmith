@@ -204,7 +204,7 @@ def test_a_get_returns_the_profile_the_prompt_path_was_given(catalog):
     assert f"{profile.table}, {profile.row_count} rows" in asked
     status = next(column for column in profile.columns if column.name == "status")
     assert f"{status.distinct_count} distinct" in asked
-    assert "values: " + ", ".join(status.samples) in asked
+    assert "values: " + ", ".join(f'"{sample}"' for sample in status.samples) in asked
 
 
 def test_a_column_above_the_sample_threshold_comes_back_with_no_samples(client, fixture_db):
