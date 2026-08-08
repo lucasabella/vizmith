@@ -31,3 +31,7 @@ htmlcov/
 coverage/
 
 CLAUDE.md
+
+# Written by CI from uv.lock on the way in, so the install can be hash checked. The lock is
+# what is committed; this is the export of it and would be one more thing to keep in step.
+/requirements.txt

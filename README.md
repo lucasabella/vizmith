@@ -108,6 +108,12 @@ cp .env.example .env      # and fill it in
 .venv/bin/vizmith serve
 ```
 
+That resolves the dependency floors in `pyproject.toml` to whatever is newest today, which
+is usually what you want while working. `uv.lock` records the set CI installs and the set
+these numbers were measured against, so `uv sync --extra dev` is the way to reproduce a
+result rather than approximate it. A change that moves a dependency has to move the lock
+with it, and CI refuses the two when they disagree.
+
 An editable install serves `web/dist`, so build the frontend once with `npm run build` in `web/`, or run Vite alongside it:
 
 ```
