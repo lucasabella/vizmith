@@ -1,7 +1,8 @@
 """Several specs saved together, arranged, and opened again.
 
-A dashboard is a name and an ordered list of tiles, and a tile is a spec plus how wide it
-sits on the grid. Nothing else is in one. There is no stored result set, because rows
+A dashboard is a name, an ordered list of tiles, and the filters that apply across all of
+them; a tile is a spec plus how wide it sits on the grid. Nothing else is in one — in
+particular there is no stored result set, because rows
 belong to the source and a stored copy of them is a number that stops being true without
 saying so, and there is no stored option, because what a spec draws is the renderer's to
 decide every time it draws it. A dashboard is therefore worth exactly what the specs in it
@@ -25,7 +26,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from vizmith.spec import validate_spec
+from vizmith.spec import validate_filters, validate_spec
 from vizmith.state import stored, write
 
 # The grid a dashboard is arranged on. A tile is one column or the whole width, which is
@@ -67,18 +68,30 @@ class Tile:
 
 @dataclass(frozen=True)
 class Dashboard:
-    """A name and the tiles under it, in the order they are drawn in. The order is the
-    list's own, because an arrangement that is a set of positions can disagree with itself
-    and a list cannot."""
+    """A name, the tiles under it in the order they are drawn in, and the filters that
+    apply across all of them. The order is the list's own, because an arrangement that is a
+    set of positions can disagree with itself and a list cannot.
+
+    `filters` is the one thing here that is not per tile. It is stored beside the tiles
+    rather than written into their specs: a tile holds the question somebody built, and a
+    dashboard filter is a narrowing of the whole page that has to be removable without
+    leaving a trace in a spec nobody edited. Applying it is the interface's job, at the
+    moment a tile runs, and the narrowed spec goes through the same validator every other
+    spec does."""
 
     name: str
     tiles: tuple[Tile, ...]
+    filters: tuple[dict, ...] = ()
 
     def as_dict(self) -> dict:
-        return {"name": self.name, "tiles": [tile.as_dict() for tile in self.tiles]}
+        return {
+            "name": self.name,
+            "tiles": [tile.as_dict() for tile in self.tiles],
+            "filters": list(self.filters),
+        }
 
 
-def review(name: str, tiles: Sequence[object]) -> list[str]:
+def review(name: str, tiles: Sequence[object], filters: object = ()) -> list[str]:
     """Everything wrong with a dashboard about to be stored, as sentences. Empty means it
     can be saved.
 
@@ -97,6 +110,9 @@ def review(name: str, tiles: Sequence[object]) -> list[str]:
         )
     for position, tile in enumerate(tiles, start=1):
         errors.extend(f"tile {position}: {error}" for error in _tile_errors(tile))
+    # A tuple where this was called from code and a list where it came off the wire. The
+    # schema judges a JSON array, and a tuple is not one.
+    errors.extend(validate_filters(list(filters) if isinstance(filters, list | tuple) else filters))
     return errors
 
 
@@ -166,16 +182,20 @@ class Dashboards:
         return Dashboard(
             name=name,
             tiles=tuple(Tile(spec=tile["spec"], width=tile.get("width", 1)) for tile in stored["tiles"]),
+            # Absent in a file written before a dashboard could hold one, which is the
+            # ordinary case and not a broken file: no filter across the tiles is what
+            # every dashboard saved until now meant.
+            filters=tuple(stored.get("filters", [])),
         )
 
-    def save(self, name: str, tiles: Sequence[object]) -> Dashboard:
+    def save(self, name: str, tiles: Sequence[object], filters: Sequence[object] = ()) -> Dashboard:
         """Store a dashboard under a name, replacing whatever was there.
 
         The review runs here rather than in the caller, so that there is no way to reach
         the file with a spec nothing judged. A save under an existing name replaces it,
         because that is what saving the thing on screen means, and a name that has to
         survive is one a person types differently."""
-        errors = review(name, tiles)
+        errors = review(name, tiles, filters)
         if errors:
             raise Refused(errors)
         saved = Dashboard(
@@ -184,9 +204,13 @@ class Dashboards:
                 Tile(spec=tile["spec"], width=tile.get("width", 1))  # type: ignore[union-attr]
                 for tile in tiles
             ),
+            filters=tuple(filters),  # type: ignore[arg-type]
         )
         with self._lock:
-            self._stored[name] = {"tiles": [tile.as_dict() for tile in saved.tiles]}
+            self._stored[name] = {
+                "tiles": [tile.as_dict() for tile in saved.tiles],
+                "filters": list(saved.filters),
+            }
             self._write()
         return saved
 

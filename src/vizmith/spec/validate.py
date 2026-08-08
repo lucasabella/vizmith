@@ -23,6 +23,26 @@ def _validator() -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
+@lru_cache(maxsize=1)
+def _filters_validator() -> Draft202012Validator:
+    """The `filters` list on its own, judged by the grammar's own definition of one.
+
+    A dashboard holds a list of filters that is not part of any spec: it is applied to each
+    tile's query when the tile runs, so there is no query to attach it to and no `from` to
+    resolve its columns against. Built out of the same `$defs`, so a filter the grammar
+    stops allowing inside a query stops being storable on a dashboard on the same day.
+    """
+    schema = json.loads(SCHEMA_PATH.read_text())
+    return Draft202012Validator(
+        {
+            "$defs": schema["$defs"],
+            "type": "array",
+            "maxItems": schema["$defs"]["query"]["properties"]["filters"]["maxItems"],
+            "items": {"$ref": "#/$defs/filter"},
+        }
+    )
+
+
 def validate_spec(spec: object) -> list[str]:
     """Return a list of human readable errors. Empty means the spec is valid."""
     errors = _schema_errors(spec)
@@ -31,9 +51,37 @@ def validate_spec(spec: object) -> list[str]:
     return _semantic_errors(spec)
 
 
+def validate_filters(filters: object) -> list[str]:
+    """Everything wrong with a list of filters held apart from a query, as sentences.
+
+    Two rules on top of the shape. A column here has to name its table, because the only
+    thing that can be done with one of these is to match it against a tile's query — an
+    unqualified `status` names a table in the tile it lands in and a different one in the
+    next tile, and matching nothing would be the quietest of the possible wrongs. And the
+    condition checks a spec's filters get are run here too: `is_null` with a value, and a
+    relative value carrying a key its token does not read, are the same mistakes wherever
+    they are written down.
+    """
+    errors = _errors_from(_filters_validator(), filters)
+    if errors or not isinstance(filters, list):
+        return errors
+    for condition in conditions({"filters": filters}):
+        if "." not in condition["column"]:
+            errors.append(
+                f"filters: '{condition['column']}' names no table. A filter held by a "
+                "dashboard is matched against the tables each tile reads, so it names its "
+                "own table rather than borrowing whichever one the tile happens to read"
+            )
+    return errors + _condition_errors(filters, "filters")
+
+
 def _schema_errors(spec: object) -> list[str]:
+    return _errors_from(_validator(), spec)
+
+
+def _errors_from(validator: Draft202012Validator, value: object) -> list[str]:
     out = []
-    for error in sorted(_validator().iter_errors(spec), key=lambda e: list(e.path)):
+    for error in sorted(validator.iter_errors(value), key=lambda e: list(e.path)):
         location = "/".join(str(p) for p in error.path) or "<root>"
         out.append(f"{location}: {error.message}")
     return out
@@ -64,13 +112,7 @@ def _semantic_errors(spec: dict) -> list[str]:
 
     errors += _computed_errors(query)
 
-    for filter_ in conditions(query):
-        if filter_["op"] in ("is_null", "is_not_null") and "value" in filter_:
-            errors.append(
-                f"query.filters: '{filter_['op']}' takes no value, but one was given "
-                f"for '{filter_['column']}'"
-            )
-        errors += _relative_errors(filter_)
+    errors += _condition_errors(query.get("filters", []), "query.filters")
 
     select = query.get("select", [])
     group_by = query.get("group_by", [])
@@ -224,7 +266,24 @@ def _computed_errors(query: dict) -> list[str]:
     return errors
 
 
-def _relative_errors(filter_: dict) -> list[str]:
+def _condition_errors(filters: list, where: str) -> list[str]:
+    """What is wrong with the conditions themselves, wherever they were written down.
+
+    `where` is the path they are reported under, because the same list is a query's
+    `filters` and a dashboard's, and a message that named the wrong one would send somebody
+    to look in a spec for a filter that is on the dashboard around it."""
+    errors: list[str] = []
+    for condition in conditions({"filters": filters}):
+        if condition["op"] in ("is_null", "is_not_null") and "value" in condition:
+            errors.append(
+                f"{where}: '{condition['op']}' takes no value, but one was given "
+                f"for '{condition['column']}'"
+            )
+        errors += _relative_errors(condition, where)
+    return errors
+
+
+def _relative_errors(filter_: dict, where: str = "query.filters") -> list[str]:
     """What the schema cannot say about a relative value without answering in the language
     of `if` and `then`.
 
@@ -247,7 +306,7 @@ def _relative_errors(filter_: dict) -> list[str]:
     named = " and ".join(repr(key) for key in spare)
     return [
         (
-            f"query.filters: a relative value of '{token}' {wants}, so {named} "
+            f"{where}: a relative value of '{token}' {wants}, so {named} "
             f"{'do' if len(spare) > 1 else 'does'} nothing here and the filter does not "
             "mean what it says"
         )

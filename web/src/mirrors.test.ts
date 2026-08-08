@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SERIES } from "./chart/option";
-import { COLUMNS, NAME_LIMIT, TILE_LIMIT, nameProblem } from "./dashboard/dashboard";
+import { COLUMNS, FILTER_LIMIT, NAME_LIMIT, TILE_LIMIT, nameProblem } from "./dashboard/dashboard";
 import {
   CHANNEL_TYPES,
   COMPARISONS,
@@ -191,6 +191,15 @@ describe("the dashboard constants", () => {
     expect(value("COLUMNS")).toBe(COLUMNS);
     expect(value("TILE_LIMIT")).toBe(TILE_LIMIT);
     expect(value("NAME_LIMIT")).toBe(NAME_LIMIT);
+  });
+
+  /** The cap on a dashboard's filters is the schema's cap on a query's, because they are
+   * the same list: the store judges one with the other's `$defs`, and a bar that offered a
+   * seventeenth would be offering one the save refuses. */
+  it("hold the filter cap the grammar holds", () => {
+    const grammar = JSON.parse(read("../../src/vizmith/spec/v1/spec.schema.json"));
+
+    expect(grammar.$defs.query.properties.filters.maxItems).toBe(FILTER_LIMIT);
   });
 });
 

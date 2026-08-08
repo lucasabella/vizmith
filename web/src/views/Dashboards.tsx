@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { deleteDashboard, execute, getDashboard, getDashboards, saveDashboard } from "../api";
 import Chart from "../chart/Deferred";
 import type { Row } from "../chart/option";
@@ -21,7 +21,9 @@ import {
   type Saved,
   type Tile,
 } from "../dashboard/dashboard";
-import { drawable, type Draft, type Spec } from "../spec/spec";
+import { drawable, type Draft, type Field, type Filter, type Spec } from "../spec/spec";
+import Across from "./Across";
+import { describe, narrowed } from "../dashboard/across";
 import { counted } from "../counted";
 
 /**
@@ -43,11 +45,13 @@ import { counted } from "../counted";
  */
 export default function Dashboards({
   current,
+  columns,
   arrangement,
   onChange,
   onEdit,
 }: {
   current: Draft | null;
+  columns: Field[];
   arrangement: Arrangement;
   onChange: (arrangement: Arrangement) => void;
   onEdit: (tile: Tile) => void;
@@ -64,10 +68,18 @@ export default function Dashboards({
   // The dashboard being arranged lives in the application rather than here, because
   // adding the chart on screen means leaving this view to build the next one, and state
   // that belongs to a view is state that is thrown away when the view is.
-  const { name, tiles } = arrangement;
+  const { name, tiles, across } = arrangement;
   const setName = (next: string) => onChange({ ...arrangement, name: next });
   const setTiles = (next: Tile[]) => onChange({ ...arrangement, tiles: next });
   const beingEdited = editingIndex(arrangement);
+
+  // Each tile's spec with the dashboard's filters in it, worked out once rather than per
+  // render. A tile fetches on the spec it is handed, so a fresh object every render would
+  // be a query every render — the memo is what makes this a rewrite rather than a loop.
+  const narrowedTiles = useMemo(
+    () => tiles.map((tile) => ({ tile, ...narrowed(tile.spec, across) })),
+    [tiles, across],
+  );
 
   const read = () => {
     getDashboards()
@@ -105,7 +117,7 @@ export default function Dashboards({
     }
     setWorking(true);
     try {
-      const stored = await saveDashboard(name.trim(), tiles);
+      const stored = await saveDashboard(name.trim(), tiles, across);
       // The name the store settled on, and the tiles that are already on screen. Taking the
       // stored tiles back would mint new ids for tiles that did not change, and every one of
       // them would run its query again for a save that drew nothing new.
@@ -130,7 +142,7 @@ export default function Dashboards({
     if (from === null) return;
     setWorking(true);
     try {
-      const stored = await saveDashboard(name.trim(), tiles);
+      const stored = await saveDashboard(name.trim(), tiles, across);
       await deleteDashboard(from);
       onChange({ ...arrangement, name: stored.name, savedAs: stored.name });
       setRefused(null);
@@ -264,6 +276,13 @@ export default function Dashboards({
             {refused === null && note !== null ? <p className="dash__note">{note}</p> : null}
           </div>
 
+          <Across
+            across={across}
+            tiles={tiles}
+            columns={columns}
+            onChange={(next: Filter[]) => onChange({ ...arrangement, across: next })}
+          />
+
           {tiles.length === 0 ? (
             <p className="dash__empty">
               No tiles. Open a saved dashboard on the left, or build a chart in the Chart view
@@ -271,7 +290,7 @@ export default function Dashboards({
             </p>
           ) : (
             <div className="grid">
-              {tiles.map((tile, index) => (
+              {narrowedTiles.map(({ tile, spec, missed }, index) => (
                 <article
                   key={tile.id}
                   className={index === beingEdited ? "grid__cell grid__cell--editing" : "grid__cell"}
@@ -333,8 +352,17 @@ export default function Dashboards({
                       sentences for one gesture, which is how a person turns announcements
                       off. What a tile is doing is written in the tile — "Running the
                       spec.", or what refused — and read where it sits. */}
+                  {missed.length === 0 ? null : (
+                    // Said on the tile rather than anywhere else, because the tile is what
+                    // is drawing a wider number than the one beside it. Not an error and
+                    // not styled as one: the tile is right, it is simply not narrowed.
+                    <p className="grid__unnarrowed">
+                      Not narrowed by {missed.map(describe).join(", ")}: this chart does not
+                      read that table.
+                    </p>
+                  )}
                   <div className="grid__body">
-                    <TileChart spec={tile.spec} />
+                    <TileChart spec={spec} />
                   </div>
                 </article>
               ))}

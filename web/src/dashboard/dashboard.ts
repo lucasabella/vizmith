@@ -12,6 +12,7 @@
  */
 
 import type { Spec } from "../spec/spec";
+import type { Across } from "./across";
 
 /** Mirrors `COLUMNS` in `dashboards.py`. The grid a dashboard is arranged on. */
 export const COLUMNS = 2;
@@ -22,6 +23,12 @@ export const TILE_LIMIT = 24;
 
 /** Mirrors `NAME_LIMIT`. */
 export const NAME_LIMIT = 80;
+
+/** Mirrors `maxItems` on `query.filters` in the schema, which is the cap the store applies
+ * to a dashboard's filters — they are the same list, judged by the same `$defs`. The bar
+ * stops offering to add one rather than letting the save refuse the whole dashboard for a
+ * filter somebody could simply not have added. */
+export const FILTER_LIMIT = 16;
 
 /**
  * A tile on screen: what the store holds, plus an identity the interface gives it.
@@ -40,7 +47,7 @@ export type Tile = { id: string; spec: Spec; width: number };
  * a spec and a width and nothing else. */
 export type StoredTile = { spec: Spec; width: number };
 
-export type Dashboard = { name: string; tiles: StoredTile[] };
+export type Dashboard = { name: string; tiles: StoredTile[]; filters?: Across };
 
 let minted = 0;
 
@@ -74,9 +81,19 @@ export type Arrangement = {
   tiles: Tile[];
   savedAs: string | null;
   editing: Tile | null;
+  /** The filters that apply across every tile that can take one. Part of the arrangement
+   * rather than of any tile: see `across.ts` for why a narrowing of the whole page must not
+   * be written into a spec somebody built. */
+  across: Across;
 };
 
-export const NOTHING: Arrangement = { name: "", tiles: [], savedAs: null, editing: null };
+export const NOTHING: Arrangement = {
+  name: "",
+  tiles: [],
+  savedAs: null,
+  editing: null,
+  across: [],
+};
 
 /** A dashboard as it arrives from the server: saved under its name, nothing being edited,
  * and every tile given the identity the interface arranges it by. */
@@ -85,6 +102,9 @@ export const opened = (dashboard: Dashboard): Arrangement => ({
   tiles: dashboard.tiles.map((tile) => tiled(tile.spec, tile.width)),
   savedAs: dashboard.name,
   editing: null,
+  // Absent from a dashboard saved before one could hold a filter, which is the ordinary
+  // case rather than a broken one: no filter across the tiles is what all of them meant.
+  across: dashboard.filters ?? [],
 });
 
 /** Which tile is being corrected, as a position, or -1 where it is no longer in the list.

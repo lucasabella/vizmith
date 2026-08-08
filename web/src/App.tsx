@@ -263,6 +263,7 @@ export default function App() {
       render: () => (
         <Dashboards
           current={asked.draft}
+          columns={columns}
           arrangement={arrangement}
           onChange={setArrangement}
           onEdit={correct}

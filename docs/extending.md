@@ -100,6 +100,27 @@ drop that produced no measure yet is not sent at all — it is unfinished rather
 and answering it with a required-property error would put a refusal on screen for every drop
 but the last.
 
+## Adding a control that crosses a dashboard
+
+There is one so far — the filter bar — and the shape it settled on is the one to copy.
+
+1. **The state goes on `Arrangement`** in `web/src/dashboard/dashboard.ts`, not on a tile
+   and not inside a spec. A tile holds the question somebody built; anything that narrows or
+   reframes the page has to come off again without leaving a trace in a spec nobody edited.
+2. **The rewrite is a pure function** in `web/src/dashboard/across.ts` taking a spec and
+   answering the spec that would run, plus what it could not do. Memoise the result in the
+   view: a tile fetches on the spec object it is handed, so a fresh one per render is a
+   query per render.
+3. **The store learns the field** in `src/vizmith/dashboards.py`, and it is judged by the
+   grammar rather than by a rule written twice — `validate_filters` builds a validator out of
+   the schema's own `$defs`. A key absent from a file saved before the field existed reads as
+   "none of it", because the store refuses a shape it does not recognise and every dashboard
+   saved until now has to keep opening.
+4. **A tile the control cannot reach says so, on the tile.** This is the rule that does not
+   move. Do not guess a join to make it reach — a join nobody confirmed produces a plausible
+   number rather than an error — and do not hide the tile, because a dashboard that drops
+   half of itself is one nobody can read.
+
 ## Adding a view
 
 Two edits, both inside `web/src/App.tsx`.

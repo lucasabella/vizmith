@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from vizmith.spec import SCHEMA_PATH, validate_spec
+from vizmith.spec import SCHEMA_PATH, validate_filters, validate_spec
 from vizmith.spec.validate import names_table, output_columns
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
@@ -313,3 +313,80 @@ def test_the_output_columns_are_what_the_wells_expect(case):
     """The result set contract, which the builder compiles and the browser predicts when it
     names a field in an encoding."""
     assert output_columns(case["query"]) == case["columns"]
+
+
+class TestAFilterListHeldOutsideAQuery:
+    """A dashboard's filters, judged before they are applied to anything.
+
+    They are the one place the grammar's `filter` appears without a query around it, so the
+    rules that resolve a column against a `from` cannot run and the rules about the
+    condition itself still must. What is checked here is that the second set really does
+    run, and that the first is replaced by something rather than dropped."""
+
+    def test_a_condition_the_grammar_allows_inside_a_query_is_allowed_here(self):
+        assert validate_filters([{"column": "shop.orders.status", "op": "=", "value": "shipped"}]) == []
+
+    def test_a_disjunction_is_allowed_here_too_since_it_is_one_filter(self):
+        assert (
+            validate_filters(
+                [
+                    {
+                        "any": [
+                            {"column": "shop.orders.status", "op": "=", "value": "shipped"},
+                            {"column": "shop.orders.status", "op": "=", "value": "packed"},
+                        ]
+                    }
+                ]
+            )
+            == []
+        )
+
+    def test_a_column_with_no_table_is_refused_because_it_would_mean_a_different_one_per_tile(self):
+        errors = validate_filters([{"column": "status", "op": "=", "value": "shipped"}])
+
+        assert errors and "names no table" in errors[0]
+
+    def test_is_null_with_a_value_is_refused_here_the_way_it_is_inside_a_query(self):
+        errors = validate_filters(
+            [{"column": "shop.orders.shipped_at", "op": "is_null", "value": None}]
+        )
+
+        assert errors == [
+            "filters: 'is_null' takes no value, but one was given for 'shop.orders.shipped_at'"
+        ]
+
+    def test_a_relative_value_carrying_a_key_its_token_ignores_is_refused_here_too(self):
+        errors = validate_filters(
+            [
+                {
+                    "column": "shop.orders.order_date",
+                    "op": ">=",
+                    "value": {"relative": "now", "unit": "month"},
+                }
+            ]
+        )
+
+        assert errors and errors[0].startswith("filters: a relative value of 'now'")
+
+    def test_the_message_names_where_the_filters_are_rather_than_a_query_that_has_none(self):
+        """The same list is a query's `filters` and a dashboard's, and a message naming the
+        wrong one sends somebody to look inside a spec for a filter that is on the
+        dashboard around it."""
+        errors = validate_filters(
+            [{"column": "shop.orders.shipped_at", "op": "is_not_null", "value": 1}]
+        )
+
+        assert errors and not errors[0].startswith("query.")
+
+    def test_something_that_is_not_a_list_is_refused_rather_than_read(self):
+        assert validate_filters({"column": "shop.orders.status", "op": "=", "value": "x"}) != []
+
+    def test_the_cap_on_a_query_s_filters_is_the_cap_here(self):
+        """Read off the schema rather than repeated, so the two cannot disagree: a
+        dashboard that could hold more filters than a query could carry would be one whose
+        every tile refuses at the moment it is applied."""
+        cap = json.loads(SCHEMA_PATH.read_text())["$defs"]["query"]["properties"]["filters"]["maxItems"]
+        one = {"column": "shop.orders.status", "op": "=", "value": "shipped"}
+
+        assert validate_filters([one] * cap) == []
+        assert validate_filters([one] * (cap + 1)) != []

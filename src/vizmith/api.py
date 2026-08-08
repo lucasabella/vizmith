@@ -346,14 +346,17 @@ class QuestionRequest(BaseModel):
 
 
 class DashboardRequest(BaseModel):
-    """The tiles of one dashboard. The name is in the path, because it is what addresses
-    the dashboard, and a name in the body as well would be two of them to disagree.
+    """The tiles of one dashboard, and the filters that apply across them. The name is in
+    the path, because it is what addresses the dashboard, and a name in the body as well
+    would be two of them to disagree.
 
-    The tiles are untyped for the same reason a spec is: the validator answers for every
+    Both lists are untyped for the same reason a spec is: the validator answers for every
     shape a spec can arrive in, and a model that rejected the wrong ones first would
-    replace its message with one of pydantic's."""
+    replace its message with one of pydantic's. `filters` defaults to empty, so a client
+    that has never heard of one saves exactly what it used to."""
 
     tiles: list[object]
+    filters: list[object] = []
 
 
 class AnswerRequest(BaseModel):
@@ -624,9 +627,11 @@ def dashboards(store: Annotated[Dashboards, Depends(saved)]):
 
 @app.get("/api/dashboards/{name}")
 def dashboard(name: str, store: Annotated[Dashboards, Depends(saved)]):
-    """One dashboard: its tiles, in the order they are drawn in, each with its width. The
-    rows are not here either. Every tile goes back through `/api/execute`, so a tile and a
-    single chart are the same spec run the same way against the same source."""
+    """One dashboard: its tiles, in the order they are drawn in, each with its width, and
+    the filters that apply across all of them. The rows are not here either. Every tile
+    goes back through `/api/execute`, so a tile and a single chart are the same spec run
+    the same way against the same source — the dashboard's filters are applied to a tile's
+    spec on the way, by the interface, and the result is judged like any other spec."""
     found = store.read(name)
     if found is None:
         return JSONResponse(
@@ -647,7 +652,7 @@ def save_dashboard(
     saved before exactly as it was, because half a dashboard is not a thing a person asked
     for."""
     try:
-        return store.save(name, request.tiles).as_dict()
+        return store.save(name, request.tiles, request.filters).as_dict()
     except Refused as failure:
         return JSONResponse(status_code=400, content={"errors": failure.errors})
 

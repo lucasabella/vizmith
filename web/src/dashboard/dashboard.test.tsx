@@ -170,6 +170,7 @@ const drawn = (current: Spec | null = null, arranged: Tile[] = [], over: Partial
   renderToStaticMarkup(
     <Dashboards
       current={current as never}
+      columns={[]}
       arrangement={{ ...NOTHING, tiles: arranged, ...over }}
       onChange={() => {}}
       onEdit={() => {}}

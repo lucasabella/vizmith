@@ -363,6 +363,51 @@ def test_a_dashboard_is_renamed_in_one_gesture(page):
 
 
 @needs_built_frontend
+def test_one_filter_narrows_every_tile_it_reaches_and_says_which_it_did_not(page):
+    """#117, end to end: the control, the two answers it gives, and the round trip.
+
+    It belongs in a browser rather than in jsdom because what is being asserted crosses a
+    reload — a filter that has to be retyped after one is a control nobody keeps — and
+    because the two tiles have to actually run against the source under it. One reads
+    customers through a join and is narrowed; the other reads only orders, and is left
+    exactly as it was with a sentence saying so. A join invented to make it reach would
+    draw a plausible number, which is the failure this whole design exists to prevent.
+    """
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+
+    page.get_by_role("button", name="Chart", exact=True).first.click()
+    run_spec(page, ORDERS_PER_MONTH)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.wait_for_selector(".grid__cell:nth-child(2) canvas", timeout=DRAWN)
+
+    page.get_by_label("Column to filter every tile by").select_option("customers.country")
+    page.get_by_label("Value").fill("Netherlands")
+    page.get_by_role("button", name="Add", exact=True).click()
+
+    page.wait_for_selector(".grid__unnarrowed", timeout=DRAWN)
+    assert page.locator(".grid__unnarrowed").count() == 1, "only the tile that cannot reach it"
+    assert "Not narrowed by country = Netherlands" in page.locator(".grid__unnarrowed").inner_text()
+    assert "1 tile" in page.locator(".across__chip").inner_text(), "and the chip says so too"
+
+    page.get_by_label("Dashboard name").fill("Trade, 2026")
+    page.get_by_role("button", name="Save").click()
+    page.wait_for_selector("text=Saved as Trade, 2026", timeout=DRAWN)
+
+    page.reload(wait_until="networkidle")
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Trade, 2026").click()
+    page.wait_for_selector(".grid__cell canvas", timeout=DRAWN)
+
+    assert "country = Netherlands" in page.locator(".across__chip").inner_text()
+    assert page.locator(".grid__unnarrowed").count() == 1
+
+
+@needs_built_frontend
 def test_arranging_a_dashboard_runs_no_query(page):
     """The bug this exists for: tiles keyed by position meant swapping two of them handed
     each component the other's spec, and both ran their query again. Arranging a dashboard

@@ -1481,6 +1481,94 @@ button:focus-visible {
   color: var(--ink-3);
 }
 
+/* The one control that reaches more than one tile. It sits above the grid rather than in
+   a tile, because what it does is to the page and a control inside one tile that changed
+   the others would be the quiet kind of wrong this project exists to avoid. */
+.across {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--surf-2);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-card);
+}
+
+.across__head {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+
+.across__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.across__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  font-size: 11.5px;
+  color: var(--ink);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+}
+
+/* How far the filter reaches, beside what it says. A filter that reaches no tile is a
+   filter doing nothing, and reading every tile to find that out is not a thing to ask. */
+.across__reach {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+
+.across__off {
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+}
+
+.across__off:hover {
+  color: var(--ink);
+}
+
+.across__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.across__field {
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surf);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-control);
+  max-width: 26ch;
+}
+
+.across__why {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
 /* Two columns, and a tile takes one of them or both. An order and a width is the whole
    arrangement: pixel positions would be a geometry that is wrong on the next screen. */
 .grid {
@@ -1574,6 +1662,19 @@ button:focus-visible {
 .grid__cell--editing {
   border-color: var(--chrome-3);
   box-shadow: 0 0 0 1px var(--chrome-3), var(--shadow-card);
+}
+
+/* A tile the dashboard's filter could not reach. Not an error colour: the tile is right,
+   it is simply drawing the wider number, and saying so is the whole of the rule. */
+.grid__unnarrowed {
+  flex: none;
+  margin: 0;
+  padding: 6px 11px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-3);
+  background: var(--surf-2);
+  border-bottom: 1px solid var(--rule);
 }
 
 .grid__editing {

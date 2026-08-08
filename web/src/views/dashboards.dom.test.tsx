@@ -48,6 +48,7 @@ function view(over: Partial<Arrangement> = {}) {
   render(
     <Dashboards
       current={null}
+      columns={[]}
       arrangement={{ ...NOTHING, tiles: [tiled(spec("Revenue"))], ...over }}
       onChange={onChange}
       onEdit={() => {}}
@@ -197,5 +198,157 @@ describe("a tile whose spec was refused", () => {
     view();
 
     expect(await screen.findByText("What the browser said")).toBeDefined();
+  });
+});
+
+/**
+ * The one control that reaches more than one tile.
+ *
+ * What it produces is a filter on the arrangement, and what a tile then runs is its own
+ * spec with that filter in it. Both halves are asserted here, because the second is the one
+ * that could go wrong quietly: a tile that reads a different table has to be left alone and
+ * has to say so, and a control that guessed a join instead would draw a plausible number.
+ */
+describe("a filter across every tile", () => {
+  const grouped = (from: string, dimension: string): Spec =>
+    ({
+      spec_version: "1",
+      title: `by ${dimension}`,
+      query: {
+        from,
+        group_by: [{ column: `${from}.${dimension}`, as: dimension }],
+        aggregates: [{ fn: "sum", column: `${from}.total`, as: "revenue" }],
+        limit: 500,
+      },
+      chart: { mark: "bar", encoding: { y: { field: "revenue", type: "quantitative" } } },
+    }) as unknown as Spec;
+
+  const ORDERS = grouped("vizmith.shop.orders", "status");
+  const CARRIERS = grouped("vizmith.shop.carriers", "name");
+
+  function board(tiles: Spec[], over: Partial<Arrangement> = {}) {
+    const onChange = vi.fn();
+    render(
+      <Dashboards
+        current={null}
+        columns={[{ table: "vizmith.shop.orders", column: "order_date", type: "date" }]}
+        arrangement={{ ...NOTHING, tiles: tiles.map((each) => tiled(each)), ...over }}
+        onChange={onChange}
+        onEdit={() => {}}
+      />,
+    );
+    return { onChange, user: userEvent.setup() };
+  }
+
+  it("offers the dimensions the tiles are grouped by, and adds the filter that was built", async () => {
+    const { onChange, user } = board([ORDERS]);
+
+    await user.type(screen.getByLabelText("Value"), "shipped");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(onChange).mock.calls[0][0].across).toEqual([
+      { column: "vizmith.shop.orders.status", op: "=", value: "shipped" },
+    ]);
+  });
+
+  it("will not add a filter with no value, since a comparison against nothing is not one", () => {
+    board([ORDERS]);
+
+    expect(screen.getByRole("button", { name: "Add" })).toHaveProperty("disabled", true);
+  });
+
+  it("asks for no value at all where the operator takes none", async () => {
+    const { onChange, user } = board([ORDERS]);
+
+    await user.selectOptions(screen.getByLabelText("Operator"), "is_null");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(vi.mocked(onChange).mock.calls[0][0].across).toEqual([
+      { column: "vizmith.shop.orders.status", op: "is_null" },
+    ]);
+  });
+
+  it("runs a tile it reaches with the filter in the spec, and never in the tile's own copy", async () => {
+    const across = [{ column: "vizmith.shop.orders.status", op: "=" as const, value: "shipped" }];
+    board([ORDERS], { across });
+
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+    expect(vi.mocked(execute).mock.calls[0][0].query.filters).toEqual(across);
+    expect(ORDERS.query.filters).toBeUndefined();
+  });
+
+  /** The rule the whole feature turns on. A tile whose query does not read the table would
+   * need a join to be narrowed by it, and a join nobody confirmed produces a plausible
+   * number rather than an error — so the tile draws what it drew and says why. */
+  it("leaves a tile that does not read the table alone, and says so on that tile", async () => {
+    board([CARRIERS], {
+      across: [{ column: "vizmith.shop.orders.status", op: "=", value: "shipped" }],
+    });
+
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+    expect(vi.mocked(execute).mock.calls[0][0].query.filters).toBeUndefined();
+    expect(screen.getByText(/Not narrowed by status = shipped/)).toBeDefined();
+  });
+
+  it("says how far a filter reaches, so one that reaches nothing does not look like it works", () => {
+    board([ORDERS, CARRIERS], {
+      across: [{ column: "vizmith.shop.orders.status", op: "=", value: "shipped" }],
+    });
+
+    expect(screen.getByText("1 tile")).toBeDefined();
+  });
+
+  it("takes a filter off again, leaving the tiles as they were", async () => {
+    const { onChange, user } = board([ORDERS], {
+      across: [{ column: "vizmith.shop.orders.status", op: "=", value: "shipped" }],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remove the filter status = shipped" }));
+
+    expect(vi.mocked(onChange).mock.calls[0][0].across).toEqual([]);
+  });
+
+  /** A stored date means that day forever, so a saved dashboard whose date filter has to be
+   * retyped every morning is one nobody keeps. The grammar could already say this. */
+  it("offers a date column the relative values the grammar has, and writes one", async () => {
+    const dated = grouped("vizmith.shop.orders", "order_date");
+    const { onChange, user } = board([dated]);
+
+    await user.selectOptions(screen.getByLabelText("What kind of date"), "ago");
+    await user.selectOptions(screen.getByLabelText("Unit"), "month");
+    await user.type(screen.getByLabelText("How many"), "3");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(vi.mocked(onChange).mock.calls[0][0].across).toEqual([
+      {
+        column: "vizmith.shop.orders.order_date",
+        op: "=",
+        value: { relative: "ago", unit: "month", count: 3 },
+      },
+    ]);
+  });
+
+  it("offers no relative value on a column that is not a date, where the tokens mean nothing", () => {
+    board([ORDERS]);
+
+    expect(screen.queryByLabelText("What kind of date")).toBeNull();
+  });
+
+  it("says why there is nothing to filter by where no tile groups by anything", () => {
+    board([spec("Revenue")]);
+
+    expect(screen.getByText(/No tile on this dashboard groups by anything/)).toBeDefined();
+  });
+
+  it("saves the filters with the dashboard, because a narrowing that is retyped is not kept", async () => {
+    const across = [{ column: "vizmith.shop.orders.status", op: "=" as const, value: "shipped" }];
+    vi.mocked(saveDashboard).mockResolvedValue({ name: "Revenue", tiles: [] });
+    const { user } = board([ORDERS], { name: "Revenue", across });
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(saveDashboard).toHaveBeenCalled());
+    expect(vi.mocked(saveDashboard).mock.calls[0][2]).toEqual(across);
   });
 });

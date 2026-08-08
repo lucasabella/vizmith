@@ -1101,7 +1101,7 @@ def test_a_dashboard_is_saved_and_read_back_over_http(keeping):
 
     assert saving.status_code == 200
     assert read.status_code == 200
-    assert read.json() == {"name": "Revenue", "tiles": tiles}
+    assert read.json() == {"name": "Revenue", "tiles": tiles, "filters": []}
 
 
 def test_the_list_names_every_dashboard_and_how_many_tiles_it_holds(keeping):

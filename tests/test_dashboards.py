@@ -210,3 +210,55 @@ def test_a_name_is_judged_the_way_the_interface_says_it_will_be(case):
     errors = review(case["name"].strip(), [tile()])
 
     assert (errors == []) is case["saveable"], errors
+
+
+ACROSS = {"column": "vizmith.shop.orders.status", "op": "=", "value": "shipped"}
+
+
+def test_a_filter_across_the_tiles_survives_a_restart_the_way_the_tiles_do(tmp_path):
+    """The narrowing of a whole dashboard is part of the dashboard. A filter that had to be
+    re-entered on every open would be a control that is only worth using while the tab
+    stays open, which is the opposite of what saving a dashboard is for."""
+    path = tmp_path / "dashboards.json"
+    Dashboards(path).save("Revenue", [tile()], [ACROSS])
+
+    read = Dashboards(path).read("Revenue")
+
+    assert read.filters == (ACROSS,)
+    assert read.as_dict()["filters"] == [ACROSS]
+
+
+def test_a_dashboard_saved_before_filters_existed_reads_as_one_with_none(tmp_path):
+    """The store refuses a file whose shape it does not recognise rather than dropping it,
+    so a key that is simply absent has to be an answer rather than a shape. Absent is the
+    only thing every dashboard saved until now can mean: no filter across the tiles."""
+    path = tmp_path / "dashboards.json"
+    path.write_text(json.dumps({"dashboards": {"Revenue": {"tiles": [tile()]}}}))
+
+    assert Dashboards(path).read("Revenue").filters == ()
+
+
+def test_a_filter_across_the_tiles_is_judged_by_the_grammar_that_judges_a_query_s(store):
+    """The same `$defs` the schema uses inside a query, applied to a list held outside one.
+    An operator the grammar does not have is refused at the save rather than on the day
+    somebody opens the dashboard and every tile refuses at once."""
+    with pytest.raises(Refused) as refusal:
+        store.save("Revenue", [tile()], [{"column": "orders.status", "op": "matches", "value": "s"}])
+
+    assert any("matches" in error for error in refusal.value.errors)
+
+
+def test_a_filter_across_the_tiles_names_its_own_table(store):
+    """A dashboard filter is matched against the tables each tile reads, so an unqualified
+    column names one table in the tile it lands in and a different one in the next. That is
+    the quietest of the ways this could be wrong, so it is refused where it is written."""
+    with pytest.raises(Refused) as refusal:
+        store.save("Revenue", [tile()], [{"column": "status", "op": "=", "value": "shipped"}])
+
+    assert any("names no table" in error for error in refusal.value.errors)
+
+
+def test_a_dashboard_with_no_filters_is_saved_the_way_it_always_was(store):
+    """The argument the whole feature rests on is that a dashboard without one is unchanged.
+    A client that has never heard of a filter sends no key and gets the old behaviour."""
+    assert store.save("Revenue", [tile()]).filters == ()

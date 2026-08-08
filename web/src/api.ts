@@ -9,6 +9,7 @@
 import type { Row } from "./chart/option";
 import type { Spec } from "./spec/spec";
 import { asStored, type Dashboard, type Saved, type Tile } from "./dashboard/dashboard";
+import type { Across } from "./dashboard/across";
 import type { Join } from "./spec/spec";
 
 export type ColumnProfile = {
@@ -293,11 +294,15 @@ export const getDashboard = (name: string): Promise<Dashboard> =>
  *
  * `asStored` is what strips the id the interface arranges by, so what the store receives is
  * a spec and a width and nothing this browser invented. */
-export const saveDashboard = (name: string, tiles: Tile[]): Promise<Dashboard> =>
+export const saveDashboard = (
+  name: string,
+  tiles: Tile[],
+  filters: Across = [],
+): Promise<Dashboard> =>
   json(`/api/dashboards/${encodeURIComponent(name)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tiles: asStored(tiles) }),
+    body: JSON.stringify({ tiles: asStored(tiles), filters }),
   });
 
 export const deleteDashboard = (name: string): Promise<unknown> =>
