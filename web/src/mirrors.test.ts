@@ -36,7 +36,8 @@ import {
   outputColumns,
   type Query,
 } from "./spec/spec";
-import { SAID } from "./outcome";
+import { SAID, STEP } from "./outcome";
+import { STEPS } from "./api";
 
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 const names = JSON.parse(read("../../tests/fixtures/mirrors/names.json"));
@@ -219,6 +220,30 @@ describe("the parts that can refuse", () => {
 
     expect(named.length).toBeGreaterThan(0);
     expect([...new Set(named)].sort()).toEqual(Object.keys(SAID).sort());
+  });
+});
+
+/**
+ * The steps of a question, as the server names them.
+ *
+ * The same line as `spoke` above: the server names the step and this interface writes the
+ * sentence. Drift here is a step reported under a name the browser has no words for, and
+ * what that looks like on screen is the wait going blank part way through — which is the
+ * thing #119 was about, arriving back through the door it was shown out of.
+ *
+ * `STEP` in `outcome.ts` is `Record<StepName, …>`, so a name in the union with no sentence
+ * is already a compile error. What this adds is the half a type cannot reach: whether the
+ * union is what Python actually reports.
+ */
+describe("the steps a question passes through", () => {
+  it("are the steps the browser has a sentence for", () => {
+    const python = read("../../src/vizmith/ask.py");
+    const declared = /^STEPS = \(([^)]*)\)/m.exec(python)?.[1] ?? "";
+    const named = [...declared.matchAll(/"([a-z]+)"/g)].map((match) => match[1]);
+
+    expect(named.length).toBeGreaterThan(0);
+    expect([...named].sort()).toEqual([...STEPS].sort());
+    expect(Object.keys(STEP).sort()).toEqual([...STEPS].sort());
   });
 });
 

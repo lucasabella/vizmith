@@ -48,12 +48,31 @@ const TYPED = {
  * test decides the order the answers come back in. */
 function serving() {
   const waiting: ((answer: object[] | { rows: object[]; cost?: object }) => void)[] = [];
+  const questions: Streamed[] = [];
 
   const fetching = vi.fn((url: string, options?: RequestInit) => {
     const path = String(url);
     if (path.endsWith("/api/health")) return answered(HEALTH);
     if (path.endsWith("/api/shape")) return answered(SHAPE);
     if (path.endsWith("/api/tables")) return answered({ tables: [] });
+    // A question is an event stream the test writes into a frame at a time, because what
+    // is under test is what the canvas says between the request and the answer.
+    if (path.endsWith("/api/ask")) {
+      let feed!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({ start: (controller) => void (feed = controller) });
+      const encoder = new TextEncoder();
+      questions.push({
+        say: (name, said) =>
+          feed.enqueue(encoder.encode(`event: ${name}\ndata: ${JSON.stringify(said)}\n\n`)),
+        end: () => feed.close(),
+      });
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "text/event-stream" }),
+        body,
+      } as unknown as Response);
+    }
     if (path.endsWith("/api/execute")) {
       const sent = JSON.parse(String(options?.body ?? "{}"));
       return new Promise((settle) => {
@@ -75,17 +94,22 @@ function serving() {
     return answered({});
   });
 
-  return { fetching, waiting };
+  return { fetching, waiting, questions };
 }
+
+/** One question's stream, held open so a test can say a step and then look at the screen. */
+type Streamed = { say: (name: string, said: unknown) => void; end: () => void };
 
 const answered = (body: unknown) =>
   Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
 
 let waiting: ((answer: object[] | { rows: object[]; cost?: object }) => void)[];
+let questions: Streamed[];
 
 beforeEach(() => {
   const serve = serving();
   waiting = serve.waiting;
+  questions = serve.questions;
   vi.stubGlobal("fetch", serve.fetching);
 });
 
@@ -220,5 +244,66 @@ describe("what a question cost", () => {
     waiting[1]({ rows: rows(1) });
 
     await waitFor(() => expect(screen.queryByText(/tokens/)).toBeNull());
+  });
+});
+
+/**
+ * The wait, which was one spinner over four very different things.
+ *
+ * A question reads the profiles, asks the model up to three times and then runs the query,
+ * and on a large schema the metadata in front of the model is the long part. What this
+ * drives is the whole path: the server says a step, the reader in `api.ts` hears it, and
+ * the canvas says which work is happening.
+ */
+describe("a question in flight", () => {
+  const ask = async () => {
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText(/Ask a question/), "revenue by country");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(questions).toHaveLength(1));
+    return questions[0];
+  };
+
+  it("says which step is running, and which attempt when there has been more than one", async () => {
+    await started();
+
+    const stream = await ask();
+    await screen.findByText("Answering the question");
+
+    stream.say("step", { step: "profiles", attempt: 0, of: 0 });
+    await screen.findByText("Reading the schema");
+
+    stream.say("step", { step: "model", attempt: 2, of: 3 });
+    await screen.findByText("Asking the model, attempt 2 of 3");
+
+    stream.say("step", { step: "query", attempt: 0, of: 0 });
+    await screen.findByText("Running the query");
+
+    stream.say("answer", { spec: TYPED, rows: rows(3) });
+    stream.end();
+    await waitFor(() => expect(screen.queryByText("Running the query")).toBeNull());
+  });
+
+  it("announces the step it moved to, since a blank wait is worst for a reader who cannot see it", async () => {
+    await started();
+    const stream = await ask();
+
+    stream.say("step", { step: "profiles", attempt: 0, of: 0 });
+
+    await waitFor(() =>
+      expect(document.querySelector(".visually-hidden")?.textContent).toBe("Reading the schema."),
+    );
+  });
+
+  it("shows the refusal an event carried, though the response was a 200", async () => {
+    await started();
+    const stream = await ask();
+
+    stream.say("step", { step: "profiles", attempt: 0, of: 0 });
+    stream.say("refused", { errors: ["the warehouse is asleep"], spoke: "source" });
+    stream.end();
+
+    await screen.findByText("What the source said");
+    await screen.findByText("the warehouse is asleep");
   });
 });

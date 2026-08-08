@@ -132,6 +132,23 @@ If the endpoint can produce a new `spoke`, add the sentence for it to `SAID` in
 `outcome.ts`'s job and never a component's; `refusal()` there is the one reading, and the
 canvas, a dashboard tile and the dashboard save bar all go through it.
 
+## Adding a step to a question
+
+`/api/ask` says which part of a question is running, as server-sent events. A fourth part —
+a cache being filled, a second model call — is three places:
+
+1. **`STEPS` in `src/vizmith/ask.py`** — the name, in the tuple. The vocabulary and nothing
+   a person reads, the same way `spoke` names which part refused.
+2. **`answering()` in `src/vizmith/api.py`** — a `yield Step("…")` where the work starts, or
+   a `yield` inside the loop that does it, the way `asking()` reports each attempt.
+3. **`STEPS` in `web/src/api.ts` and `STEP` in `web/src/outcome.ts`** — the name again, and
+   the sentence somebody waiting reads. `STEP` is a `Record` keyed by the union, so a name
+   with no sentence is a compile error, and `mirrors.test.ts` reads the Python tuple and
+   fails when the two lists disagree.
+
+Nothing else changes. The JSON body is the last event of the same sequence, so a step added
+here is invisible to a caller that did not ask for the stream.
+
 ## Adding a source
 
 A connector is a module in `src/vizmith/sources/`, an entry in `KINDS` with the settings its

@@ -78,15 +78,23 @@ export class Refused extends Error {
   }
 }
 
+/** A refusal out of a body the server sent. One reading of it, because a refusal arrives
+ * two ways now — as a status with a body, and as an event named `refused` on a stream that
+ * could not use a status — and the two have to become the same thing. */
+const refusedBy = (body: Refusing, fallback: string): Refused =>
+  new Refused(body.errors ?? [fallback], {
+    spoke: body.spoke,
+    said: Array.isArray(body.errors),
+    cost: body.cost,
+  });
+
+type Refusing = { errors?: string[]; spoke?: Spoke; cost?: Cost };
+
 async function json<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Refused(body.errors ?? [`${response.status} ${response.statusText}`], {
-      spoke: body.spoke,
-      said: Array.isArray(body.errors),
-      cost: body.cost,
-    });
+    throw refusedBy(body, `${response.status} ${response.statusText}`);
   }
   return body as T;
 }
@@ -144,10 +152,102 @@ export const answerRelationship = (
  * spec means. */
 export const execute = (spec: Spec): Promise<Answered> => json("/api/execute", posted({ spec }));
 
-/** A question, answered as the spec it produced and the rows that spec returned, with what
- * asking cost. The endpoint that had no function here at all, which is why `App.tsx` held a
- * `fetch` and its own account of what a failure is. */
-export const ask = (question: string): Promise<Answered> => json("/api/ask", posted({ question }));
+/** Which part of answering a question is running. The names are the server's — `STEPS` in
+ * `ask.py`, held to this list by `mirrors.test.ts` — and what each one says to a person is
+ * `STEP` in `outcome.ts`. The same line the `spoke` field falls on. */
+export const STEPS = ["profiles", "model", "query"] as const;
+export type StepName = (typeof STEPS)[number];
+
+/** A step that has started. `attempt` and `of` are the retry loop's and are zero on a step
+ * that has no attempts, which is every step but the model. */
+export type Step = { step: StepName; attempt: number; of: number };
+
+const EVENTS = "text/event-stream";
+
+/**
+ * A question, answered as the spec it produced and the rows that spec returned, with what
+ * asking cost — and, while it is being answered, which step is running.
+ *
+ * A question is not one wait. It reads the profiles, builds the relationship graph, asks
+ * the model up to three times and then runs the query, and on a large schema the metadata
+ * in front of the model is the long part. `watching` is called as each step starts, which
+ * is what turns one spinner into a sentence that names the slow part.
+ *
+ * The stream is asked for by `Accept` and the answer is its last event, so what comes back
+ * here is what the JSON body always held. A server that answered with a body anyway — an
+ * older one, or a refusal decided before the endpoint ran, which is what rationing and the
+ * host check are — is read as a body, because a caller waiting for a frame that is never
+ * coming is worse than a caller that heard no steps.
+ */
+export async function ask(question: string, watching?: (step: Step) => void): Promise<Answered> {
+  const request = posted({ question });
+  const response = await fetch("/api/ask", {
+    ...request,
+    headers: { ...request.headers, Accept: `${EVENTS}, application/json` },
+  });
+  const streaming = (response.headers.get("content-type") ?? "").includes(EVENTS);
+  if (!streaming || response.body === null) {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw refusedBy(body, `${response.status} ${response.statusText}`);
+    return body as Answered;
+  }
+  return await heard(response.body, watching);
+}
+
+/**
+ * The stream, read to its one answer.
+ *
+ * The status line said 200 before any of this ran, because the headers went out before the
+ * first step did. So a refusal is the event named `refused` and not a status, which is the
+ * price of answering more than once over one request.
+ *
+ * Frames are split on a blank line and a frame's data is one line of JSON, which is what
+ * makes this safe to do by hand rather than through `EventSource`: that one only speaks
+ * GET, and a question is a POST. The trailing part of the buffer is kept rather than parsed
+ * because a chunk boundary falls wherever the network put it, not where a frame ends.
+ */
+async function heard(stream: ReadableStream<Uint8Array>, watching?: (step: Step) => void) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answered: Answered | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const [name, body] = read(frame);
+      if (name === "step") watching?.(body as Step);
+      if (name === "answer") answered = body as Answered;
+      if (name === "refused") throw refusedBy(body as Refusing, "the server refused the question");
+    }
+  }
+  if (answered === null) {
+    // The stream ended without saying anything. Not a validator's list and not a status
+    // either, so it is shown as a server that failed without saying what failed.
+    throw new Refused(["the answer never arrived, the connection ended first"], { said: false });
+  }
+  return answered;
+}
+
+/** One frame, as its event name and its body. A frame this does not recognise comes back
+ * under a name nothing acts on, which is how a server that learns a fourth event stops
+ * short of breaking a browser that only knows three. */
+function read(frame: string): [string, unknown] {
+  let name = "";
+  let data = "";
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event: ")) name = line.slice(7);
+    if (line.startsWith("data: ")) data = line.slice(6);
+  }
+  try {
+    return [name, JSON.parse(data)];
+  } catch {
+    return ["", null];
+  }
+}
 
 /**
  * What a model call cost, in tokens and in billed requests.

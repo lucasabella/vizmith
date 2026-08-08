@@ -12,7 +12,7 @@ prompt means changing this signature rather than changing a line inside it.
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from dataclasses import dataclass, field
 
 from vizmith.catalog import Relationship
@@ -88,6 +88,34 @@ Every query needs a row limit. A chart that binds a colour channel also needs li
 whose column is that colour dimension and whose by is an aggregate's alias, so the two are
 never the same. It keeps the top N values of one dimension whole instead of cutting rows
 off partway through a series."""
+
+
+# Which part of answering a question is running. The names and nothing else: what each one
+# says to a person is the interface's, the same way `spoke` names which part refused and the
+# browser writes the sentence. `mirrors.test.ts` holds the browser's copy of this list to it.
+#
+# Two of the three happen in `api.py`, which is where the source is read and the query is
+# run; the model step is this file's, because the retry loop is the only thing that knows
+# which attempt is in flight. The list lives here because it is one vocabulary and not two.
+STEPS = ("profiles", "model", "query")
+
+
+@dataclass(frozen=True)
+class Step:
+    """A step that has started, on its way past a caller who is waiting.
+
+    `attempt` and `of` are the retry loop's, and are zero on a step that has no attempts:
+    reading the schema happens once. They are reported because "asking the model" for the
+    third time is a different thing to be waiting through than the first, and the loop is
+    the part of a question that can cost three times what it looks like it costs.
+    """
+
+    name: str
+    attempt: int = 0
+    of: int = 0
+
+    def as_dict(self) -> dict:
+        return {"step": self.name, "attempt": self.attempt, "of": self.of}
 
 
 @dataclass(frozen=True)
@@ -172,6 +200,29 @@ def ask(
 ) -> Answer:
     """Ask until the validator is satisfied or the attempts run out.
 
+    The loop is `asking` below. This is it drained, for every caller that wants the answer
+    and not the running commentary: the eval harness, the CLI, and the tests of the loop
+    itself. A caller that is holding somebody's attention while this runs iterates the
+    generator instead and hears which attempt is in flight.
+    """
+    loop = asking(question, tables, model, attempts, constrained, relationships)
+    while True:
+        try:
+            next(loop)
+        except StopIteration as done:
+            return done.value
+
+
+def asking(
+    question: str,
+    tables: Sequence[TableProfile],
+    model: Model,
+    attempts: int = ATTEMPTS,
+    constrained: bool = False,
+    relationships: Sequence[Relationship] = (),
+) -> Generator[Step, None, Answer]:
+    """Ask until the validator is satisfied or the attempts run out, reporting each attempt.
+
     `constrained` says whether the endpoint honours a JSON Schema, which the adapter
     reports and this does not check, because checking costs a request of its own. Where it
     is false the loop below is the fallback and it runs more often.
@@ -181,11 +232,18 @@ def ask(
     `relevance.select` makes and not whatever they happened to have. `relationships` is what
     a join may be resolved through, and it is what keeps a table a correct answer has to
     join through readable even where the question never names it.
+
+    A generator rather than a callback, so that the attempt is reported from the one place
+    that knows it and the caller decides what to do about it — and so that a caller which
+    does not care is `ask` above, three lines, rather than a default no-op threaded through
+    the signature. What it yields is the attempt *about to run*: the point of saying so is
+    that somebody is waiting for it.
     """
     chosen = select(question, tables, relationships)
     errors: list[str] = []
     spent = Spend()
     for attempt in range(1, attempts + 1):
+        yield Step("model", attempt, attempts)
         written = prompt(
             question,
             chosen.tables,

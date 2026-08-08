@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Refused } from "./api";
 import { SERIES_LIMIT } from "./chart/option";
 import type { Spec } from "./spec/spec";
-import { announced, refusal, REJECTED, SAID, type Outcome } from "./outcome";
+import { announced, refusal, REJECTED, SAID, STEP, waiting, type Outcome } from "./outcome";
+import { type StepName } from "./api";
 
 const spec = (encoding: Spec["chart"]["encoding"]): Spec =>
   ({ chart: { mark: "bar", encoding } }) as Spec;
@@ -17,16 +18,33 @@ const rows = (many: number) => Array.from({ length: many }, (_, at) => ({ revenu
 
 const chart = (many: number, of: Spec = bar): Outcome => ({ kind: "chart", spec: of, rows: rows(many) });
 
+const asked = { asking: true, step: null };
+const stepped = (step: StepName, attempt = 0, of = 0) => ({ asking: true, step: { step, attempt, of } });
+
 describe("what the canvas announces", () => {
   it("says which wait is being waited, because that is the only signal during one", () => {
-    expect(announced({ kind: "nothing" }, "question")).toBe("Answering the question.");
-    expect(announced({ kind: "nothing" }, "spec")).toBe("Running the spec.");
+    expect(announced({ kind: "nothing" }, asked)).toBe("Answering the question.");
+    expect(announced({ kind: "nothing" }, { asking: false, step: null })).toBe("Running the spec.");
+  });
+
+  it("says which step, because most of a question's wait is not the model", () => {
+    // Three announcements in one question rather than one. That is the point: somebody who
+    // cannot see the canvas is the person a blank wait is worst for.
+    expect(announced({ kind: "nothing" }, stepped("profiles"))).toBe("Reading the schema.");
+    expect(announced({ kind: "nothing" }, stepped("query"))).toBe("Running the query.");
+  });
+
+  it("says which attempt, since the third costs three times what the first did", () => {
+    expect(announced({ kind: "nothing" }, stepped("model", 1, 3))).toBe("Asking the model.");
+    expect(announced({ kind: "nothing" }, stepped("model", 3, 3))).toBe(
+      "Asking the model, attempt 3 of 3.",
+    );
   });
 
   it("says what is in flight rather than what is still on screen", () => {
     // The chart under the spinner answered the previous question. Announcing it while the
     // next one is in flight is announcing the wrong answer.
-    expect(announced(chart(30), "question")).toBe("Answering the question.");
+    expect(announced(chart(30), asked)).toBe("Answering the question.");
   });
 
   it("says the row count when a chart lands, since that is what changed", () => {
@@ -175,5 +193,37 @@ describe("a refusal the server itself made", () => {
       ),
     ).toBe("What this server would not spend: That is more than 20 model requests in a minute");
     expect(said.plain).toContain("Nothing was asked of the model or the source");
+  });
+});
+
+describe("what the wait says it is doing", () => {
+  it("names the step, because a question is not one wait", () => {
+    // Measured at 152 tables: around 18 seconds of metadata before a token is requested.
+    // A spinner over all of it cannot say whether the model is slow or the warehouse is cold.
+    expect(waiting(stepped("profiles")).title).toBe("Reading the schema");
+    expect(waiting(stepped("model", 1, 3)).title).toBe("Asking the model");
+    expect(waiting(stepped("query")).title).toBe("Running the query");
+  });
+
+  it("counts the attempt only once there has been more than one", () => {
+    // The first attempt is the expected case and saying "attempt 1 of 3" over it reads as a
+    // warning about something that has not happened.
+    expect(waiting(stepped("model", 1, 3)).title).not.toContain("attempt");
+    expect(waiting(stepped("model", 2, 3)).title).toBe("Asking the model, attempt 2 of 3");
+    expect(waiting(stepped("model", 2, 3)).body).toBe(STEP.model.body);
+  });
+
+  it("has words for the moment before the first step arrives", () => {
+    // One round trip with the request gone and nothing back, and the same moment for a
+    // server that answered with a body rather than a stream.
+    expect(waiting(asked).title).toBe("Answering the question");
+    expect(waiting(asked).body).toBe(STEP.profiles.body);
+  });
+
+  it("says the source and not the model for a spec that was run by hand", () => {
+    const running = waiting({ asking: false, step: null });
+
+    expect(running.title).toBe("Running the spec");
+    expect(running.body).toContain("nowhere near the model");
   });
 });

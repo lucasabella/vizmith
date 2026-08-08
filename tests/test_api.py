@@ -14,6 +14,7 @@ from test_model import ENDPOINT
 from test_spec_validation import EXPECTED_ERROR
 
 from vizmith.api import (
+    EVENTS,
     LOOPBACK,
     MODEL_CONFIGURATION,
     _allowed_hosts,
@@ -25,7 +26,7 @@ from vizmith.api import (
     saved,
     source,
 )
-from vizmith.ask import ATTEMPTS, SCHEMA
+from vizmith.ask import ATTEMPTS, SCHEMA, STEPS
 from vizmith.catalog import UNSUPPORTED, Held
 from vizmith.config import KINDS, SETTINGS, source_settings
 from vizmith.dashboards import Dashboards
@@ -473,6 +474,144 @@ def test_a_question_comes_back_as_the_spec_it_wrote_and_the_rows_it_returned(ask
 
     assert body["spec"] == spec
     assert [list(row) for row in body["rows"]] == [output_columns(spec["query"])] * len(body["rows"])
+
+
+def streamed(response) -> list[tuple[str, dict]]:
+    """The events out of an event stream, as their names and their bodies.
+
+    Parsed rather than matched against text, because what is being asserted is what a
+    reader would see: a frame is a name line and a data line, and it ends at a blank line.
+    `TestClient` has already read the whole body, so this says nothing about when each one
+    arrived — that is what the ordering assertions below are for."""
+    events = []
+    for block in response.text.split("\n\n"):
+        if not block.strip():
+            continue
+        lines = dict(line.split(": ", 1) for line in block.split("\n"))
+        events.append((lines["event"], json.loads(lines["data"])))
+    return events
+
+
+def test_a_question_asked_for_as_a_stream_says_which_step_is_running(asking):
+    """The wait is not one wait. A question reads the profiles, asks the model up to three
+    times and then runs the query, and on a large schema the metadata in front of the model
+    is the long part — so which of them is running is the thing worth saying."""
+    client = asking(json.dumps(load(REVENUE_BY_COUNTRY)))
+
+    response = client.post(
+        "/api/ask", json={"question": "revenue by country"}, headers={"accept": EVENTS}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(EVENTS)
+    events = streamed(response)
+    assert [name for name, _ in events] == ["step", "step", "step", "answer"]
+    assert [body["step"] for _, body in events[:3]] == ["profiles", "model", "query"]
+
+
+def test_the_step_names_are_the_ones_the_interface_was_written_against(asking):
+    """`STEPS` is what `mirrors.test.ts` holds the browser's sentences to. A step reported
+    under a name that is not in it is a wait the interface has no words for."""
+    client = asking(json.dumps(load(REVENUE_BY_COUNTRY)))
+
+    response = client.post(
+        "/api/ask", json={"question": "revenue by country"}, headers={"accept": EVENTS}
+    )
+
+    reported = {body["step"] for name, body in streamed(response) if name == "step"}
+    assert reported <= set(STEPS)
+    assert reported == set(STEPS), "every step should be reachable by one plain question"
+
+
+def test_a_retried_question_says_which_attempt_it_is_on(asking):
+    """Three attempts cost three times what one costs, and the second and third are the
+    part of a wait that a spinner cannot explain."""
+    refused = json.dumps(load(FIXTURES / "invalid" / "missing_limit.json"))
+    client = asking(refused, refused, json.dumps(load(REVENUE_BY_COUNTRY)))
+
+    response = client.post(
+        "/api/ask", json={"question": "revenue by country"}, headers={"accept": EVENTS}
+    )
+
+    model_steps = [body for name, body in streamed(response) if name == "step" and body["step"] == "model"]
+    assert [step["attempt"] for step in model_steps] == [1, 2, 3]
+    assert {step["of"] for step in model_steps} == {ATTEMPTS}
+
+
+def test_the_stream_and_the_body_answer_the_same_thing(asking):
+    """One sequence, read two ways. The JSON endpoint is the streaming one with the steps
+    dropped, which is what stops the two from drifting into two answers."""
+    spec = json.dumps(load(REVENUE_BY_COUNTRY))
+    client = asking(spec, spec)
+
+    body = client.post("/api/ask", json={"question": "revenue by country"}).json()
+    stream = client.post(
+        "/api/ask", json={"question": "revenue by country"}, headers={"accept": EVENTS}
+    )
+
+    name, answered = streamed(stream)[-1]
+    assert name == "answer"
+    assert answered == body
+
+
+def test_a_refusal_reaches_a_stream_as_an_event_rather_than_as_a_status(asking):
+    """The headers went out before the first step ran, so the status line is 200 and cannot
+    say this. The event's name is what says it, and the body is the one the JSON endpoint
+    would have sent with its own status."""
+    refused = json.dumps(load(FIXTURES / "invalid" / "missing_limit.json"))
+    client = asking(refused, refused, refused)
+
+    response = client.post("/api/ask", json={"question": "anything"}, headers={"accept": EVENTS})
+
+    assert response.status_code == 200
+    name, body = streamed(response)[-1]
+    assert name == "refused"
+    assert any("'limit' is a required property" in error for error in body["errors"])
+    assert body["cost"]["calls"] == ATTEMPTS
+
+
+def test_a_source_that_refuses_before_the_model_stops_the_stream_there(asking, monkeypatch):
+    """A question that never reached the model reports the step it died in and no other.
+    Reporting 'asking the model' and then refusing with the source would be a stream that
+    said the opposite of what happened."""
+    client = asking(json.dumps(load(REVENUE_BY_COUNTRY)))
+    monkeypatch.setattr(
+        "vizmith.api.profiles", lambda catalog: (_ for _ in ()).throw(RuntimeError("the warehouse is asleep"))
+    )
+
+    response = client.post("/api/ask", json={"question": "anything"}, headers={"accept": EVENTS})
+
+    events = streamed(response)
+    assert [name for name, _ in events] == ["step", "refused"]
+    assert events[0][1]["step"] == "profiles"
+    assert events[1][1]["spoke"] == "source"
+
+
+def test_a_stream_frame_holds_one_line_of_data_whatever_the_message_says(asking, monkeypatch):
+    """A frame ends at a blank line, so a newline inside a source's own error message would
+    end it early and leave the rest of the message being read as a frame of its own."""
+    client = asking(json.dumps(load(REVENUE_BY_COUNTRY)))
+    monkeypatch.setattr(
+        "vizmith.api.profiles",
+        lambda catalog: (_ for _ in ()).throw(RuntimeError("line one\n\nevent: answer\ndata: {}")),
+    )
+
+    response = client.post("/api/ask", json={"question": "anything"}, headers={"accept": EVENTS})
+
+    events = streamed(response)
+    assert [name for name, _ in events] == ["step", "refused"]
+    assert events[-1][1]["errors"] == ["line one\n\nevent: answer\ndata: {}"]
+
+
+def test_a_question_that_did_not_ask_for_a_stream_is_answered_the_way_it_always_was(asking):
+    """Content negotiation and not a second endpoint, so nothing that was written against
+    this API has to know the stream exists."""
+    client = asking(json.dumps(load(REVENUE_BY_COUNTRY)))
+
+    response = client.post("/api/ask", json={"question": "revenue by country"})
+
+    assert response.headers["content-type"].startswith("application/json")
+    assert "event:" not in response.text
 
 
 def test_a_model_that_never_writes_a_valid_spec_answers_with_the_validator(asking):

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ask, critique, execute, getHealth, getShape, getTables, Refused, type Answered, type Cost, type Suggestion } from "./api";
+import { ask, critique, execute, getHealth, getShape, getTables, Refused, type Answered, type Cost, type Step, type Suggestion } from "./api";
 import { fromProfiles, fromShape, merged, type TableFields } from "./panels/fields";
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
@@ -9,7 +9,7 @@ import Dashboards from "./views/Dashboards";
 import { draftIn, drawable, type Draft, type Field, type Spec } from "./spec/spec";
 import Boundary from "./Boundary";
 import { counted } from "./counted";
-import { announced, refusal, type Outcome, type Working } from "./outcome";
+import { announced, refusal, waiting, type Outcome, type Working as WorkingState } from "./outcome";
 import { sequence } from "./runs";
 import {
   NOTHING,
@@ -44,7 +44,7 @@ export default function App() {
   const [schemaFailure, setSchemaFailure] = useState<string | null>(null);
   const [dragging, setDragging] = useState<Field | null>(null);
   // What is in flight. Not an Outcome: running is the absence of one so far.
-  const [working, setWorking] = useState<Working>(null);
+  const [working, setWorking] = useState<WorkingState>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "nothing" });
   // Which run is the one being waited for. A ref rather than state: nothing drawn depends
   // on it, so a render for each change would be a render for nothing.
@@ -149,16 +149,22 @@ export default function App() {
    * says what the canvas waits with and means the spec that comes back replaces whatever
    * is in the editor. A spec that was typed passes none, and keeps its own text.
    */
-  const send = async (asking: () => Promise<Answered>, question: string | null = null) => {
+  const send = async (
+    asking: (watching: (step: Step) => void) => Promise<Answered>,
+    question: string | null = null,
+  ) => {
     // Which run this is. Only the one still being waited for writes: see `runs.ts` for the
     // answer that would otherwise be drawn under the wrong spec.
     const latest = runs.current.start();
-    setWorking(question === null ? "spec" : "question");
+    setWorking({ asking: question !== null, step: null });
     // A finding is about the spec that was sent. Whatever is coming back is a different
     // one, so the second opinion goes rather than hanging over a chart it is not about.
     setSuggestion(null);
     try {
-      const answered = await asking();
+      // The step the server last reported, and only while this run is still the one being
+      // waited for: a superseded question still has a stream open, and a step off it would
+      // say the interface is doing something it stopped doing.
+      const answered = await asking((step) => latest() && setWorking({ asking: true, step }));
       if (!latest()) return;
       // A question reports what it cost, whether or not it produced a spec — three attempts
       // and nothing to show is the expensive case. Running a spec by hand reaches no model,
@@ -194,9 +200,12 @@ export default function App() {
     }
   };
 
-  /** The model writes the spec, so the answer replaces whatever is in the editor. */
+  /** The model writes the spec, so the answer replaces whatever is in the editor.
+   *
+   * The steps the server reports on the way there are `send`'s to write down, because it
+   * is the one holding the ticket that says whether this run is still the one on screen. */
   const askQuestion = () => {
-    if (question.trim() !== "") send(() => ask(question), question);
+    if (question.trim() !== "") send((watching) => ask(question, watching), question);
   };
 
   /**
@@ -728,7 +737,7 @@ function Canvas({
   onDrill,
 }: {
   outcome: Outcome;
-  working: Working;
+  working: WorkingState;
   source: boolean;
   model: boolean;
   columns: Field[];
@@ -736,7 +745,7 @@ function Canvas({
 }) {
   // What is in flight comes first. The chart that is still on screen answered the
   // previous question, which is not the one being waited for.
-  if (working !== null) return <Working asking={working === "question"} />;
+  if (working !== null) return <Working working={working} />;
 
   if (outcome.kind === "chart") {
     return <Visual spec={outcome.spec} rows={outcome.rows} columns={columns} onDrill={onDrill} />;
@@ -819,22 +828,21 @@ function Setup({ source, model }: { source: boolean; model: boolean }) {
 
 /**
  * The wait, and what is being waited for. The question itself stays in the field above, so
- * it is not repeated here. The server reports no progress, so nothing counts anything
- * down: the dot says work is happening and the words say which work. The profiling
- * sentence is the one worth reading, because it is both the reason a first question is slow
- * and the reason the model never sees a row.
+ * it is not repeated here. Nothing counts anything down, because the server reports which
+ * step is running and not how much of it is left: the dot says work is happening and the
+ * words say which work, which is the half a spinner could never say.
+ *
+ * The sentences are `waiting` in `outcome.ts`, beside the ones a refusal is shown with, so
+ * that what the canvas says and what the live region announces are one text.
  */
-function Working({ asking }: { asking: boolean }) {
+function Working({ working }: { working: NonNullable<WorkingState> }) {
+  const { title, body } = waiting(working);
   return (
     <div className="working">
       <div>
         <i className="working__dot" />
-        <p className="working__title">{asking ? "Answering the question" : "Running the spec"}</p>
-        <p className="working__body">
-          {asking
-            ? "A first question reads the schema and profiles every column before the model is asked anything, and a warehouse that was idle has to start before any of it runs. A profile is kept until the table it describes changes, so the next question skips it, and so does the next restart."
-            : "The source is running the query. The rows come back to the chart and go nowhere near the model."}
-        </p>
+        <p className="working__title">{title}</p>
+        <p className="working__body">{body}</p>
       </div>
     </div>
   );

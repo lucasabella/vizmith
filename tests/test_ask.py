@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from vizmith.ask import ATTEMPTS, VALUE_LIMIT, Answer, ask, prompt
+from vizmith.ask import ATTEMPTS, STEPS, VALUE_LIMIT, Answer, Step, ask, asking, prompt
 from vizmith.model import Completion, Endpoint, Model, Spend
 from vizmith.profiler import ColumnProfile, TableProfile, profile_table
 
@@ -69,6 +69,48 @@ def test_a_valid_answer_is_returned_on_the_first_attempt(tables):
     # The scripted model reports no usage, so what is recorded is the one call it took.
     assert answer == Answer(spec=VALID, errors=[], attempts=1, spent=Spend(calls=1))
     assert len(model.prompts) == 1
+
+
+def test_the_loop_reports_each_attempt_before_it_runs(tables):
+    """What somebody waiting is told. The attempt is reported before the request goes out,
+    because the point of saying it is that they are about to wait for that request rather
+    than that they have finished waiting for it."""
+    model = ScriptedModel(json.dumps(REJECTED), json.dumps(VALID))
+    loop = asking("revenue by country", tables, model)
+
+    first = next(loop)
+    asked_before_the_first_step = len(model.prompts)
+    second = next(loop)
+
+    assert asked_before_the_first_step == 0
+    assert first == Step("model", 1, ATTEMPTS)
+    assert second == Step("model", 2, ATTEMPTS)
+    assert first.name in STEPS
+
+
+def test_draining_the_loop_is_what_ask_answers(tables):
+    """`ask` is the generator with the commentary dropped. Two accounts of what a question
+    costs is what this is written to prevent."""
+    drained = ask("revenue by country", tables, ScriptedModel(json.dumps(REJECTED), json.dumps(VALID)))
+    loop = asking("revenue by country", tables, ScriptedModel(json.dumps(REJECTED), json.dumps(VALID)))
+    steps = []
+    while True:
+        try:
+            steps.append(next(loop))
+        except StopIteration as done:
+            iterated = done.value
+            break
+
+    assert iterated == drained
+    assert steps == [Step("model", 1, ATTEMPTS), Step("model", 2, ATTEMPTS)]
+
+
+def test_a_step_says_what_it_is_over_the_wire(tables):
+    """The name and the two numbers, and nothing a person reads: what a step *says* is the
+    interface's, the same way `spoke` names which part refused and the browser writes the
+    sentence."""
+    assert Step("model", 2, 3).as_dict() == {"step": "model", "attempt": 2, "of": 3}
+    assert Step("profiles").as_dict() == {"step": "profiles", "attempt": 0, "of": 0}
 
 
 def test_a_rejected_answer_is_asked_again_with_the_validator_s_words(tables):

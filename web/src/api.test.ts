@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ask, execute, getHealth, Refused } from "./api";
+import { ask, execute, getHealth, Refused, type Step } from "./api";
 import type { Spec } from "./spec/spec";
 
 /**
@@ -21,9 +21,34 @@ const responding = (status: number, body: unknown) =>
       ok: status < 400,
       status,
       statusText: status === 500 ? "Internal Server Error" : "Bad Request",
+      headers: new Headers({ "content-type": "application/json" }),
+      body: null,
       json: () => (body === undefined ? Promise.reject(new Error("no body")) : Promise.resolve(body)),
     } as Response),
   );
+
+/** A response that arrives as an event stream, in the chunks given. The chunks are what the
+ * network handed over and not what the server wrote: a frame is split wherever a packet
+ * ended, which is the case the reader has to survive and the reason it keeps a buffer. */
+const streaming = (...chunks: string[]) =>
+  vi.fn(() =>
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "content-type": "text/event-stream; charset=utf-8" }),
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder();
+          for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+          controller.close();
+        },
+      }),
+      json: () => Promise.reject(new Error("this one is a stream")),
+    } as unknown as Response),
+  );
+
+const event = (name: string, body: unknown) => `event: ${name}\ndata: ${JSON.stringify(body)}\n\n`;
 
 const spec = { chart: { mark: "bar", encoding: {} } } as unknown as Spec;
 
@@ -105,6 +130,9 @@ describe("the requests themselves", () => {
     expect(url).toBe("/api/ask");
     expect(options.method).toBe("POST");
     expect(JSON.parse(String(options.body))).toEqual({ question: "revenue by country" });
+    // The stream is asked for by Accept, so the same endpoint answers both ways and a
+    // caller that predates it is answered the way it always was.
+    expect(String((options.headers as Record<string, string>).Accept)).toContain("text/event-stream");
   });
 
   it("reads what the server says about itself, which is what the controls gate on", async () => {
@@ -117,5 +145,91 @@ describe("the requests themselves", () => {
 
     expect(health.source).toBe(true);
     expect(health.model).toBe(false);
+  });
+});
+
+/**
+ * The steps, which are the other thing this endpoint answers with.
+ *
+ * A question reads the profiles, asks the model up to three times and then runs the query,
+ * and on a large schema the part in front of the model is the long one. What is under test
+ * is the reader: the frames are the server's, split where a network would split them.
+ */
+describe("a question answered as a stream", () => {
+  const answer = { spec, rows: [], cost: { calls: 1, prompt: 10, completion: 2, total: 12 } };
+
+  it("hears each step as it starts, and answers with the last event", async () => {
+    vi.stubGlobal(
+      "fetch",
+      streaming(
+        event("step", { step: "profiles", attempt: 0, of: 0 }),
+        event("step", { step: "model", attempt: 1, of: 3 }),
+        event("step", { step: "query", attempt: 0, of: 0 }),
+        event("answer", answer),
+      ),
+    );
+    const heard: Step[] = [];
+
+    const answered = await ask("revenue by country", (step) => heard.push(step));
+
+    expect(heard.map((step) => step.step)).toEqual(["profiles", "model", "query"]);
+    expect(heard[1].of).toBe(3);
+    expect(answered.cost?.calls).toBe(1);
+  });
+
+  it("reads a frame the network split down the middle", async () => {
+    // A chunk boundary falls where the packet ended, not where a frame does. Splitting the
+    // buffer and keeping the tail is the whole of why this is not one JSON.parse.
+    const frames = event("step", { step: "model", attempt: 2, of: 3 }) + event("answer", answer);
+    const at = frames.indexOf("attempt") + 3;
+    vi.stubGlobal("fetch", streaming(frames.slice(0, at), frames.slice(at)));
+    const heard: Step[] = [];
+
+    await ask("revenue by country", (step) => heard.push(step));
+
+    expect(heard).toEqual([{ step: "model", attempt: 2, of: 3 }]);
+  });
+
+  it("throws what a refusal event carries, since the status line could not say it", async () => {
+    // The headers went out before the first step ran, so the response is a 200 and the name
+    // of the event is the only thing that says otherwise.
+    vi.stubGlobal(
+      "fetch",
+      streaming(
+        event("step", { step: "profiles", attempt: 0, of: 0 }),
+        event("refused", { errors: ["the warehouse is asleep"], spoke: "source" }),
+      ),
+    );
+
+    const error = await ask("anything").catch((thrown: Refused) => thrown);
+
+    expect(error).toBeInstanceOf(Refused);
+    expect((error as Refused).spoke).toBe("source");
+    expect((error as Refused).errors).toEqual(["the warehouse is asleep"]);
+  });
+
+  it("says so when the stream ends without answering", async () => {
+    vi.stubGlobal("fetch", streaming(event("step", { step: "model", attempt: 1, of: 3 })));
+
+    const error = await ask("anything").catch((thrown: Refused) => thrown);
+
+    expect((error as Refused).said).toBe(false);
+    expect((error as Refused).errors[0]).toContain("never arrived");
+  });
+
+  it("reads a body from a server that answered with one instead", async () => {
+    // Rationing and the host check refuse before the endpoint runs, so they answer with a
+    // status and a body however the request asked to be answered.
+    vi.stubGlobal("fetch", responding(429, { errors: ["36 more seconds"], spoke: "rations" }));
+
+    const error = await ask("anything").catch((thrown: Refused) => thrown);
+
+    expect((error as Refused).spoke).toBe("rations");
+  });
+
+  it("ignores an event it has no name for, rather than failing on it", async () => {
+    vi.stubGlobal("fetch", streaming(event("heartbeat", {}), event("answer", answer)));
+
+    expect((await ask("revenue by country")).rows).toEqual([]);
   });
 });
