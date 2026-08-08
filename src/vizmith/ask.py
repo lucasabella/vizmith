@@ -67,6 +67,14 @@ written down is the answer to the day it was written and this spec may be saved 
 again. Each token reads only its own keys: "today" and "now" take neither a unit nor a
 count, and "start_of" takes no count.
 
+How a number reads is the channel's to say, and only a quantitative channel may say it.
+Add "format" to a channel where the question or the column names what the number is:
+{"kind": "currency", "symbol": "€"} for money, {"kind": "unit", "symbol": "kg"} for a
+measured quantity, {"kind": "percent"} for a proportion the source stores as a fraction, so
+0.2317 is drawn as 23%, and {"kind": "number"} for anything that is only a number. Each
+takes an optional "decimals" and "group". Leave it off where nothing in the question or the
+column names a unit; a wrong one is worse than none.
+
 Every query needs a row limit. A chart that binds a colour channel also needs limit_by,
 whose column is that colour dimension and whose by is an aggregate's alias, so the two are
 never the same. It keeps the top N values of one dimension whole instead of cutting rows

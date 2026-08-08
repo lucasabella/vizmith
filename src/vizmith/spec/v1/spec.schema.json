@@ -556,8 +556,70 @@
         "title": {
           "type": "string",
           "maxLength": 120
+        },
+        "format": {
+          "$ref": "#/$defs/format"
         }
       }
+    },
+    "format": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "number",
+            "percent",
+            "currency",
+            "unit"
+          ]
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "group": {
+          "type": "boolean"
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "currency",
+                  "unit"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "symbol"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "symbol"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

@@ -45,6 +45,10 @@ EXPECTED_ERROR = {
         "query.limit_by.by: 'status' is not one of the query's aggregate aliases, and "
         "ranking 'country' needs a measure to rank it by"
     ),
+    "format_on_a_dimension.json": (
+        "chart.encoding.x: 'format' says how a number reads, and 'country' is bound as "
+        "'nominal'. Only a quantitative channel carries one"
+    ),
     "value_axis_bound_to_a_dimension.json": (
         "chart.encoding.y: 'country' is bound to the value axis as 'nominal', but the value "
         "axis carries a measure, so its type is 'quantitative'"
@@ -146,6 +150,67 @@ def test_a_null_check_carrying_a_value_is_rejected_in_words():
 @pytest.mark.parametrize("spec", [None, [], "spec", 7, {"spec_version": "2"}])
 def test_a_spec_of_the_wrong_shape_returns_errors_rather_than_raising(spec):
     assert validate_spec(spec)
+
+
+def formatted(**format_: object) -> dict:
+    """A valid spec whose measure carries the format under test."""
+    spec = load(FIXTURES / "valid" / "orders_per_month.json")
+    spec["chart"]["encoding"]["y"]["format"] = format_
+    return spec
+
+
+@pytest.mark.parametrize(
+    "format_",
+    [
+        {"kind": "number"},
+        {"kind": "number", "decimals": 0, "group": False},
+        {"kind": "percent", "decimals": 1},
+        {"kind": "currency", "symbol": "€"},
+        {"kind": "unit", "symbol": "kg", "decimals": 2},
+    ],
+    ids=lambda f: str(f["kind"]),
+)
+def test_the_four_ways_a_number_reads_are_accepted(format_):
+    assert validate_spec(formatted(**format_)) == []
+
+
+@pytest.mark.parametrize(
+    ("format_", "because"),
+    [
+        ({}, "'kind' is a required property"),
+        ({"kind": "scientific"}, "is not one of"),
+        ({"kind": "number", "symbol": "kg"}, "should not be valid"),
+        ({"kind": "currency"}, "'symbol' is a required property"),
+        ({"kind": "unit"}, "'symbol' is a required property"),
+        ({"kind": "number", "decimals": 7}, "is greater than the maximum"),
+        ({"kind": "number", "decimals": -1}, "is less than the minimum"),
+        ({"kind": "number", "places": 2}, "Additional properties are not allowed"),
+    ],
+    ids=["no kind", "unknown kind", "symbol without one", "currency", "unit", "7dp", "-1dp", "extra key"],
+)
+def test_a_format_outside_the_vocabulary_is_refused(format_, because):
+    """The vocabulary is closed on purpose: a format string is a small language, and a
+    model that can write one is writing something the renderer then executes. Each of these
+    is a way of reaching past the four kinds, and the schema refuses all of them — a symbol
+    on a kind that places none included, since where it would be drawn is undefined."""
+    errors = validate_spec(formatted(**format_))
+
+    assert errors, f"{format_} should not validate"
+    assert any(because in error for error in errors), errors
+
+
+def test_a_format_on_a_dimension_is_refused_in_words():
+    """The rule the schema cannot state, because it depends on a sibling property. A format
+    describes a number, so a channel bound to a category has nothing for it to apply to."""
+    spec = load(FIXTURES / "valid" / "revenue_by_country.json")
+    spec["chart"]["encoding"]["x"]["format"] = {"kind": "percent"}
+
+    assert validate_spec(spec) == [
+        (
+            "chart.encoding.x: 'format' says how a number reads, and 'country' is bound as "
+            "'nominal'. Only a quantitative channel carries one"
+        )
+    ]
 
 
 def qualified(column: str) -> dict:

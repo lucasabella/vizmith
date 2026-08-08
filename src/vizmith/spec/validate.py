@@ -133,6 +133,17 @@ def _semantic_errors(spec: dict) -> list[str]:
         if field not in known:
             errors.append(f"chart.encoding.{channel}: '{field}' is not an output column of the query")
 
+        # A format says how a number reads, so a channel bound to something else has
+        # nothing for it to apply to. The schema cannot say this: it would have to make
+        # `format` conditional on a sibling property, which is the `if`/`then` shape that
+        # costs a readable error message and that the endpoints refuse to constrain on.
+        if "format" in spec_channel and spec_channel["type"] != "quantitative":
+            errors.append(
+                f"chart.encoding.{channel}: 'format' says how a number reads, and "
+                f"'{field}' is bound as '{spec_channel['type']}'. Only a quantitative "
+                "channel carries one"
+            )
+
     # The value axis is what a chart is read against, so it carries a measure. A nominal 'y'
     # draws categories up the side and produces a picture with no quantity anywhere in it.
     if encoding["y"]["type"] != "quantitative":

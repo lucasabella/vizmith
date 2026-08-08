@@ -118,6 +118,32 @@ describe("clicking a mark", () => {
 
     expect(await screen.findByText("Netherlands")).toBeDefined();
   });
+
+  it("shows the source's own number in the table, whatever the chart's format says", async () => {
+    // The other half of what makes a format legal. Rounding on an axis is a label, and the
+    // rule is that the value behind it stays reachable — so the table is the one place in
+    // the product that never formats, the same way it is the escape hatch for the three
+    // series colours that fail the contrast rule.
+    const formatted = {
+      ...SPEC,
+      chart: {
+        ...SPEC.chart,
+        encoding: {
+          ...SPEC.chart.encoding,
+          y: { field: "revenue", type: "quantitative", format: { kind: "currency", symbol: "€" } },
+        },
+      },
+    } as unknown as Spec;
+    const user = userEvent.setup();
+    render(
+      <Visual spec={formatted} rows={[{ country: "Netherlands", revenue: 91240.5 }]} columns={COLUMNS} onDrill={vi.fn()} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Table" }));
+
+    expect(await screen.findByText("91240.5")).toBeDefined();
+    expect(screen.queryByText("€91,240.50")).toBeNull();
+  });
 });
 
 /**

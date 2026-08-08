@@ -27,6 +27,7 @@ import {
   COMPARISONS,
   DIRECTIONS,
   FNS,
+  FORMAT_KINDS,
   JOIN_TYPES,
   MARKS,
   OPS,
@@ -253,6 +254,7 @@ describe("the grammar's closed sets, against the schema that is the grammar", ()
   it.each([
     ["chart.mark", enumOf("chart", "mark"), MARKS],
     ["channel.type", enumOf("channel", "type"), CHANNEL_TYPES],
+    ["format.kind", enumOf("format", "kind"), FORMAT_KINDS],
     ["aggregate.fn", enumOf("aggregate", "fn"), FNS],
     ["select_item.truncate", enumOf("select_item", "truncate"), UNITS],
     ["join.type", enumOf("join", "type"), JOIN_TYPES],

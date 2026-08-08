@@ -11,7 +11,8 @@ hold both would bury one.
 Two rules run through all of it.
 
 **The grammar grows first and everything else follows, never the reverse.** The mark set,
-the operators, the aggregate functions and the truncation units are closed by
+the operators, the aggregate functions, the truncation units and the four ways a number
+reads are closed by
 `src/vizmith/spec/v1/spec.schema.json`, which is the grammar and the only judge of a spec.
 A renderer that can draw something the schema does not allow is a renderer nobody can reach;
 a schema that allows something no renderer draws is a chart that comes back blank. The

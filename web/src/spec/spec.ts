@@ -39,10 +39,32 @@ export type Query = {
   limit: number;
 };
 
+/**
+ * How a number on this channel reads.
+ *
+ * A closed vocabulary and not a format string. A format string is a small language, and a
+ * model that can write one is a model writing something the renderer then executes — which
+ * is the rule the query IR exists to keep, applied to the other half of a spec.
+ *
+ * `symbol` is placed by the renderer rather than interpreted: before the number for money,
+ * after it for a unit, which is what those two conventions are. It belongs to `currency`
+ * and `unit` and the schema refuses it anywhere else, so there is no third placement to
+ * guess at.
+ */
+export type Format = {
+  kind: FormatKind;
+  decimals?: number;
+  group?: boolean;
+  symbol?: string;
+};
+
 /** What a column is bound to, and how the axis it lands on should read it. The type is the
  * grammar's rather than the profile's: a column is `integer` in a profile and
- * `quantitative` here, because what the renderer needs to know is how to draw it. */
-export type Channel = { field: string; type: ChannelType; title?: string };
+ * `quantitative` here, because what the renderer needs to know is how to draw it.
+ *
+ * `format` is about a number, so it is legal on a quantitative channel and refused by the
+ * validator on the others: a format on a category is a rule with nothing to apply to. */
+export type Channel = { field: string; type: ChannelType; title?: string; format?: Format };
 
 /** No `y` is a chart with nothing to measure, which is a draft rather than a spec. The
  * absence of `x` is different and is legal: it is the answer to a question with no
@@ -182,6 +204,12 @@ export type Mark = (typeof MARKS)[number];
 
 export const CHANNEL_TYPES = ["nominal", "ordinal", "quantitative", "temporal"] as const;
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
+
+/** The four ways a number reads. `unit` is the one that is not a number type — it is a
+ * number with something appended — and it is here rather than being a free suffix because
+ * a closed set is what keeps this out of format-string territory. */
+export const FORMAT_KINDS = ["number", "percent", "currency", "unit"] as const;
+export type FormatKind = (typeof FORMAT_KINDS)[number];
 
 export const FNS = ["sum", "avg", "min", "max", "count", "count_distinct"] as const;
 export type Fn = (typeof FNS)[number];

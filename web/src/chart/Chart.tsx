@@ -8,7 +8,7 @@ import {
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { SURF, buildOption, clickedValue, label, type Row } from "./option";
+import { SURF, buildOption, clickedValue, formatted, type Row } from "./option";
 import type { Spec } from "../spec/spec";
 import type { Clicked } from "../spec/drill";
 
@@ -145,7 +145,7 @@ export default function Chart({
       <div className="figure">
         <div>
           <p className="figure__name">{spec.title ?? y.title ?? y.field}</p>
-          <p className="figure__value">{label(rows[0][y.field])}</p>
+          <p className="figure__value">{formatted(rows[0][y.field], y.format)}</p>
         </div>
       </div>
     );
