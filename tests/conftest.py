@@ -8,6 +8,7 @@ import pytest
 from dotenv import load_dotenv
 from generate_data import COLUMNS, DATA_DIR, FOREIGN_KEYS, NULLABLE
 
+from vizmith.api import rations
 from vizmith.catalog import (
     DATE,
     DECIMAL,
@@ -255,6 +256,20 @@ def state_dir(tmp_path, monkeypatch):
     directory = tmp_path / "state"
     monkeypatch.setenv("VIZMITH_STATE_DIR", str(directory))
     return directory
+
+
+@pytest.fixture(autouse=True)
+def full_rations():
+    """Every test starts with its rations untouched.
+
+    The limiter holds one bucket per client for the life of the process, which is what it
+    is for and what makes it wrong in a suite: two hundred requests spread over a hundred
+    tests are one client emptying a bucket, and the test that happens to be running when it
+    empties is the one that fails. Cleared before and after, so a test about the limiter
+    leaves nothing behind either."""
+    rations.cache_clear()
+    yield
+    rations.cache_clear()
 
 
 @pytest.fixture

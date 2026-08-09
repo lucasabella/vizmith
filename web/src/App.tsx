@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { critique, getShape, getTables, Refused, type Suggestion } from "./api";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { getHealth, getShape, getTables, type Cost, type Suggestion } from "./api";
 import { fromProfiles, fromShape, merged, type TableFields } from "./panels/fields";
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";
 import Data from "./views/Data";
 import Dashboards from "./views/Dashboards";
-import { draftIn, drawable, type Draft, type Field } from "./spec/spec";
+import { drawable, type Field, type Spec } from "./spec/spec";
 import Boundary from "./Boundary";
 import { counted } from "./counted";
-import { announced, REJECTED, SAID, type Outcome, type Spoke, type Working } from "./outcome";
-import { sequence } from "./runs";
+import { announced, waiting, type Outcome, type Working as WorkingState } from "./outcome";
+import { useAsked } from "./asked";
+import { ChartIcon, DashboardIcon, DataIcon } from "./icons";
 import {
   NOTHING,
   editingIndex,
@@ -21,58 +22,65 @@ import {
 } from "./dashboard/dashboard";
 
 /**
- * How many drills the way back holds.
+ * The views the rail switches between, in the order it draws them.
  *
- * Every entry keeps the result set it replaced, so an unbounded history is one held copy
- * of every chart a person drilled through for as long as the tab is open, to support one
- * button. Ten is more steps than a drill path has and bounds what is kept; the oldest is
- * dropped, because the way back is walked from the newest end.
+ * A view used to be three separate edits — a button in the rail, a branch of a chain of
+ * ternaries in the canvas, and a string in the `useState` union that nothing tied to either
+ * — and the second was the one that got long. Here the union is the list, and `views` below
+ * is a `Record` keyed by it, so a view added to `VIEWS` and nowhere else is a type error
+ * that names the file and the missing key rather than a rail button that switches to a
+ * blank canvas. It is the same exhaustiveness check `STEP` and `SAID` in `outcome.ts` get
+ * from being keyed by the server's own unions.
  */
-const DRILLS_KEPT = 10;
+const VIEWS = ["chart", "dashboards", "data"] as const;
+
+type ViewId = (typeof VIEWS)[number];
+
+type View = {
+  /** What the rail button is called, which is also the name a screen reader reads. */
+  label: string;
+  icon: ReactNode;
+  /**
+   * Whether the view is a page that scrolls, rather than the chart canvas.
+   *
+   * The chart canvas is a column that fits: a field at the top, a plot that takes what is
+   * left, a strip at the bottom, and nothing that scrolls, because a chart that has to be
+   * scrolled to is one nobody sees. Data and Dashboards are documents, so they get padding
+   * and an overflow. One boolean rather than a class name in each entry, since these are
+   * the only two surfaces `docs/design.md` allows.
+   */
+  page: boolean;
+  render: () => ReactNode;
+};
 
 export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
   const [source, setSource] = useState(false);
   const [model, setModel] = useState(false);
   const [question, setQuestion] = useState("");
-  const [view, setView] = useState<"chart" | "dashboards" | "data">("chart");
+  const [view, setView] = useState<ViewId>("chart");
   const [visualisationOpen, setVisualisationOpen] = useState(true);
   const [fieldsOpen, setFieldsOpen] = useState(true);
   const [json, setJson] = useState(false);
-  const [text, setText] = useState("");
   const [tables, setTables] = useState<TableFields[] | null>(null);
   const [schemaFailure, setSchemaFailure] = useState<string | null>(null);
   const [dragging, setDragging] = useState<Field | null>(null);
-  // What is in flight. Not an Outcome: running is the absence of one so far.
-  const [working, setWorking] = useState<Working>(null);
-  const [outcome, setOutcome] = useState<Outcome>({ kind: "nothing" });
-  // Which run is the one being waited for. A ref rather than state: nothing drawn depends
-  // on it, so a render for each change would be a render for nothing.
-  const runs = useRef(sequence());
-  // Where a drill came from. A drill that cannot be undone is a trap, so the spec that was
-  // replaced stays reachable, as the text and the chart it drew. Taking a suggestion goes
-  // on the same stack, because it replaces a chart the same way a drill does.
-  const [before, setBefore] = useState<{ text: string; outcome: Outcome }[]>([]);
-  // The second opinion, once it has been asked for. Null is nobody asked; it is cleared on
-  // every run, because a finding is about the spec that was sent and the next chart is a
-  // different spec.
-  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
-  const [suggesting, setSuggesting] = useState(false);
+  // The spec on screen, the request that produced it and the way back from it. One machine,
+  // and it is in `asked.ts` so a test can drive it without rendering any of this.
+  const asked = useAsked();
   // The dashboard being arranged. It lives here rather than in the view, because adding
   // the chart on screen to it means going back to the Chart view to build the next one,
   // and a view holding it would throw the arrangement away on the way out. Correcting a
   // tile is the same journey in reverse, which is why the tile being corrected is part of
   // it rather than a second piece of state somewhere else.
   const [arrangement, setArrangement] = useState<Arrangement>(NOTHING);
-  const running = working !== null;
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((response) => response.json())
-      .then((body) => {
-        setBackend(body.version);
-        setSource(body.source);
-        setModel(body.model);
+    getHealth()
+      .then((said) => {
+        setBackend(said.version);
+        setSource(said.source);
+        setModel(said.model);
       })
       .catch(() => setBackend(null));
   }, []);
@@ -115,15 +123,6 @@ export default function App() {
     };
   }, [source]);
 
-  /**
-   * The spec on screen, parsed. The wells and `{ } JSON` are two views of one spec rather
-   * than two specs, so this is the one place it lives and both write to it. Text that is
-   * not a spec parses to nothing and the wells go quiet, which is what a half typed spec
-   * should do to them. What counts as a spec here is `draftIn`, which is in `spec.ts`
-   * because that is where a test can reach it.
-   */
-  const draft = useMemo<Draft | null>(() => draftIn(text), [text]);
-
   /** Every column of every table, which is what a well drags and what a drill offers. */
   const columns = useMemo<Field[]>(
     () =>
@@ -138,136 +137,6 @@ export default function App() {
   );
 
   /**
-   * The API decides. Nothing here validates, because a second opinion in the browser is
-   * one that can disagree with the one that counts. `question` is what was asked, which
-   * says what the canvas waits with and means the spec that comes back replaces whatever
-   * is in the editor. A spec that was typed passes none, and keeps its own text.
-   */
-  const send = async (endpoint: string, payload: object, question: string | null = null) => {
-    // Which run this is. Only the one still being waited for writes: see `runs.ts` for the
-    // answer that would otherwise be drawn under the wrong spec.
-    const latest = runs.current.start();
-    setWorking(question === null ? "spec" : "question");
-    // A finding is about the spec that was sent. Whatever is coming back is a different
-    // one, so the second opinion goes rather than hanging over a chart it is not about.
-    setSuggestion(null);
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = await response.json();
-      if (!latest()) return;
-      if (response.ok) {
-        setOutcome({ kind: "chart", spec: body.spec, rows: body.rows });
-        if (question !== null) setText(JSON.stringify(body.spec, null, 2));
-      } else if (body.spoke) {
-        setOutcome({ kind: "refused", spoke: body.spoke, lines: body.errors, ...SAID[body.spoke as Spoke] });
-      } else if (body.errors) {
-        setOutcome({ kind: "refused", heading: "What the validator said", lines: body.errors, plain: REJECTED });
-      } else {
-        setOutcome({
-          kind: "refused",
-          heading: "What the server said",
-          lines: [`${response.status} ${response.statusText}`],
-          plain: "The server answered without saying what failed, so there is nothing here to act on but the status.",
-        });
-      }
-    } catch (error) {
-      if (!latest()) return;
-      setOutcome({
-        kind: "refused",
-        heading: "What the browser said",
-        lines: [(error as Error).message],
-        plain: "The request never reached the server.",
-      });
-    } finally {
-      // Only the latest run clears it, so a superseded answer arriving first does not take
-      // the canvas off "Running the spec" while the run being waited for is still in flight.
-      if (latest()) setWorking(null);
-    }
-  };
-
-  const run = () => {
-    try {
-      send("/api/execute", { spec: JSON.parse(text) });
-    } catch (error) {
-      setOutcome({
-        kind: "refused",
-        heading: "What the parser said",
-        lines: [(error as Error).message],
-        plain: "The spec is not valid JSON, so it was never sent.",
-      });
-    }
-  };
-
-  /** The model writes the spec, so the answer replaces whatever is in the editor. */
-  const askQuestion = () => {
-    if (question.trim() !== "") send("/api/ask", { question }, question);
-  };
-
-  /**
-   * A well was edited. The spec it produced goes to `/api/execute`, which validates before
-   * it reaches the source, so a well that produced something illegal shows the validator's
-   * words and runs no query.
-   *
-   * A spec with no measure is not sent. It is not a spec that failed, it is one that is
-   * not finished, and answering an unfinished spec with a required property error would
-   * put a refusal on screen for every drop but the last.
-   */
-  const edited = (next: Draft) => {
-    setText(JSON.stringify(next, null, 2));
-    if (drawable(next)) send("/api/execute", { spec: next });
-  };
-
-  /** A drill replaces the chart, and keeps the one it replaced. */
-  const drilled = (next: Draft) => {
-    setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
-    setText(JSON.stringify(next, null, 2));
-    send("/api/execute", { spec: next });
-  };
-
-  /**
-   * A second opinion on the chart that is on screen. It is asked for rather than offered,
-   * because it is a request to a model and because a chart nothing refuses gets nothing
-   * said about it, which is a control that would sit there doing nothing most of the time.
-   *
-   * The spec that drew the chart is what is sent, not what is in the editor: a finding is
-   * about a chart that exists, and half a typed spec has not drawn one.
-   */
-  const askForASuggestion = async () => {
-    if (outcome.kind !== "chart") return;
-    setSuggesting(true);
-    setSuggestion(null);
-    try {
-      setSuggestion(await critique(outcome.spec));
-    } catch (error) {
-      // In the same shape a suggestion arrives in, so the strip has one thing to draw. The
-      // server's own words where there are any: a message written here would be a second
-      // account of something that already has one.
-      setSuggestion({
-        findings: [],
-        spec: null,
-        errors: error instanceof Refused ? error.errors : [(error as Error).message],
-      });
-    } finally {
-      setSuggesting(false);
-    }
-  };
-
-  /** A suggestion, taken. It replaces the chart and keeps the one it replaced, which is
-   * what the drill already does and for the same reason: the spec it was about is one
-   * control away. A suggestion nobody takes changes nothing at all. */
-  const takeTheSuggestion = () => {
-    const next = suggestion?.spec;
-    if (!next) return;
-    setBefore([...before, { text, outcome }].slice(-DRILLS_KEPT));
-    setText(JSON.stringify(next, null, 2));
-    send("/api/execute", { spec: next });
-  };
-
-  /**
    * A tile opened for correction. Its spec goes into the editor and runs, and the view
    * changes to the one that can edit it, because a correction made anywhere else would be
    * a second editor to keep true. What is on screen before this is not saved anywhere, so
@@ -275,8 +144,7 @@ export default function App() {
    */
   const correct = (tile: Tile) => {
     setArrangement({ ...arrangement, editing: tile });
-    setText(JSON.stringify(tile.spec, null, 2));
-    send("/api/execute", { spec: tile.spec });
+    asked.open(tile.spec);
     setView("chart");
   };
 
@@ -284,20 +152,12 @@ export default function App() {
    * asked for: a tile that changed on every run would move under the person correcting
    * it, and half a spec is not a chart anybody wants on a dashboard. */
   const putItBack = () => {
-    if (draft === null || !drawable(draft)) return;
-    setArrangement(putBack(arrangement, draft));
+    if (asked.draft === null || !drawable(asked.draft)) return;
+    setArrangement(putBack(arrangement, asked.draft));
     setView("dashboards");
   };
 
   const stopCorrecting = () => setArrangement({ ...arrangement, editing: null });
-
-  const back = () => {
-    const previous = before[before.length - 1];
-    if (previous === undefined) return;
-    setBefore(before.slice(0, -1));
-    setText(previous.text);
-    setOutcome(previous.outcome);
-  };
 
   // Both halves have to be there: the model writes the spec and the source answers it.
   const askable = source && model;
@@ -308,6 +168,117 @@ export default function App() {
     visualisationOpen ? "var(--w-visualisation)" : "var(--w-shutter)",
     fieldsOpen ? "var(--w-fields)" : "var(--w-shutter)",
   ].join(" ");
+
+  const views: Record<ViewId, View> = {
+    chart: {
+      label: "Chart",
+      icon: <ChartIcon />,
+      page: false,
+      render: () => (
+        <>
+          <div className="ask">
+            <div className="ask__field">
+              <span className="ask__caret">&rsaquo;</span>
+              <input
+                className="ask__input"
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && asked.askQuestion(question)}
+                placeholder={
+                  askable ? "Ask a question about your data" : "Finish setting Vizmith up to ask a question"
+                }
+                disabled={!askable || asked.running}
+              />
+              <span className="ask__key">Return</span>
+            </div>
+          </div>
+
+          {/* `aria-busy` while a run is in flight, so what is under it is reported as
+              changing rather than as the answer. */}
+          <div className="plot" aria-busy={asked.running}>
+            {/* The inner one. What the renderer draws is the part most likely to meet a
+                value nobody planned for, and losing the chart is a much smaller loss
+                than losing the wells, the editor and the dashboard being arranged —
+                all of which are outside it and still there. The next outcome clears it,
+                so one chart that could not be drawn does not refuse the ones after it. */}
+            <Boundary
+              what="chart"
+              note="The spec is still in the editor and the panels beside it are untouched."
+              resetOn={asked.outcome}
+            >
+              <Canvas
+                outcome={asked.outcome}
+                working={asked.working}
+                source={source}
+                model={model}
+                columns={columns}
+                onDrill={asked.drilled}
+              />
+            </Boundary>
+          </div>
+
+          {/* The page tabs that used to sit here were markup and did nothing. Several
+              charts at once is the Dashboards view now, and a control that looks like it
+              does that and does not is worse than not having one. */}
+          <div className="pages">
+            {asked.back === null ? null : (
+              <button className="pages__back" onClick={asked.back}>
+                &larr; the chart this came from
+              </button>
+            )}
+            {/* The model reads the chart, so this is only offered where there is one to
+                read and an endpoint to read it. */}
+            {asked.outcome.kind === "chart" && askable ? (
+              <SecondOpinion
+                suggestion={asked.suggestion}
+                asking={asked.suggesting}
+                disabled={asked.running}
+                onAsk={() => void asked.suggest()}
+                onTake={asked.takeSuggestion}
+                onDismiss={asked.dismissSuggestion}
+              />
+            ) : null}
+            {arrangement.editing !== null ? (
+              <Correcting
+                arrangement={arrangement}
+                drawable={asked.draft !== null && drawable(asked.draft)}
+                onPutBack={putItBack}
+                onStop={stopCorrecting}
+              />
+            ) : null}
+            <span className="pages__meta">
+              {asked.outcome.kind === "chart" ? counted(asked.outcome.rows.length, "row") : "no rows"}
+              {asked.spent === null ? null : <Spent cost={asked.spent.cost} what={asked.spent.what} />}
+            </span>
+          </div>
+        </>
+      ),
+    },
+    dashboards: {
+      label: "Dashboards",
+      icon: <DashboardIcon />,
+      page: true,
+      // The spec on screen is what a dashboard adds, so the two views share the one draft
+      // rather than the dashboard holding a copy that can drift from it.
+      render: () => (
+        <Dashboards
+          current={asked.draft}
+          columns={columns}
+          arrangement={arrangement}
+          onChange={setArrangement}
+          onEdit={correct}
+        />
+      ),
+    },
+    data: {
+      label: "Data",
+      icon: <DataIcon />,
+      page: true,
+      render: () => <Data />,
+    },
+  };
+
+  const current = views[view];
 
   return (
     <div className="app">
@@ -335,133 +306,26 @@ export default function App() {
         <span className="strip__text">
           The model writes <b>the query and the chart spec</b>. Everything else on this screen is code.
         </span>
-        <Badge outcome={outcome} />
+        <Badge outcome={asked.outcome} />
       </div>
 
       <div className="body" style={{ gridTemplateColumns: columnsFor }}>
         <nav className="rail">
-          <button
-            className={view === "chart" ? "rail__btn rail__btn--on" : "rail__btn"}
-            title="Chart"
-            aria-label="Chart"
-            aria-current={view === "chart" ? "page" : undefined}
-            onClick={() => setView("chart")}
-          >
-            <ChartIcon />
-          </button>
-          <button
-            className={view === "dashboards" ? "rail__btn rail__btn--on" : "rail__btn"}
-            title="Dashboards"
-            aria-label="Dashboards"
-            aria-current={view === "dashboards" ? "page" : undefined}
-            onClick={() => setView("dashboards")}
-          >
-            <DashboardIcon />
-          </button>
-          <button
-            className={view === "data" ? "rail__btn rail__btn--on" : "rail__btn"}
-            title="Data"
-            aria-label="Data"
-            aria-current={view === "data" ? "page" : undefined}
-            onClick={() => setView("data")}
-          >
-            <DataIcon />
-          </button>
+          {VIEWS.map((id) => (
+            <button
+              key={id}
+              className={view === id ? "rail__btn rail__btn--on" : "rail__btn"}
+              title={views[id].label}
+              aria-label={views[id].label}
+              aria-current={view === id ? "page" : undefined}
+              onClick={() => setView(id)}
+            >
+              {views[id].icon}
+            </button>
+          ))}
         </nav>
 
-        {view === "data" ? (
-          <main className="canvas canvas--data">
-            <Data />
-          </main>
-        ) : view === "dashboards" ? (
-          // The spec on screen is what a dashboard adds, so the two views share the one
-          // draft rather than the dashboard holding a copy that can drift from it.
-          <main className="canvas canvas--data">
-            <Dashboards
-              current={draft}
-              arrangement={arrangement}
-              onChange={setArrangement}
-              onEdit={correct}
-            />
-          </main>
-        ) : (
-          <main className="canvas">
-            <div className="ask">
-              <div className="ask__field">
-                <span className="ask__caret">&rsaquo;</span>
-                <input
-                  className="ask__input"
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  onKeyDown={(event) => event.key === "Enter" && askQuestion()}
-                  placeholder={
-                    askable ? "Ask a question about your data" : "Finish setting Vizmith up to ask a question"
-                  }
-                  disabled={!askable || running}
-                />
-                <span className="ask__key">Return</span>
-              </div>
-            </div>
-
-            {/* `aria-busy` while a run is in flight, so what is under it is reported as
-                changing rather than as the answer. */}
-            <div className="plot" aria-busy={running}>
-              {/* The inner one. What the renderer draws is the part most likely to meet a
-                  value nobody planned for, and losing the chart is a much smaller loss
-                  than losing the wells, the editor and the dashboard being arranged —
-                  all of which are outside it and still there. The next outcome clears it,
-                  so one chart that could not be drawn does not refuse the ones after it. */}
-              <Boundary
-                what="chart"
-                note="The spec is still in the editor and the panels beside it are untouched."
-                resetOn={outcome}
-              >
-                <Canvas
-                  outcome={outcome}
-                  working={working}
-                  source={source}
-                  model={model}
-                  columns={columns}
-                  onDrill={drilled}
-                />
-              </Boundary>
-            </div>
-
-            {/* The page tabs that used to sit here were markup and did nothing. Several
-                charts at once is the Dashboards view now, and a control that looks like it
-                does that and does not is worse than not having one. */}
-            <div className="pages">
-              {before.length > 0 ? (
-                <button className="pages__back" onClick={back}>
-                  &larr; the chart this came from
-                </button>
-              ) : null}
-              {/* The model reads the chart, so this is only offered where there is one to
-                  read and an endpoint to read it. */}
-              {outcome.kind === "chart" && askable ? (
-                <SecondOpinion
-                  suggestion={suggestion}
-                  asking={suggesting}
-                  disabled={running}
-                  onAsk={askForASuggestion}
-                  onTake={takeTheSuggestion}
-                  onDismiss={() => setSuggestion(null)}
-                />
-              ) : null}
-              {arrangement.editing !== null ? (
-                <Correcting
-                  arrangement={arrangement}
-                  drawable={draft !== null && drawable(draft)}
-                  onPutBack={putItBack}
-                  onStop={stopCorrecting}
-                />
-              ) : null}
-              <span className="pages__meta">
-                {outcome.kind === "chart" ? counted(outcome.rows.length, "row") : "no rows"}
-              </span>
-            </div>
-          </main>
-        )}
+        <main className={current.page ? "canvas canvas--data" : "canvas"}>{current.render()}</main>
 
         {visualisationOpen ? (
           <section className="panel">
@@ -489,8 +353,8 @@ export default function App() {
                 <div className="spec">
                   <textarea
                     className="spec__text"
-                    value={text}
-                    onChange={(event) => setText(event.target.value)}
+                    value={asked.text}
+                    onChange={(event) => asked.retype(event.target.value)}
                     placeholder="Paste a spec, then run it."
                     // A placeholder is not a name: it is gone the moment there is text in
                     // the field, which is the whole time somebody is working in it.
@@ -498,16 +362,21 @@ export default function App() {
                     spellCheck={false}
                   />
                   <div className="spec__foot">
-                    <button className="btn" onClick={run} disabled={!source || running || text === ""}>
-                      {running ? "Running" : "Run spec"}
+                    <button
+                      className="btn"
+                      onClick={asked.run}
+                      disabled={!source || asked.running || asked.text === ""}
+                    >
+                      {asked.running ? "Running" : "Run spec"}
                     </button>
                   </div>
                 </div>
               ) : (
                 <Wells
-                  draft={draft}
+                  draft={asked.draft}
                   dragging={dragging}
-                  onChange={edited}
+                  onChange={asked.edited}
+                  onDrag={setDragging}
                   onRelationships={() => setView("data")}
                 />
               )}
@@ -540,6 +409,7 @@ export default function App() {
               <Fields
                 tables={source ? tables : []}
                 failure={schemaFailure}
+                holding={dragging}
                 onDrag={setDragging}
               />
             </div>
@@ -573,7 +443,7 @@ export default function App() {
           on the readers that do announce an inserted region, it would say the same sentence
           again on every return. Out here it is in the document for the life of the tab. */}
       <p className="visually-hidden" role="status" aria-live="polite">
-        {announced(outcome, working)}
+        {announced(asked.outcome, asked.working)}
       </p>
     </div>
   );
@@ -636,6 +506,32 @@ function SecondOpinion({
 }
 
 /**
+ * What the last model request cost, beside what it produced.
+ *
+ * The number is here because the first argument this project makes is that sending a
+ * profile rather than rows keeps token cost bounded, and until now the figure that
+ * demonstrates it was measured on every request and thrown away — so the claim was asked
+ * for on trust by the audience most able to check it.
+ *
+ * Attempts are named rather than folded into the total, because they are the part that
+ * surprises: a question the validator rejected twice cost three times one it accepted, and
+ * a person watching one number go up has no way to know which happened. The breakdown
+ * between prompt and completion is in the title, since it is the second question and not
+ * the first.
+ */
+function Spent({ cost, what }: { cost: Cost; what: string }) {
+  const tokens = cost.total.toLocaleString();
+  return (
+    <span
+      className="pages__spent"
+      title={`${cost.prompt.toLocaleString()} in the prompt, ${cost.completion.toLocaleString()} in the answer`}
+    >
+      {`· ${tokens} tokens on ${what}${cost.calls > 1 ? `, over ${cost.calls} attempts` : ""}`}
+    </span>
+  );
+}
+
+/**
  * The tile being corrected, and the two ways out of it.
  *
  * A correction that cannot be abandoned is the same trap a drill without a way back is,
@@ -681,10 +577,11 @@ function Correcting({
 }
 
 /** The badge reports the spec and nothing else. A source that refused a statement did not
- * make the spec invalid, and a model that never answered wrote none to judge. */
+ * make the spec invalid, a model that never answered wrote none to judge, and a request the
+ * server would not spend on never reached the thing that judges one. */
 function Badge({ outcome }: { outcome: Outcome }) {
   const spoke = outcome.kind === "refused" ? outcome.spoke : undefined;
-  if (outcome.kind === "nothing" || spoke === "model") {
+  if (outcome.kind === "nothing" || spoke === "model" || spoke === "rations") {
     return <span className="strip__badge">no spec yet</span>;
   }
   const valid = outcome.kind === "chart" || spoke === "source";
@@ -704,15 +601,15 @@ function Canvas({
   onDrill,
 }: {
   outcome: Outcome;
-  working: Working;
+  working: WorkingState;
   source: boolean;
   model: boolean;
   columns: Field[];
-  onDrill: (draft: Draft) => void;
+  onDrill: (narrowed: Spec) => void;
 }) {
   // What is in flight comes first. The chart that is still on screen answered the
   // previous question, which is not the one being waited for.
-  if (working !== null) return <Working asking={working === "question"} />;
+  if (working !== null) return <Working working={working} />;
 
   if (outcome.kind === "chart") {
     return <Visual spec={outcome.spec} rows={outcome.rows} columns={columns} onDrill={onDrill} />;
@@ -795,54 +692,22 @@ function Setup({ source, model }: { source: boolean; model: boolean }) {
 
 /**
  * The wait, and what is being waited for. The question itself stays in the field above, so
- * it is not repeated here. The server reports no progress, so nothing counts anything
- * down: the dot says work is happening and the words say which work. The profiling
- * sentence is the one worth reading, because it is both the reason a first question is slow
- * and the reason the model never sees a row.
+ * it is not repeated here. Nothing counts anything down, because the server reports which
+ * step is running and not how much of it is left: the dot says work is happening and the
+ * words say which work, which is the half a spinner could never say.
+ *
+ * The sentences are `waiting` in `outcome.ts`, beside the ones a refusal is shown with, so
+ * that what the canvas says and what the live region announces are one text.
  */
-function Working({ asking }: { asking: boolean }) {
+function Working({ working }: { working: NonNullable<WorkingState> }) {
+  const { title, body } = waiting(working);
   return (
     <div className="working">
       <div>
         <i className="working__dot" />
-        <p className="working__title">{asking ? "Answering the question" : "Running the spec"}</p>
-        <p className="working__body">
-          {asking
-            ? "A first question reads the schema and profiles every column before the model is asked anything, and a warehouse that was idle has to start before any of it runs. A profile is kept until the table it describes changes, so the next question skips it, and so does the next restart."
-            : "The source is running the query. The rows come back to the chart and go nowhere near the model."}
-        </p>
+        <p className="working__title">{title}</p>
+        <p className="working__body">{body}</p>
       </div>
     </div>
-  );
-}
-
-function ChartIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <rect x="2" y="9" width="3.4" height="7" fill="currentColor" />
-      <rect x="7.3" y="5" width="3.4" height="11" fill="currentColor" />
-      <rect x="12.6" y="2" width="3.4" height="14" fill="currentColor" />
-    </svg>
-  );
-}
-
-function DashboardIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <rect x="2" y="2" width="6" height="7" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="10" y="2" width="6" height="4" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="2" y="11" width="6" height="5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="10" y="8" width="6" height="8" fill="none" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
-  );
-}
-
-function DataIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <rect x="2" y="3" width="14" height="12" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <line x1="2" y1="7" x2="16" y2="7" stroke="currentColor" strokeWidth="1.4" />
-      <line x1="7" y1="7" x2="7" y2="15" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
   );
 }

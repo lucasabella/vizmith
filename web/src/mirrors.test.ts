@@ -21,8 +21,24 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SERIES } from "./chart/option";
-import { COLUMNS, NAME_LIMIT, TILE_LIMIT, nameProblem } from "./dashboard/dashboard";
-import { namesTable, outputColumns, type Query } from "./spec/spec";
+import { COLUMNS, FILTER_LIMIT, NAME_LIMIT, TILE_LIMIT, nameProblem } from "./dashboard/dashboard";
+import {
+  CHANNEL_TYPES,
+  COMPARISONS,
+  DIRECTIONS,
+  FNS,
+  FORMAT_KINDS,
+  JOIN_TYPES,
+  MARKS,
+  OPERATORS,
+  OPS,
+  UNITS,
+  namesTable,
+  outputColumns,
+  type Query,
+} from "./spec/spec";
+import { SAID, STEP } from "./outcome";
+import { STEPS } from "./api";
 
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 const names = JSON.parse(read("../../tests/fixtures/mirrors/names.json"));
@@ -84,8 +100,10 @@ describe("the chart chrome, against the tokens it copies", () => {
 
   const token = (name: string) =>
     new RegExp(`--${name}:\\s*([^;]+);`).exec(tokens)?.[1].trim().toLowerCase();
+  // `export` is optional: `SURF` is exported so a PNG can be taken on the surface the
+  // chart is drawn on, and the mirror is about the value rather than about the visibility.
   const constant = (name: string) =>
-    new RegExp(`^const ${name} = (["'])(.*)\\1;`, "m").exec(option)?.[2].trim().toLowerCase();
+    new RegExp(`^(?:export )?const ${name} = (["'])(.*)\\1;`, "m").exec(option)?.[2].trim().toLowerCase();
 
   it.each([
     ["SURF", "surf"],
@@ -105,6 +123,66 @@ describe("the chart chrome, against the tokens it copies", () => {
   });
 });
 
+/**
+ * The document is a third copy, and it is the one a contributor reads before touching
+ * anything. `docs/design.md` quotes every series colour and the contrast each has against
+ * `--surf`, because a rule about which slots are legal is not a rule unless it says which
+ * slots. Those numbers are printed by `docs/palette.py` off `tokens.css`, so the failure
+ * mode is a colour changed in the stylesheet and a document still describing the old one —
+ * a contributor checking their new chart against a table that is quietly wrong.
+ *
+ * The contrast is recomputed here rather than parsed from the script, so the document is
+ * checked against the tokens and not against the thing that generated it.
+ */
+describe("the design document, against the tokens it documents", () => {
+  const tokens = read("./styles/tokens.css");
+  const design = read("../../docs/design.md");
+
+  const value = (name: string) =>
+    new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`).exec(tokens)?.[1].toLowerCase();
+
+  const luminance = (colour: string) => {
+    const channels = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255);
+    const [red, green, blue] = channels.map((one) =>
+      one <= 0.04045 ? one / 12.92 : ((one + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const contrast = (one: string, two: string) => {
+    const [first, second] = [luminance(one), luminance(two)];
+    return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+  };
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])("names slot %i and the colour the token holds", (slot) => {
+    const colour = value(`series-${slot}`);
+    expect(colour).toBeDefined();
+    // The row of the order table: a slot, its token, its hex.
+    expect(design).toContain(`| ${slot} | \`--series-${slot}\` | \`${colour}\` |`);
+  });
+
+  it("quotes each series colour's contrast against --surf as it is", () => {
+    const surf = value("surf");
+    expect(surf).toBeDefined();
+    for (let slot = 1; slot <= 8; slot += 1) {
+      const colour = value(`series-${slot}`) as string;
+      const stated = new RegExp(`\\| ${slot} \\| \`${colour}\` \\| ([0-9.]+) \\|`).exec(design);
+      expect(stated, `docs/design.md has no contrast row for slot ${slot}`).not.toBeNull();
+      expect(Number(stated?.[1])).toBeCloseTo(contrast(colour, surf as string), 2);
+    }
+  });
+
+  it("names the three slots the Table tab exists for", () => {
+    // The escape hatch is quoted by slot number in Table.tsx and Visual.tsx, so which
+    // slots fail 3:1 is load-bearing prose rather than a detail of the table above it.
+    const surf = value("surf") as string;
+    const failing = [1, 2, 3, 4, 5, 6, 7, 8].filter(
+      (slot) => contrast(value(`series-${slot}`) as string, surf) < 3,
+    );
+    expect(failing).toEqual([3, 4, 5]);
+    expect(design).toContain("Three slots are under 3:1");
+  });
+});
+
 describe("the dashboard constants", () => {
   it("hold what the store holds", () => {
     const python = read("../../src/vizmith/dashboards.py");
@@ -113,5 +191,115 @@ describe("the dashboard constants", () => {
     expect(value("COLUMNS")).toBe(COLUMNS);
     expect(value("TILE_LIMIT")).toBe(TILE_LIMIT);
     expect(value("NAME_LIMIT")).toBe(NAME_LIMIT);
+  });
+
+  /** The cap on a dashboard's filters is the schema's cap on a query's, because they are
+   * the same list: the store judges one with the other's `$defs`, and a bar that offered a
+   * seventeenth would be offering one the save refuses. */
+  it("hold the filter cap the grammar holds", () => {
+    const grammar = JSON.parse(read("../../src/vizmith/spec/v1/spec.schema.json"));
+
+    expect(grammar.$defs.query.properties.filters.maxItems).toBe(FILTER_LIMIT);
+  });
+});
+
+/**
+ * Which parts can refuse, as the server names them.
+ *
+ * `spoke` is a field the server sets and the browser branches on, so the two hold the same
+ * closed set in two languages. What drift looks like here is a fifth part learning to
+ * refuse — a cache, a second model call, whatever it turns out to be — and every interface
+ * that catches it falling through to the sentence for a refusal it is not: `refusal()` in
+ * `outcome.ts` reads an unknown name as `undefined` and heads it "What the validator said",
+ * which is the wrong heading and the wrong next move, silently.
+ *
+ * Only `SAID` is asserted, because TypeScript already ties the rest to it: `SAID` is typed
+ * `Record<Spoke, …>`, so a key here that the union does not have, or a member of the union
+ * with no key, is a compile error rather than something this test has to catch twice.
+ */
+describe("the parts that can refuse", () => {
+  it("are the parts the browser has a sentence for", () => {
+    const python = read("../../src/vizmith/api.py");
+    // Two ways the server writes one. Most refusals go through `refused(spoke, …)`; the
+    // rationing handler writes the body itself, because it is an exception handler and has
+    // a `Retry-After` header to set as well.
+    const named = [
+      ...[...python.matchAll(/\brefused\(\s*"([a-z]+)"/g)].map((match) => match[1]),
+      ...[...python.matchAll(/"spoke":\s*"([a-z]+)"/g)].map((match) => match[1]),
+    ];
+
+    expect(named.length).toBeGreaterThan(0);
+    expect([...new Set(named)].sort()).toEqual(Object.keys(SAID).sort());
+  });
+});
+
+/**
+ * The steps of a question, as the server names them.
+ *
+ * The same line as `spoke` above: the server names the step and this interface writes the
+ * sentence. Drift here is a step reported under a name the browser has no words for, and
+ * what that looks like on screen is the wait going blank part way through — which is the
+ * thing #119 was about, arriving back through the door it was shown out of.
+ *
+ * `STEP` in `outcome.ts` is `Record<StepName, …>`, so a name in the union with no sentence
+ * is already a compile error. What this adds is the half a type cannot reach: whether the
+ * union is what Python actually reports.
+ */
+describe("the steps a question passes through", () => {
+  it("are the steps the browser has a sentence for", () => {
+    const python = read("../../src/vizmith/ask.py");
+    const declared = /^STEPS = \(([^)]*)\)/m.exec(python)?.[1] ?? "";
+    const named = [...declared.matchAll(/"([a-z]+)"/g)].map((match) => match[1]);
+
+    expect(named.length).toBeGreaterThan(0);
+    expect([...named].sort()).toEqual([...STEPS].sort());
+    expect(Object.keys(STEP).sort()).toEqual([...STEPS].sort());
+  });
+});
+
+/**
+ * The grammar, which is the copy that matters most and was the one nothing held.
+ *
+ * `spec/v1/spec.schema.json` is the grammar and the only judge of a spec. The browser
+ * writes its closed sets out again — a mark goes in a control, an operator goes in a filter
+ * the wells build, a channel type picks an axis — and every one of them was a union typed by
+ * hand with nothing failing when it disagreed. What disagreement looks like is not a crash:
+ * it is a spec this interface wrote, accepted by the checker, accepted by the wells, and
+ * refused by the validator after the round trip.
+ *
+ * There is one copy of each now, in `spec/spec.ts`, which is what this holds to the schema.
+ * The renderer had two more and has none: `option.ts` imports the grammar's types, and its
+ * two lookups are `Record`s keyed by them, so a mark or a channel type added here is a
+ * compile error in the renderer until it is drawn. That is stricter than a mirror and it is
+ * why the assertions that read this file as text are gone.
+ *
+ * Read as sets rather than in order, unlike the colour mirror above: the order of these is
+ * the order a person reads them in a menu, which is a decision for the interface, while
+ * which values exist is the schema's.
+ */
+describe("the grammar's closed sets, against the schema that is the grammar", () => {
+  const schema = JSON.parse(read("../../src/vizmith/spec/v1/spec.schema.json"));
+
+  /** One enum, by the definition it belongs to. Read rather than assumed: a definition
+   * renamed away answers `undefined` and fails as a missing mirror, rather than passing as
+   * two empty lists that agree. */
+  const enumOf = (definition: string, property: string): string[] =>
+    schema.$defs[definition].properties[property].enum;
+
+  it.each([
+    ["chart.mark", enumOf("chart", "mark"), MARKS],
+    ["channel.type", enumOf("channel", "type"), CHANNEL_TYPES],
+    ["format.kind", enumOf("format", "kind"), FORMAT_KINDS],
+    ["aggregate.fn", enumOf("aggregate", "fn"), FNS],
+    ["select_item.truncate", enumOf("select_item", "truncate"), UNITS],
+    ["join.type", enumOf("join", "type"), JOIN_TYPES],
+    ["order_by.direction", enumOf("order_by", "direction"), DIRECTIONS],
+    ["limit_by.direction", schema.$defs.query.properties.limit_by.properties.direction.enum, DIRECTIONS],
+    ["condition.op", enumOf("condition", "op"), OPS],
+    ["expression.op", enumOf("expression", "op"), OPERATORS],
+    ["having.op", enumOf("having", "op"), COMPARISONS],
+  ])("%s is what spec.ts holds", (_name, declared, held) => {
+    expect(declared.length).toBeGreaterThan(0);
+    expect([...declared].sort()).toEqual([...held].sort());
   });
 });

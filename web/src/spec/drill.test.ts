@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { Row, Spec } from "../chart/option";
+import type { Row } from "../chart/option";
+import type { Spec } from "./spec";
 import { NoDrill, candidates, drill } from "./drill";
-import type { Draft, Field } from "./spec";
+import { type Condition, type Draft, type Field, anyOf } from "./spec";
+
+/** The one condition a drill wrote. A drill narrows to a single clicked value, so it never
+ * writes a disjunction; this says so to the checker and fails loudly if that stops holding. */
+function only(spec: Spec): Condition {
+  const [filter] = spec.query.filters ?? [];
+  if (filter === undefined || anyOf(filter)) throw new Error(`not one condition: ${JSON.stringify(filter)}`);
+  return filter;
+}
 
 const field = (table: string, column: string, type = "string"): Field => ({ table, column, type });
 
@@ -83,14 +92,14 @@ describe("clicking a mark", () => {
     const numbers: Row[] = [{ country: 4, revenue: 10 }];
     const narrowed = drill(spec(chart()), numbers, { category: "4" }, STATUS);
 
-    expect(narrowed.query.filters?.[0].value).toBe(4);
+    expect(only(narrowed).value).toBe(4);
   });
 
   it("keeps the value out of the SQL by leaving it a value, quote and all", () => {
     const quoted: Row[] = [{ country: "O'Hare's", revenue: 1 }];
     const narrowed = drill(spec(chart()), quoted, { category: "O'Hare's" }, STATUS);
 
-    expect(narrowed.query.filters?.[0].value).toBe("O'Hare's");
+    expect(only(narrowed).value).toBe("O'Hare's");
   });
 
   it("drills a null with is_null rather than comparing it to an empty string", () => {
@@ -133,6 +142,19 @@ describe("clicking a mark", () => {
   it("refuses a truncated date axis, where a filter would mean one day of a month", () => {
     expect(() => drill(spec(chart("month")), [{ country: "2026-01-01", revenue: 1 }], { category: "2026-01-01" }, STATUS)).toThrow(
       /truncated date/,
+    );
+  });
+
+  it("refuses a computed axis, where there is no column behind the label", () => {
+    // The narrowed question would have to filter on the result of the arithmetic, which
+    // the grammar cannot say — and which is a different question from the one clicked.
+    const computed = chart();
+    computed.query.group_by = [
+      { expression: { left: "orders.total", op: "-", right: "orders.item_count" }, as: "country" },
+    ];
+
+    expect(() => drill(spec(computed), rows, { category: "Germany" }, STATUS)).toThrow(
+      /worked out from other columns/,
     );
   });
 

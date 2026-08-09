@@ -193,8 +193,10 @@ function Section({
                 <span className="rel__joins">joins</span>
                 <Side table={relationship.right_table} column={relationship.right_column} />
               </span>
-              {/* The word, not only the colour. Provenance was encoded in colour alone
-                  twice in this project and cut both times for that reason. */}
+              {/* The word, not only the colour: provenance is never colour alone, which is
+                  a rule in docs/design.md rather than a habit. It was encoded in colour
+                  alone twice in this project and cut both times, because a fact and a
+                  guess being the same shape is the failure the Data view exists to stop. */}
               <span className={`rel__kind rel__kind--${relationship.kind}`}>{word}</span>
               {children ? <span className="rel__actions">{children(relationship)}</span> : null}
             </li>

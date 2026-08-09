@@ -11,6 +11,7 @@ import type {
   TooltipComponentOption,
 } from "echarts/components";
 import type { ComposeOption } from "echarts/core";
+import type { Channel, ChannelType, Format, FormatKind, Mark, Spec } from "../spec/spec";
 
 /**
  * The option this file builds, composed of the four series types the grammar's marks
@@ -33,39 +34,39 @@ export type EChartsOption = ComposeOption<
   | GridComponentOption
 >;
 
-export type ChannelType = "nominal" | "ordinal" | "quantitative" | "temporal";
-
-export type Channel = {
-  field: string;
-  type: ChannelType;
-  title?: string;
-};
-
-export type Spec = {
-  title?: string;
-  chart: {
-    mark: "bar" | "line" | "area" | "point" | "arc";
-    stack?: boolean;
-    // No x is a question with no dimension. The validator has already established that the
-    // query returns one row, and `Chart` draws the measure as a figure rather than a plot.
-    encoding: { x?: Channel; y: Channel; color?: Channel };
-  };
-};
-
 export type Value = string | number | boolean | null;
 export type Row = Record<string, Value>;
 
 /** Shown wherever a null reaches an axis or a legend. Left joins produce these. */
 export const NO_VALUE = "(no value)";
 
-const AXIS_TYPE = {
+/**
+ * How each channel type is drawn, and which ECharts series each mark compiles to.
+ *
+ * Both are `Record`s over the grammar's own types rather than object literals, so a mark or
+ * a channel type added to `spec.ts` — which `mirrors.test.ts` holds to the schema — is a
+ * compile error here until it is drawn. That is the check that used to be a text-parsing
+ * mirror over this file, and it is stricter: a channel type with no entry draws an axis of
+ * `undefined`, which ECharts reads as a category axis and a person reads as dates in the
+ * wrong order.
+ *
+ * An arc is the one mark that is not a series lookup. It is a pie, configured differently
+ * enough to be a branch in `buildOption`, so it is excluded by name rather than by being
+ * quietly absent.
+ */
+const AXIS_TYPE: Record<ChannelType, "category" | "value" | "time"> = {
   nominal: "category",
   ordinal: "category",
   quantitative: "value",
   temporal: "time",
-} as const;
+};
 
-const SERIES_TYPE = { bar: "bar", line: "line", area: "line", point: "scatter" } as const;
+const SERIES_TYPE: Record<Exclude<Mark, "arc">, "bar" | "line" | "scatter"> = {
+  bar: "bar",
+  line: "line",
+  area: "line",
+  point: "scatter",
+};
 
 /**
  * ECharts paints onto a canvas and cannot read a CSS variable, so the chrome the chart
@@ -73,7 +74,10 @@ const SERIES_TYPE = { bar: "bar", line: "line", area: "line", point: "scatter" }
  * moves without this one. Reading the computed styles instead would give one copy, at
  * the price of a DOM in every test of this file.
  */
-const SURF = "#ffffff";
+// Exported because a PNG of the chart needs it: a canvas has no background of its own, and
+// a picture taken without one is transparent where the chart's surface should be. The mirror
+// test reads it as text off this line either way.
+export const SURF = "#ffffff";
 const INK = "#14202b";
 const INK_2 = "#5c6b7a";
 const INK_3 = "#8c99a6";
@@ -87,10 +91,12 @@ const LABEL = { fontFamily: MONO, fontSize: 11, color: INK_2 };
 
 /**
  * The series colours, in the order they are assigned, which is the order and not a
- * palette to pick from. The first three are the ones the application tokens carry and are
- * validated against these surfaces; all eight are the data viz skill's categorical order,
- * whose sequence is the colourblind safety mechanism rather than a preference. Assigning
- * out of order breaks the adjacent pair gates that order was chosen to clear.
+ * palette to pick from. The sequence is the colour vision safety mechanism rather than a
+ * preference: adjacent slots are the pairs a reader actually has to tell apart, since a
+ * series takes the next free slot, and the order is what keeps them apart under the two
+ * common dichromacies. The gate, what it does not promise, and the measurements are in
+ * docs/design.md; the worst adjacent pair clears it by three dE, so assigning out of
+ * order is not a matter of taste.
  *
  * Never cycled. ECharts cycles its own palette by default, which is what puts one colour
  * on two entries of one legend: a chart that lies about which series it is.
@@ -127,6 +133,59 @@ const ROTATE_LONGER_THAN = 12;
 /** How a row value is written wherever one is shown, so an axis, a tooltip and a figure
  * cannot disagree about what came out of the warehouse. Never rounded. */
 export const label = (value: Value): string => (value === null ? NO_VALUE : String(value));
+
+/**
+ * How many decimals each kind takes when the spec does not say.
+ *
+ * `null` is "as many as the number has", which is what every value did before there was a
+ * format at all. Money is two because a price with one is a price that lost something, and
+ * a percentage is none because the reason to ask for one is usually to stop reading
+ * `0.2317`. Both are defaults and both are overridden by `decimals`.
+ */
+const DECIMALS: Record<FormatKind, number | null> = {
+  number: null,
+  percent: 0,
+  currency: 2,
+  unit: null,
+};
+
+/** Thousands, in groups of three, on the integer part only. */
+const GROUPED = /\B(?=(\d{3})+(?!\d))/g;
+
+/**
+ * A number, as its channel says it reads.
+ *
+ * Written here rather than handed to `Intl.NumberFormat`, which is the obvious answer and
+ * the wrong one for this: its separators come from the browser's locale, so one chart would
+ * read `1,234.5` on one machine and `1.234,5` on the next, and the committed screenshot
+ * would depend on where it was taken. A spec is supposed to be a reproducible artefact, so
+ * the convention is fixed — comma between thousands, full stop before the decimals — which
+ * is also what every unformatted value in this interface already looks like.
+ *
+ * This is the one place in the product that rounds, and it is legal for the same reason the
+ * three low contrast series colours are: the Table tab is beside every chart and shows what
+ * the source sent. An axis reading `86,331,297.40` and a table reading `86331297.4` are the
+ * same number, and only one of them is a label.
+ *
+ * Anything that is not a number comes back through `label` untouched. A null is `(no value)`
+ * whatever the format says, because a format describes a number and a null is not one.
+ */
+export function formatted(value: Value, format?: Format): string {
+  if (format === undefined || typeof value !== "number") return label(value);
+
+  const scaled = format.kind === "percent" ? value * 100 : value;
+  const places = format.decimals ?? DECIMALS[format.kind];
+  const fixed = places === null ? String(scaled) : scaled.toFixed(places);
+  const [whole, fraction] = fixed.split(".");
+  const written =
+    (format.group ?? true ? whole.replace(GROUPED, ",") : whole) +
+    (fraction === undefined ? "" : `.${fraction}`);
+
+  if (format.kind === "percent") return `${written}%`;
+  if (format.kind === "currency") return `${format.symbol}${written}`;
+  if (format.kind === "unit") return `${written} ${format.symbol}`;
+  return written;
+}
 
 /** The contract's two forms for a temporal value: a date, or a date and a time, never a
  * zone. Anything else did not come out of a catalog that keeps the contract. */
@@ -246,7 +305,7 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
     textStyle: { fontFamily: MONO, fontSize: 11.5, color: INK },
     // The rows go in with the mark, because a temporal axis carries instants and the
     // value behind one is in the result set rather than in the mark.
-    formatter: (params: unknown) => markText(spec, params as Mark, rows),
+    formatter: (params: unknown) => markText(spec, params as Hovered, rows),
   } as const;
 
   if (mark === "arc") {
@@ -337,21 +396,26 @@ function legend(names: string[], titled: boolean) {
 }
 
 /** What a mark stands for. The shape ECharts hands a tooltip formatter, narrowed to the
- * three fields this one reads. */
-export type Mark = { name: string; seriesName?: string; value: Value | Value[] };
+ * three fields this one reads.
+ *
+ * Named for the hover rather than for the mark, because `Mark` in `spec/spec.ts` is the
+ * grammar's mark — one of five words a spec may use — and two unrelated types under one
+ * name in a codebase this size is a name that has to be read twice every time. */
+export type Hovered = { name: string; seriesName?: string; value: Value | Value[] };
 
 /**
  * The text in a tooltip: the category, the series when a colour channel made one, and
- * the measure. Values are the ones in the result set, printed as they arrived, because a
- * tooltip that rounds is a tooltip that has to be checked somewhere else.
+ * the measure. Values are the ones in the result set, written the way the channel they
+ * came in on says they read — a tooltip that disagreed with the axis above it would be two
+ * accounts of one number, and the unformatted one is a tab away in the table.
  */
-export function markText(spec: Spec, mark: Mark, rows: Row[] = []): string {
+export function markText(spec: Spec, mark: Hovered, rows: Row[] = []): string {
   const { x, y, color } = spec.chart.encoding;
   // A time or value axis carries the pair, a category axis carries the measure alone and
   // names the category on the axis.
   const pair = Array.isArray(mark.value) ? mark.value : null;
   const line = (channel: Channel, value: Value) =>
-    `${axisName(channel)}: ${label(sent(rows, channel, value))}`;
+    `${axisName(channel)}: ${formatted(sent(rows, channel, value), channel.format)}`;
 
   return [
     ...(x ? [line(x, pair ? pair[0] : mark.name)] : []),
@@ -380,16 +444,30 @@ export function clickedValue(
 }
 
 /** Axis chrome. Hairline gridlines a step off the surface, mono for a field name and for
- * a figure, both of which a machine produced. */
+ * a figure, both of which a machine produced.
+ *
+ * A formatted channel writes its own tick labels. Only a value axis reaches this with a
+ * format on it — the validator refuses one on a category or a date — and a category axis
+ * has its labels replaced by `categoryLabel` in the caller either way. */
 const axis = (channel: Channel) => ({
   type: AXIS_TYPE[channel.type],
   name: axisName(channel),
   nameTextStyle: { fontFamily: MONO, fontSize: 11, color: INK_3 },
   axisLine: { lineStyle: { color: RULE_2 } },
   axisTick: { lineStyle: { color: RULE_2 } },
-  axisLabel: LABEL,
+  axisLabel: ticks(channel),
   splitLine: { lineStyle: { color: RULE } },
 });
+
+/** The tick labels of one axis: the chrome every axis wears, plus the channel's own
+ * formatter where it has a format. One declared shape rather than two, because an axis
+ * built two ways is two axis types to ECharts and neither matches the other. */
+type Ticks = typeof LABEL & { formatter?: (value: Value) => string };
+
+const ticks = (channel: Channel): Ticks =>
+  channel.format === undefined
+    ? LABEL
+    : { ...LABEL, formatter: (value: Value) => formatted(value, channel.format) };
 
 /**
  * Every category keeps its label. `interval: 0` emits all of them and `hideOverlap`
@@ -417,7 +495,7 @@ const categoryLabel = (categories: string[]) => {
 
 /** Mark geometry the design system fixes. A stacked segment stays square, because a
  * rounded top halfway up a bar reads as the top of the bar. */
-function markStyle(mark: Spec["chart"]["mark"], stack?: boolean) {
+function markStyle(mark: Mark, stack?: boolean) {
   const END: [number, number, number, number] = [4, 4, 0, 0];
 
   if (mark === "bar") {

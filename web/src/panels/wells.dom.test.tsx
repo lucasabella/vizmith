@@ -36,13 +36,21 @@ const revenue = (): Draft => place(place(null, "Axis", COUNTRY), "Values", TOTAL
  *
  * The zone is found inside the well that names it rather than by position, because a well
  * only draws one while it is empty — counting them means counting a number that changes
- * with the spec. There is no role to query by, which is the keyboard gap #143 is about.
+ * with the spec. It is a button now, so the tests below this one find it by its name; a
+ * drop is still fired as a drop, because that is the gesture being driven.
  */
 function wells(draft: Draft | null, dragging: Field | null) {
   const onChange = vi.fn();
+  const onDrag = vi.fn();
   const onRelationships = vi.fn();
   const { container } = render(
-    <Wells draft={draft} dragging={dragging} onChange={onChange} onRelationships={onRelationships} />,
+    <Wells
+      draft={draft}
+      dragging={dragging}
+      onChange={onChange}
+      onDrag={onDrag}
+      onRelationships={onRelationships}
+    />,
   );
 
   const drop = (well: string) => {
@@ -55,7 +63,7 @@ function wells(draft: Draft | null, dragging: Field | null) {
     fireEvent.drop(zone);
   };
 
-  return { drop, onChange, onRelationships };
+  return { drop, onChange, onDrag, onRelationships };
 }
 
 afterEach(() => vi.mocked(getJoinPath).mockReset());
@@ -146,5 +154,83 @@ describe("a column dropped into a well", () => {
 
     await waitFor(() => expect(getJoinPath).not.toHaveBeenCalled());
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The same result, without a mouse.
+ *
+ * Dragging a column into a well is the primary interaction of the product and it was
+ * implemented entirely in HTML5 drag and drop, so a keyboard only person could read the
+ * Fields panel, reach every control around it, and not build a chart at all — WCAG 2.1.1,
+ * level A. What closes it is an input path and not a second feature: picking a field up
+ * sets the same state a drag sets, and the well presses the same `drop`.
+ */
+describe("a field placed without a mouse", () => {
+  it("places what is held in the well that was pressed", async () => {
+    const user = userEvent.setup();
+    const { onChange } = wells(null, COUNTRY);
+
+    await user.click(screen.getByRole("button", { name: "Place country in Axis" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const next = onChange.mock.calls[0][0] as Draft;
+    expect(next.chart.encoding.x?.field).toBe("country");
+  });
+
+  it("says what pressing a well will do with what is held", async () => {
+    // "Drop a field here" describes a gesture the keyboard does not have. The visible text
+    // is inside the accessible name rather than replaced by it, so somebody driving this
+    // by voice can say what they can see.
+    wells(revenue(), CATEGORY);
+
+    expect(screen.getByRole("button", { name: "Place category in Legend" })).toBeTruthy();
+    // Every empty well says it, because any of them is where it might go.
+    expect(screen.getAllByText("Place category").length).toBeGreaterThan(1);
+  });
+
+  it("puts the field down once it has landed, so the next Return does not place it twice", async () => {
+    const user = userEvent.setup();
+    const { onDrag } = wells(null, COUNTRY);
+
+    await user.click(screen.getByRole("button", { name: "Place country in Axis" }));
+
+    await waitFor(() => expect(onDrag).toHaveBeenCalledWith(null));
+  });
+
+  it("keeps holding a field the well refused, since the next thing is another well", async () => {
+    const user = userEvent.setup();
+    // Top N ranks a column the chart already groups by, and this one is not one.
+    const { onDrag, onChange } = wells(revenue(), CATEGORY);
+
+    await user.click(screen.getByRole("button", { name: "Place category in Top N" }));
+
+    await screen.findByRole("alert");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDrag).not.toHaveBeenCalled();
+  });
+
+  it("offers a way out, because a field picked up is a mode somebody can be stuck in", async () => {
+    const user = userEvent.setup();
+    const { onDrag } = wells(revenue(), CATEGORY);
+
+    await user.click(screen.getByRole("button", { name: "Place category in Legend" }));
+    await user.keyboard("{Escape}");
+
+    expect(onDrag).toHaveBeenCalledWith(null);
+  });
+
+  it("says what is held, for somebody who cannot see a row go into its pressed state", () => {
+    const { container } = render(
+      <Wells
+        draft={null}
+        dragging={COUNTRY}
+        onChange={() => {}}
+        onDrag={() => {}}
+        onRelationships={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Holding country");
   });
 });

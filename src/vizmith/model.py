@@ -84,6 +84,63 @@ class Completion:
     usage: dict
 
 
+@dataclass(frozen=True)
+class Spend:
+    """What a question cost, in tokens and in calls.
+
+    Every completion carries a usage block and nothing read it, which is an odd gap in a
+    project whose first argument is that sending metadata rather than data keeps token cost
+    bounded: the number that demonstrates the claim was in hand on every request and went
+    out of scope with the response. It is summed across the retry loop rather than reported
+    per call, because what a person asked for was an answer and what they paid for was every
+    attempt at one — a question that took three tries costing three times one that took one
+    is exactly the thing worth seeing.
+
+    `calls` is how many billed requests it took, which is the retry loop made visible.
+    `total` is what the endpoint said rather than the sum of the other two, because a model
+    that bills for reasoning tokens reports them in neither.
+    """
+
+    calls: int = 0
+    prompt: int = 0
+    completion: int = 0
+    total: int = 0
+
+    @staticmethod
+    def of(usage: dict | None) -> "Spend":
+        """One call's usage, in whichever of the two spellings the endpoint used. The
+        OpenAI convention is `prompt_tokens` and `completion_tokens`; enough
+        OpenAI-compatible servers answer with `input_tokens` and `output_tokens` that
+        reading only one of them would report zero for a question that cost money. An
+        endpoint that reports nothing gives a call with no tokens on it, which is honest:
+        the call happened and what it cost is not known here."""
+        said = usage or {}
+        prompt = int(said.get("prompt_tokens") or said.get("input_tokens") or 0)
+        completion = int(said.get("completion_tokens") or said.get("output_tokens") or 0)
+        return Spend(
+            calls=1,
+            prompt=prompt,
+            completion=completion,
+            total=int(said.get("total_tokens") or 0) or prompt + completion,
+        )
+
+    def __add__(self, other: "Spend") -> "Spend":
+        return Spend(
+            calls=self.calls + other.calls,
+            prompt=self.prompt + other.prompt,
+            completion=self.completion + other.completion,
+            total=self.total + other.total,
+        )
+
+    def as_dict(self) -> dict:
+        return {
+            "calls": self.calls,
+            "prompt": self.prompt,
+            "completion": self.completion,
+            "total": self.total,
+        }
+
+
 class ModelError(Exception):
     """Everything that can go wrong reaching a model, in one type, so a caller handles a
     timeout, a refused connection and a rejected request the same way rather than

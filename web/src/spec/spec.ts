@@ -6,28 +6,77 @@
  * same judge a model's answer goes through. A second opinion in the browser is one that
  * can disagree with the one that counts.
  *
- * The renderer's `Spec` is what a validated spec looks like on the way back. A draft is
- * what is on screen while it is being built, which is the same shape with a measure that
- * may not be there yet.
+ * The grammar's own types live here, and there is one of them. A `Spec` is what the API
+ * answers with and what the renderer draws; a `Draft` is the same object while it is being
+ * built, which is a spec whose measure may not be bound yet. They used to be two partial
+ * types in two files with `as unknown as` between them — see below.
  */
-
-import type { Channel, ChannelType, Spec } from "../chart/option";
-
-export type Mark = "bar" | "line" | "area" | "point" | "arc";
 
 export type Join = {
   table: string;
-  type?: "inner" | "left";
+  type?: JoinType;
   on: { left: string; right: string }[];
 };
 
-export type Item = { column: string; truncate?: Unit; as?: string };
-export type Aggregate = { fn: Fn; column?: string; as: string };
-export type Filter = { column: string; op: string; value?: unknown };
+/**
+ * One side of a computed column: a column reference, or a number the builder binds like
+ * every other value. A number on the left is legal because `-` and `/` do not commute.
+ */
+export type Operand = string | number;
+
+/**
+ * A value the source does not store, as one operation over two it does.
+ *
+ * One operation and no nesting, which is the whole of the grammar here: neither side can
+ * be another expression, and there are four operators and no functions. That is enough for
+ * a revenue the warehouse does not hold and for a ratio, and it is deliberately not a
+ * language — an expression language is the shortest path back to the model writing
+ * something that gets compiled. See DESIGN.md.
+ */
+export type Expression = { left: Operand; op: Operator; right: Operand };
+
+export const OPERATORS = ["+", "-", "*", "/"] as const;
+export type Operator = (typeof OPERATORS)[number];
+
+/** A column, or a computed one. An item that computes says what to call the result,
+ * because there is no column name to fall back on: `nameOf` is where that is read. */
+export type Item =
+  | { column: string; expression?: undefined; truncate?: Unit; as?: string }
+  | { column?: undefined; expression: Expression; truncate?: undefined; as: string };
+
+export type Aggregate =
+  | { fn: Fn; column?: string; expression?: undefined; as: string }
+  | { fn: Fn; column?: undefined; expression: Expression; as: string };
+
+/**
+ * What this item is called in the result set: its alias, or the last segment of its column.
+ *
+ * The same rule as `output_columns` in the validator, and it was written out at eight call
+ * sites before there was a second shape of item to get it wrong on. An item that computes
+ * has no column, so the alias is not a preference there — it is the only name it has, which
+ * is why the schema requires one.
+ */
+export const nameOf = (item: Item): string =>
+  item.column === undefined ? item.as : (item.as ?? item.column.split(".").slice(-1)[0]);
+/** One test against one column. */
+export type Condition = { column: string; op: Op; value?: unknown };
+
+/** Conditions where any one of them is enough, which is the only place `filters` is not a
+ * conjunction. One level and no recursion: the grammar allows a disjunction of conditions
+ * and not a disjunction of disjunctions, so the compiled `WHERE` is a conjunction of
+ * clauses where a clause may be a bracketed `OR`. See DESIGN.md. */
+export type Disjunction = { any: Condition[] };
+
+export type Filter = Condition | Disjunction;
+
+/** Which of the two shapes a filter is. `any` is the key the grammar tells them apart by,
+ * so it is the key this reads: a condition cannot carry one, because the schema refuses
+ * every property beside it. */
+export const anyOf = (filter: Filter): filter is Disjunction => "any" in filter;
 /** A condition on a measure, which names an aggregate alias rather than a column because
  * what it compares is the aggregated value. `filters` is the other one and applies before
  * the rows are grouped. */
-export type Having = { aggregate: string; op: string; value: string | number };
+export type Having = { aggregate: string; op: Comparison; value: string | number };
 
 export type Query = {
   from: string;
@@ -37,26 +86,89 @@ export type Query = {
   group_by?: Item[];
   aggregates?: Aggregate[];
   having?: Having[];
-  order_by?: { column: string; direction?: "asc" | "desc" }[];
-  limit_by?: { column: string; by: string; limit: number; direction?: "asc" | "desc" };
+  order_by?: { column: string; direction?: Direction }[];
+  limit_by?: { column: string; by: string; limit: number; direction?: Direction };
   limit: number;
 };
 
-export type Draft = {
+/**
+ * How a number on this channel reads.
+ *
+ * A closed vocabulary and not a format string. A format string is a small language, and a
+ * model that can write one is a model writing something the renderer then executes — which
+ * is the rule the query IR exists to keep, applied to the other half of a spec.
+ *
+ * `symbol` is placed by the renderer rather than interpreted: before the number for money,
+ * after it for a unit, which is what those two conventions are. It belongs to `currency`
+ * and `unit` and the schema refuses it anywhere else, so there is no third placement to
+ * guess at.
+ */
+export type Format = {
+  kind: FormatKind;
+  decimals?: number;
+  group?: boolean;
+  symbol?: string;
+};
+
+/** What a column is bound to, and how the axis it lands on should read it. The type is the
+ * grammar's rather than the profile's: a column is `integer` in a profile and
+ * `quantitative` here, because what the renderer needs to know is how to draw it.
+ *
+ * `format` is about a number, so it is legal on a quantitative channel and refused by the
+ * validator on the others: a format on a category is a rule with nothing to apply to. */
+export type Channel = { field: string; type: ChannelType; title?: string; format?: Format };
+
+/** No `y` is a chart with nothing to measure, which is a draft rather than a spec. The
+ * absence of `x` is different and is legal: it is the answer to a question with no
+ * dimension, and it draws the measure as one figure. */
+export type Encoding = { x?: Channel; y: Channel; color?: Channel };
+
+export type Chart = { mark: Mark; stack?: boolean; encoding: Encoding };
+
+/**
+ * One object, described once.
+ *
+ * This is what `/api/execute` answers with, what a dashboard tile stores, and what the
+ * renderer draws. It used to be two types in two files that each left out part of it — the
+ * renderer's had no `query` at all, not optional but absent — with `as unknown as` between
+ * them at six call sites. That cast is the one that exists because the direct one is
+ * refused, and it was doing real work in both directions: `drill.ts` cannot read
+ * `query.group_by` off a type that says there is no query.
+ *
+ * What it cost was that the split was invisible until somebody added a field to the
+ * grammar, at which point it landed in whichever of the two types was in front of them and
+ * the other one kept not knowing, with the casts making sure nothing said so.
+ */
+export type Spec = {
   spec_version: "1";
   title?: string;
   query: Query;
-  chart: { mark: Mark; stack?: boolean; encoding: { x?: Channel; y?: Channel; color?: Channel } };
+  chart: Chart;
 };
 
-/** A validated spec is a draft that has a measure. The renderer only ever sees one of
- * these, because it only ever draws what the API returned. */
-export const drawable = (draft: Draft): draft is Draft & { chart: { encoding: { y: Channel } } } =>
-  draft.chart.encoding.y !== undefined;
+/**
+ * A spec whose measure may not be bound yet, which is what is on screen while it is being
+ * built. That is the whole of the difference, so it is the whole of what is written down:
+ * a draft is a spec with a partial encoding and nothing else changed.
+ *
+ * A `Spec` is therefore already a `Draft` as far as the checker is concerned, and passing
+ * one where a draft is wanted needs no conversion. Going the other way is `drawable`.
+ */
+export type Draft = Omit<Spec, "chart"> & { chart: Omit<Chart, "encoding"> & { encoding: Partial<Encoding> } };
 
-/** A spec off the wire, as the thing being edited. The two are one spec in two views, so
- * the JSON and the wells cannot drift apart. */
-export const asDraft = (spec: Spec): Draft => spec as unknown as Draft;
+/**
+ * A draft that has a measure, which is a spec.
+ *
+ * The guard's whole job is to say the measure is present, and it used to narrow to a
+ * `Draft` with a `y` — a shape the renderer did not accept, so a caller that had just
+ * proved it went through a cast anyway to get back what the guard had established. It
+ * narrows to `Spec` now, and the renderer takes exactly that.
+ *
+ * It says nothing about whether the spec is *legal*. That is `/api/validate`, which is the
+ * judge a model's answer goes through and the only one; what the browser can answer is
+ * whether the thing in hand is shaped like a spec, which is a different question.
+ */
+export const drawable = (draft: Draft): draft is Spec => draft.chart.encoding.y !== undefined;
 
 const anObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,6 +179,19 @@ const aListOfRecords = (value: unknown): value is Record<string, unknown>[] | un
   value === undefined || (Array.isArray(value) && value.every(anObject));
 
 const aString = (value: unknown): boolean => typeof value === "string";
+
+/** A filter a chip can be built out of: a condition with a column and an operator, or a
+ * list of them under `any`. An empty `any` is refused here as well as by the schema, since
+ * a chip made of no conditions has nothing to name. */
+const aFilter = (filter: Record<string, unknown>): boolean => {
+  const held = filter.any;
+  if (held === undefined) return aString(filter.column) && aString(filter.op);
+  return (
+    Array.isArray(held) &&
+    held.length > 0 &&
+    held.every((each) => anObject(each) && aString(each.column) && aString(each.op))
+  );
+};
 
 /**
  * The text in `{ } JSON`, as the draft both views read, or as nothing.
@@ -113,8 +238,10 @@ export const draftIn = (text: string): Draft | null => {
     // A select or group_by item is written into a well by its alias where it has one and
     // by the last segment of its column otherwise, so one of the two has to be text.
     items.every((item: Record<string, unknown>) => aString(item.column) || aString(item.as)) &&
-    // A filter chip splits the column and rewrites the operator, so both of those do.
-    filters.every((filter) => aString(filter.column) && aString(filter.op))
+    // A filter chip splits the column and rewrites the operator, so both of those do — and
+    // a disjunction is a chip built out of the conditions it holds, so it is the same
+    // question asked of each of them.
+    filters.every(aFilter)
       ? (parsed as unknown as Draft)
       : null
   );
@@ -123,11 +250,54 @@ export const draftIn = (text: string): Draft | null => {
 export const WELLS = ["Axis", "Legend", "Values", "Top N", "Filters"] as const;
 export type Well = (typeof WELLS)[number];
 
+/**
+ * The grammar's closed sets, as values rather than as unions written by hand.
+ *
+ * Every one of these is an `enum` in `spec/v1/spec.schema.json`, which is the grammar and
+ * the only judge of it. They are written out again here because the browser has to name a
+ * mark in a control and put an operator in a filter it builds, and `mirrors.test.ts` reads
+ * the schema and holds each list to it — so a value added on one side and not the other
+ * fails in the browser's own suite rather than as a 400 nobody expected.
+ *
+ * As tuples rather than as types, for the same reason: a type is gone at run time and
+ * cannot be compared with a file. What it buys beyond the mirror is that the three
+ * operators this interface writes into specs — `is_not_null` from a Filters drop, `is_null`
+ * and `=` from a drill — are checked literals now. `op` was typed `string`, so a typo in
+ * one of them was a spec the checker accepted, the wells accepted, and the validator
+ * refused, after the round trip.
+ */
+export const MARKS = ["bar", "line", "area", "point", "arc"] as const;
+export type Mark = (typeof MARKS)[number];
+
+export const CHANNEL_TYPES = ["nominal", "ordinal", "quantitative", "temporal"] as const;
+export type ChannelType = (typeof CHANNEL_TYPES)[number];
+
+/** The four ways a number reads. `unit` is the one that is not a number type — it is a
+ * number with something appended — and it is here rather than being a free suffix because
+ * a closed set is what keeps this out of format-string territory. */
+export const FORMAT_KINDS = ["number", "percent", "currency", "unit"] as const;
+export type FormatKind = (typeof FORMAT_KINDS)[number];
+
 export const FNS = ["sum", "avg", "min", "max", "count", "count_distinct"] as const;
 export type Fn = (typeof FNS)[number];
 
 export const UNITS = ["year", "quarter", "month", "week", "day", "hour"] as const;
 export type Unit = (typeof UNITS)[number];
+
+export const JOIN_TYPES = ["inner", "left"] as const;
+export type JoinType = (typeof JOIN_TYPES)[number];
+
+export const DIRECTIONS = ["asc", "desc"] as const;
+export type Direction = (typeof DIRECTIONS)[number];
+
+/** The operators that take a value and compare it, which is the whole of what `having`
+ * allows: a condition on a measure is a comparison, and `in` over an aggregate is not a
+ * question the grammar asks. `filters` allows these and four more. */
+export const COMPARISONS = ["=", "!=", "<", "<=", ">", ">="] as const;
+export type Comparison = (typeof COMPARISONS)[number];
+
+export const OPS = [...COMPARISONS, "in", "not_in", "is_null", "is_not_null"] as const;
+export type Op = (typeof OPS)[number];
 
 /** The column types a profile reports, which is what a dragged column carries. */
 export type Field = { table: string; column: string; type: string };
@@ -197,7 +367,7 @@ export function qualified(field: Field, query?: Query): string {
 export function outputColumns(query: Query): string[] {
   const items = [...(query.select ?? []), ...(query.group_by ?? [])];
   return [
-    ...items.map((item) => item.as ?? item.column.split(".").slice(-1)[0]),
+    ...items.map(nameOf),
     ...(query.aggregates ?? []).map((aggregate) => aggregate.as),
   ];
 }
@@ -284,8 +454,11 @@ export function reaggregate(draft: Draft, fn: Fn): Draft {
 export function retruncate(draft: Draft, channel: "x" | "color", unit: Unit | null): Draft {
   const field = draft.chart.encoding[channel]?.field;
   if (field === undefined) return draft;
-  const group_by = (draft.query.group_by ?? []).map((item) => {
-    if ((item.as ?? item.column.split(".").slice(-1)[0]) !== field) return item;
+  const group_by = (draft.query.group_by ?? []).map((item): Item => {
+    // A computed item has no date in it to round, which the validator says in words and
+    // the checker says here: the control this comes from is only drawn for a temporal
+    // channel, and a temporal channel is not a channel bound to an expression.
+    if (item.column === undefined || nameOf(item) !== field) return item;
     const { truncate: _was, ...rest } = item;
     return unit === null ? rest : { ...rest, truncate: unit };
   });
@@ -357,7 +530,9 @@ function measured(draft: Draft, field: Field): Draft {
 function ranked(draft: Draft, field: Field): Draft {
   const outputs = outputColumns(draft.query);
   const dimension = (draft.query.group_by ?? []).find(
-    (item) => item.column === qualified(field, draft.query) || item.column.endsWith(`.${field.column}`),
+    (item) =>
+      item.column === qualified(field, draft.query) ||
+      item.column?.endsWith(`.${field.column}`) === true,
   );
   const measure = draft.chart.encoding.y?.field;
   if (dimension === undefined || measure === undefined) {
@@ -367,7 +542,7 @@ function ranked(draft: Draft, field: Field): Draft {
         : "Top N ranks by a measure, so put a column in Values first.",
     );
   }
-  const column = dimension.as ?? dimension.column.split(".").slice(-1)[0];
+  const column = nameOf(dimension);
   if (!outputs.includes(column)) throw new WellRefusal(`'${column}' is not an output column`);
 
   return {
@@ -382,7 +557,7 @@ function ranked(draft: Draft, field: Field): Draft {
  * screen rather than something a drag guesses at.
  */
 function filtered(draft: Draft, field: Field): Draft {
-  const filter: Filter = { column: qualified(field, draft.query), op: "is_not_null" };
+  const filter: Condition = { column: qualified(field, draft.query), op: "is_not_null" };
   return { ...draft, query: { ...draft.query, filters: [...(draft.query.filters ?? []), filter] } };
 }
 
@@ -405,7 +580,7 @@ function withJoins(query: Query, joins: Join[]): Query {
 function unbind(draft: Draft, alias: string): Draft {
   const query = draft.query;
   const group_by = (query.group_by ?? []).filter(
-    (item) => (item.as ?? item.column.split(".").slice(-1)[0]) !== alias,
+    (item) => nameOf(item) !== alias,
   );
   const aggregates = (query.aggregates ?? []).filter((aggregate) => aggregate.as !== alias);
   const encoding = { ...draft.chart.encoding };

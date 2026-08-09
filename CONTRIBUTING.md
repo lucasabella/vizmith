@@ -65,6 +65,22 @@ now true, and they are allowed to be long. `ROADMAP.md` is the other file and is
 what is next, rather than why the built parts are the shape they are. An entry that only says what the code does is one
 the code already said.
 
+**`docs/extending.md` holds the list this file deliberately does not.** What makes a
+contribution acceptable is here — the gate, the rules that do not move, where a decision
+goes. What makes one *complete* is per extension point and lives there: the files a new
+mark, a new well, a new view, a new endpoint or a new source has to touch, in order, with
+the reason each is on the list. Adding a mark is eight steps across two languages, and the
+two whose absence is silent — a mark no rule can refuse, and a series type that is used and
+not registered — are named as such.
+
+**`docs/design.md` holds the half of the house style that governs pixels.** Which surfaces
+exist and which ink is legal on each, why the eight series colours are an order rather than
+a palette and what gate that order clears, the contrast rule and the escape hatch that makes
+the Table tab mandatory rather than convenient, and that provenance is never colour alone.
+Its numbers are measured off `tokens.css` by `docs/palette.py` rather than remembered, so a
+token that moves is a script to re-run and a table to paste. Anything adding a panel, a
+chart type, a status indicator or a view that draws marks is downstream of that file.
+
 **A module docstring says what was rejected.** The reason `catalog.py` explains why a
 freshness answer is held per burst rather than per entry is that the next person to read it
 would otherwise reasonably change it back. Comments here explain why, on the assumption the
@@ -138,6 +154,23 @@ trade-off yet.
 
 If your change closes an issue, say `Closes #123`. If measuring changed what you built — it
 happens here more than you would expect — say what you measured and what it redirected.
+
+### The co-authorship trailers are meant
+
+Most commits on `main` carry a `Co-authored-by: Claude` trailer, and some carry the URL of
+the session that produced them. That is a statement rather than an artefact nobody cleaned
+up: a large part of this repository was written with an AI assistant, and the commit that
+says so is the honest place to say it. It costs nothing to leave and it would cost a history
+rewrite to remove — every `#nnn` and every hash quoted in `DESIGN.md`, `ROADMAP.md` and the
+code comments points into this history.
+
+What the trailer does not do is move responsibility. The reasoning in `DESIGN.md`, the
+measurements the comments quote and the tests that hold them are the work, and they were
+argued and reviewed by a person whichever way the keys were pressed. If you contribute with
+an assistant, the same applies: keep the trailer, and own the diff.
+
+Nothing about your own workflow is asked for beyond that. A pull request is read for what it
+does and what it argues, and there is no separate bar for one written with help.
 
 ## Reporting things
 

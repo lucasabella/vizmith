@@ -1,0 +1,19 @@
+{
+  "spec_version": "1",
+  "title": "A column of sixes",
+  "query": {
+    "from": "orders",
+    "group_by": [{ "column": "status", "as": "status" }],
+    "aggregates": [
+      { "fn": "sum", "expression": { "left": 2, "op": "*", "right": 3 }, "as": "constant" }
+    ],
+    "limit": 20
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "status", "type": "nominal" },
+      "y": { "field": "constant", "type": "quantitative" }
+    }
+  }
+}

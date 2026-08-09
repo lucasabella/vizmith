@@ -23,6 +23,26 @@ def _validator() -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
+@lru_cache(maxsize=1)
+def _filters_validator() -> Draft202012Validator:
+    """The `filters` list on its own, judged by the grammar's own definition of one.
+
+    A dashboard holds a list of filters that is not part of any spec: it is applied to each
+    tile's query when the tile runs, so there is no query to attach it to and no `from` to
+    resolve its columns against. Built out of the same `$defs`, so a filter the grammar
+    stops allowing inside a query stops being storable on a dashboard on the same day.
+    """
+    schema = json.loads(SCHEMA_PATH.read_text())
+    return Draft202012Validator(
+        {
+            "$defs": schema["$defs"],
+            "type": "array",
+            "maxItems": schema["$defs"]["query"]["properties"]["filters"]["maxItems"],
+            "items": {"$ref": "#/$defs/filter"},
+        }
+    )
+
+
 def validate_spec(spec: object) -> list[str]:
     """Return a list of human readable errors. Empty means the spec is valid."""
     errors = _schema_errors(spec)
@@ -31,9 +51,37 @@ def validate_spec(spec: object) -> list[str]:
     return _semantic_errors(spec)
 
 
+def validate_filters(filters: object) -> list[str]:
+    """Everything wrong with a list of filters held apart from a query, as sentences.
+
+    Two rules on top of the shape. A column here has to name its table, because the only
+    thing that can be done with one of these is to match it against a tile's query — an
+    unqualified `status` names a table in the tile it lands in and a different one in the
+    next tile, and matching nothing would be the quietest of the possible wrongs. And the
+    condition checks a spec's filters get are run here too: `is_null` with a value, and a
+    relative value carrying a key its token does not read, are the same mistakes wherever
+    they are written down.
+    """
+    errors = _errors_from(_filters_validator(), filters)
+    if errors or not isinstance(filters, list):
+        return errors
+    for condition in conditions({"filters": filters}):
+        if "." not in condition["column"]:
+            errors.append(
+                f"filters: '{condition['column']}' names no table. A filter held by a "
+                "dashboard is matched against the tables each tile reads, so it names its "
+                "own table rather than borrowing whichever one the tile happens to read"
+            )
+    return errors + _condition_errors(filters, "filters")
+
+
 def _schema_errors(spec: object) -> list[str]:
+    return _errors_from(_validator(), spec)
+
+
+def _errors_from(validator: Draft202012Validator, value: object) -> list[str]:
     out = []
-    for error in sorted(_validator().iter_errors(spec), key=lambda e: list(e.path)):
+    for error in sorted(validator.iter_errors(value), key=lambda e: list(e.path)):
         location = "/".join(str(p) for p in error.path) or "<root>"
         out.append(f"{location}: {error.message}")
     return out
@@ -62,13 +110,9 @@ def _semantic_errors(spec: dict) -> list[str]:
                 f"{' and '.join(repr(t) for t in named)}, so qualify it with more segments"
             )
 
-    for filter_ in query.get("filters", []):
-        if filter_["op"] in ("is_null", "is_not_null") and "value" in filter_:
-            errors.append(
-                f"query.filters: '{filter_['op']}' takes no value, but one was given "
-                f"for '{filter_['column']}'"
-            )
-        errors += _relative_errors(filter_)
+    errors += _computed_errors(query)
+
+    errors += _condition_errors(query.get("filters", []), "query.filters")
 
     select = query.get("select", [])
     group_by = query.get("group_by", [])
@@ -133,6 +177,17 @@ def _semantic_errors(spec: dict) -> list[str]:
         if field not in known:
             errors.append(f"chart.encoding.{channel}: '{field}' is not an output column of the query")
 
+        # A format says how a number reads, so a channel bound to something else has
+        # nothing for it to apply to. The schema cannot say this: it would have to make
+        # `format` conditional on a sibling property, which is the `if`/`then` shape that
+        # costs a readable error message and that the endpoints refuse to constrain on.
+        if "format" in spec_channel and spec_channel["type"] != "quantitative":
+            errors.append(
+                f"chart.encoding.{channel}: 'format' says how a number reads, and "
+                f"'{field}' is bound as '{spec_channel['type']}'. Only a quantitative "
+                "channel carries one"
+            )
+
     # The value axis is what a chart is read against, so it carries a measure. A nominal 'y'
     # draws categories up the side and produces a picture with no quantity anywhere in it.
     if encoding["y"]["type"] != "quantitative":
@@ -170,7 +225,65 @@ def _semantic_errors(spec: dict) -> list[str]:
     return errors
 
 
-def _relative_errors(filter_: dict) -> list[str]:
+def _computed_errors(query: dict) -> list[str]:
+    """What the schema cannot say about a computed column.
+
+    Three things, and each is a spec that validates against the shape and means something
+    nobody asked for. An item carrying both a `column` and an `expression` compiles as one
+    of the two and silently drops the other — the schema sees two properties it allows and
+    has nothing to say about them together. `truncate` rounds a date to a unit and an
+    expression is a number, so a unit on one is a key the builder ignores. And an operation
+    over two numbers is a constant: `2 * 3` compiles, runs, and draws a column of sixes,
+    which is the quiet kind of wrong this project exists to avoid.
+    """
+    errors = []
+    for where, items in (
+        ("query.select", query.get("select", [])),
+        ("query.group_by", query.get("group_by", [])),
+        ("query.aggregates", query.get("aggregates", [])),
+    ):
+        for item in items:
+            expression = item.get("expression")
+            if expression is None:
+                continue
+            named = item["as"]
+            if "column" in item:
+                errors.append(
+                    f"{where}: '{named}' has both a 'column' and an 'expression', and only "
+                    "one of them can be what it reads. Keep whichever it means"
+                )
+            if "truncate" in item:
+                errors.append(
+                    f"{where}: '{named}' computes a number, and 'truncate' rounds a date to "
+                    "a unit, so there is nothing here for it to round"
+                )
+            if not any(True for _ in operands(item)):
+                errors.append(
+                    f"{where}: '{named}' computes {expression['left']} {expression['op']} "
+                    f"{expression['right']}, which names no column and is the same number in "
+                    "every row"
+                )
+    return errors
+
+
+def _condition_errors(filters: list, where: str) -> list[str]:
+    """What is wrong with the conditions themselves, wherever they were written down.
+
+    `where` is the path they are reported under, because the same list is a query's
+    `filters` and a dashboard's, and a message that named the wrong one would send somebody
+    to look in a spec for a filter that is on the dashboard around it."""
+    errors: list[str] = []
+    for condition in conditions({"filters": filters}):
+        if condition["op"] in ("is_null", "is_not_null") and "value" in condition:
+            errors.append(
+                f"{where}: '{condition['op']}' takes no value, but one was given "
+                f"for '{condition['column']}'"
+            )
+        errors += _relative_errors(condition, where)
+    return errors
+
+
+def _relative_errors(filter_: dict, where: str = "query.filters") -> list[str]:
     """What the schema cannot say about a relative value without answering in the language
     of `if` and `then`.
 
@@ -193,7 +306,7 @@ def _relative_errors(filter_: dict) -> list[str]:
     named = " and ".join(repr(key) for key in spare)
     return [
         (
-            f"query.filters: a relative value of '{token}' {wants}, so {named} "
+            f"{where}: a relative value of '{token}' {wants}, so {named} "
             f"{'do' if len(spare) > 1 else 'does'} nothing here and the filter does not "
             "mean what it says"
         )
@@ -210,7 +323,11 @@ def output_columns(query: dict) -> list[str]:
     group_by item by its alias or the last segment of its column, then every aggregate
     alias. The validator checks references against this list and the builder compiles the
     list into the SELECT, so the result set contract has one definition rather than two
-    that can disagree."""
+    that can disagree.
+
+    An item that computes has no column to fall back on, which is why the schema makes its
+    alias required: `a * b` has no name of its own and something has to be what the chart
+    binds a channel to."""
     names = [
         item.get("as") or item["column"].rsplit(".", 1)[-1]
         for item in [*query.get("select", []), *query.get("group_by", [])]
@@ -228,11 +345,42 @@ def names_table(table: str, qualifier: str) -> bool:
     return len(wanted) <= len(segments) and segments[-len(wanted) :] == wanted
 
 
+def conditions(query: dict):
+    """Every condition in `filters`, with a disjunction replaced by the conditions it holds.
+
+    A filter is either a condition or `{"any": [...]}`, one level deep, so everything that
+    reads conditions — the reference check, the null check, the relative check, the eval
+    harness counting which columns an answer touched — wants the flat list and none of them
+    wants to know which of the two shapes it came from. One nesting level is the whole of
+    what the grammar allows, so this is a loop rather than a walk."""
+    for filter_ in query.get("filters", []):
+        yield from filter_.get("any", [filter_])
+
+
+def operands(item: dict):
+    """The column references a computed item holds, which is one, two, or none: an operand
+    is a column or a number, and a number is bound rather than resolved. Nothing here knows
+    whether the item computes; an item that does not has no `expression` and yields nothing,
+    which is what lets every caller ask the same question of every item."""
+    expression = item.get("expression")
+    if expression is None:
+        return
+    for side in ("left", "right"):
+        if isinstance(expression[side], str):
+            yield expression[side]
+
+
 def _column_refs(query: dict):
-    yield from ((f["column"], "query.filters") for f in query.get("filters", []))
-    yield from ((s["column"], "query.select") for s in query.get("select", []))
-    yield from ((g["column"], "query.group_by") for g in query.get("group_by", []))
-    yield from ((a["column"], "query.aggregates") for a in query.get("aggregates", []) if "column" in a)
+    yield from ((f["column"], "query.filters") for f in conditions(query))
+    for where, items in (
+        ("query.select", query.get("select", [])),
+        ("query.group_by", query.get("group_by", [])),
+        ("query.aggregates", query.get("aggregates", [])),
+    ):
+        for item in items:
+            if "column" in item:
+                yield item["column"], where
+            yield from ((reference, where) for reference in operands(item))
     for join in query.get("joins", []):
         for on in join["on"]:
             yield on["left"], "query.joins.on"

@@ -1,5 +1,7 @@
 import { Suspense, lazy } from "react";
-import type { Row, Spec } from "./option";
+import type { Drawn } from "./Chart";
+import type { Row } from "./option";
+import type { Spec } from "../spec/spec";
 import type { Clicked } from "../spec/drill";
 
 /**
@@ -30,6 +32,10 @@ export default function Deferred(props: {
   spec: Spec;
   rows: Row[];
   onSelect?: (clicked: Clicked) => void;
+  // Announced when there is an instance and withdrawn when there is not, which includes the
+  // moment this boundary is showing the fallback: there is no chart to save a picture of
+  // while the renderer is still being fetched, and the control that saves one says so.
+  onDrawn?: (drawn: Drawn | null) => void;
 }) {
   return (
     <Suspense fallback={<Fetching />}>

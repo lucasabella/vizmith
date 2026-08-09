@@ -1,0 +1,27 @@
+{
+  "spec_version": "1",
+  "title": "Orders that need attention, per month",
+  "query": {
+    "from": "orders",
+    "filters": [
+      { "column": "order_date", "op": "is_not_null" },
+      {
+        "any": [
+          { "column": "status", "op": "=", "value": "pending" },
+          { "column": "total", "op": ">", "value": 500 }
+        ]
+      }
+    ],
+    "group_by": [{ "column": "order_date", "truncate": "month", "as": "month" }],
+    "aggregates": [{ "fn": "count", "as": "order_count" }],
+    "order_by": [{ "column": "month", "direction": "asc" }],
+    "limit": 500
+  },
+  "chart": {
+    "mark": "line",
+    "encoding": {
+      "x": { "field": "month", "type": "temporal" },
+      "y": { "field": "order_count", "type": "quantitative" }
+    }
+  }
+}

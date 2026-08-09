@@ -22,20 +22,24 @@ Validator messages are returned word for word. They are written to be fed back t
 on retry, so rewording them here would break that loop before it is written.
 """
 
+import json
 import os
+from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from vizmith import __version__, query
-from vizmith.ask import SCHEMA, ask
+from vizmith.ask import SCHEMA, Step, asking
 from vizmith.catalog import (
     DECLARED,
     METADATA_WORKERS,
@@ -49,6 +53,7 @@ from vizmith.critique import critique
 from vizmith.dashboards import Dashboards, Refused
 from vizmith.model import Endpoint, Model, ModelError
 from vizmith.profiler import Profiles, TableProfile
+from vizmith.rationing import MODEL, QUERY, Exhausted, Rations
 from vizmith.relationships import Confirmations, graph, resolve, suggest
 from vizmith.sources import build
 from vizmith.spec import validate_spec
@@ -158,6 +163,53 @@ def damaged(request: Request, failure: Damaged) -> JSONResponse:
     500: the request was well formed, nothing is wrong with what was asked, and the endpoint
     can answer again as soon as the file named in the message is moved aside."""
     return JSONResponse(status_code=503, content={"errors": [str(failure)]})
+
+
+@app.exception_handler(Exhausted)
+def exhausted(request: Request, failure: Exhausted) -> JSONResponse:
+    """A ration that ran out, in the shape every other refusal arrives in.
+
+    429 with `Retry-After`, which is what a client that means well reads and backs off on.
+    Registered here rather than raised as an `HTTPException` so that the body is the same
+    `errors` list the validator and the source refusals use: the interface has one way to
+    show a refusal, and a second shape would be a second way."""
+    return JSONResponse(
+        status_code=429,
+        content={"errors": [str(failure)], "spoke": "rations"},
+        headers={"Retry-After": str(failure.retry_after)},
+    )
+
+
+@lru_cache
+def rations() -> Rations:
+    """What is left of what the costed endpoints may spend, for the life of the process.
+
+    One object rather than one per request, which is the whole point of it, and built on
+    first use rather than at import so that a test can put its own clock in front of it and
+    so that the environment `serve` sets is read after `serve` has set it."""
+    return Rations()
+
+
+def rationed(what: str):
+    """A dependency for an endpoint that costs something: a token now, a slot for as long
+    as it runs.
+
+    The slot is released in a `finally` on the far side of the `yield`, which FastAPI runs
+    after the endpoint has returned, so a handler that raised still gives its slot back. The
+    token is taken first and is not returned: what a bucket rations is requests made, and a
+    request that failed at the source was still paid for."""
+
+    def ration(request: Request):
+        allowance = rations()
+        client = request.client.host if request.client else "unknown"
+        allowance.spend(client, what)
+        allowance.enter()
+        try:
+            yield
+        finally:
+            allowance.leave()
+
+    return ration
 
 
 @lru_cache
@@ -294,14 +346,17 @@ class QuestionRequest(BaseModel):
 
 
 class DashboardRequest(BaseModel):
-    """The tiles of one dashboard. The name is in the path, because it is what addresses
-    the dashboard, and a name in the body as well would be two of them to disagree.
+    """The tiles of one dashboard, and the filters that apply across them. The name is in
+    the path, because it is what addresses the dashboard, and a name in the body as well
+    would be two of them to disagree.
 
-    The tiles are untyped for the same reason a spec is: the validator answers for every
+    Both lists are untyped for the same reason a spec is: the validator answers for every
     shape a spec can arrive in, and a model that rejected the wrong ones first would
-    replace its message with one of pydantic's."""
+    replace its message with one of pydantic's. `filters` defaults to empty, so a client
+    that has never heard of one saves exactly what it used to."""
 
     tiles: list[object]
+    filters: list[object] = []
 
 
 class AnswerRequest(BaseModel):
@@ -330,7 +385,7 @@ def health() -> dict[str, str | bool]:
     }
 
 
-@app.get("/api/tables")
+@app.get("/api/tables", dependencies=[Depends(rationed(QUERY))])
 def tables(catalog: Annotated[Catalog, Depends(source)]):
     """Every table in the configured schema, as the profile the prompt path was given.
 
@@ -349,7 +404,7 @@ def tables(catalog: Annotated[Catalog, Depends(source)]):
     try:
         return {"tables": [table.as_dict() for table in profiles(catalog)]}
     except RuntimeError as failure:
-        return refused("source", failure)
+        return refused("source", failure).response
 
 
 @app.get("/api/shape")
@@ -387,7 +442,7 @@ def shape(catalog: Annotated[Catalog, Depends(source)]):
         with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
             described = tuple(pool.map(catalog.describe, names))
     except RuntimeError as failure:
-        return refused("source", failure)
+        return refused("source", failure).response
     return {
         "tables": [
             {
@@ -403,7 +458,7 @@ def shape(catalog: Annotated[Catalog, Depends(source)]):
     }
 
 
-@app.get("/api/tables/{name}")
+@app.get("/api/tables/{name}", dependencies=[Depends(rationed(QUERY))])
 def table(name: str, catalog: Annotated[Catalog, Depends(source)]):
     """One table's profile: the figures the prompt path was given for that table.
 
@@ -429,7 +484,7 @@ def table(name: str, catalog: Annotated[Catalog, Depends(source)]):
             )
         return profile(catalog, name).as_dict()
     except RuntimeError as failure:
-        return refused("source", failure)
+        return refused("source", failure).response
 
 
 @app.get("/api/relationships")
@@ -446,7 +501,7 @@ def relationships(
     try:
         known = relationship_graph(catalog)
     except RuntimeError as failure:
-        return refused("source", failure)
+        return refused("source", failure).response
     return {
         "relationships": [
             {**relationship.as_dict(), "state": confirmations.state(relationship)}
@@ -468,7 +523,7 @@ def answer(
     try:
         known = relationship_graph(catalog)
     except RuntimeError as failure:
-        return refused("source", failure)
+        return refused("source", failure).response
 
     named = Relationship(
         request.left_table, request.left_column, request.right_table, request.right_column
@@ -512,7 +567,7 @@ def join_path(
     try:
         known = relationship_graph(catalog)
     except RuntimeError as failure:
-        return refused("source", failure)
+        return refused("source", failure).response
     try:
         path = resolve(confirmations.usable(known), left, right)
     except ValueError as failure:
@@ -572,9 +627,11 @@ def dashboards(store: Annotated[Dashboards, Depends(saved)]):
 
 @app.get("/api/dashboards/{name}")
 def dashboard(name: str, store: Annotated[Dashboards, Depends(saved)]):
-    """One dashboard: its tiles, in the order they are drawn in, each with its width. The
-    rows are not here either. Every tile goes back through `/api/execute`, so a tile and a
-    single chart are the same spec run the same way against the same source."""
+    """One dashboard: its tiles, in the order they are drawn in, each with its width, and
+    the filters that apply across all of them. The rows are not here either. Every tile
+    goes back through `/api/execute`, so a tile and a single chart are the same spec run
+    the same way against the same source — the dashboard's filters are applied to a tile's
+    spec on the way, by the interface, and the result is judged like any other spec."""
     found = store.read(name)
     if found is None:
         return JSONResponse(
@@ -595,7 +652,7 @@ def save_dashboard(
     saved before exactly as it was, because half a dashboard is not a thing a person asked
     for."""
     try:
-        return store.save(name, request.tiles).as_dict()
+        return store.save(name, request.tiles, request.filters).as_dict()
     except Refused as failure:
         return JSONResponse(status_code=400, content={"errors": failure.errors})
 
@@ -611,17 +668,40 @@ def delete_dashboard(name: str, store: Annotated[Dashboards, Depends(saved)]):
     return {"name": name}
 
 
-def refused(spoke: str, failure: Exception, status: int = 502) -> JSONResponse:
+@dataclass(frozen=True)
+class Reply:
+    """A status and a body, before either has been written into a response.
+
+    It exists because a question is answered down two channels now — a JSON body, and an
+    event stream that says which step is running — and both have to answer the same thing.
+    Holding the body as a dict until the last moment is what lets the stream put it in a
+    frame and the JSON endpoint put it in a response, from one line that decided it.
+
+    The body is what a source produced, so it holds dates and decimals rather than JSON
+    types. `jsonable_encoder` is what turned those into the wire shape while an endpoint
+    could return a dict and let FastAPI do it; returning a response or a frame means doing
+    it here, on both paths, or a temporal value stops being ISO-8601 text on one of them.
+    """
+
+    status: int
+    body: dict
+
+    @property
+    def response(self) -> JSONResponse:
+        return JSONResponse(status_code=self.status, content=jsonable_encoder(self.body))
+
+
+def refused(spoke: str, failure: Exception, status: int = 502) -> Reply:
     """A failure after validation, in the shape the validator's refusal already uses, so the
     interface keeps one way to show a refusal rather than growing a second. 502 by default,
     rather than 500 or 400: the request was well formed and the spec was valid, and what
     failed sits behind the server. `spoke` names which part failed, because a question
     passes through the source, the model and the source again, and a caller cannot tell
     from a message which of them produced it."""
-    return JSONResponse(status_code=status, content={"errors": [str(failure)], "spoke": spoke})
+    return Reply(status, {"errors": [str(failure)], "spoke": spoke})
 
 
-def execute_spec(spec: dict, catalog: Catalog):
+def execute_spec(spec: dict, catalog: Catalog) -> Reply:
     """The rows, or what refused to produce them.
 
     `RuntimeError` is the source: a statement it did not finish, or a result too large for
@@ -635,32 +715,41 @@ def execute_spec(spec: dict, catalog: Catalog):
         return refused("spec", failure, status=400)
     except RuntimeError as failure:
         return refused("source", failure)
-    return {"spec": spec, "rows": rows}
+    return Reply(200, {"spec": spec, "rows": rows})
 
 
-@app.post("/api/execute")
+@app.post("/api/execute", dependencies=[Depends(rationed(QUERY))])
 def execute(request: SpecRequest, catalog: Annotated[Catalog, Depends(source)]):
     """The rows a valid spec produces, with the spec that produced them. An invalid spec is
     refused with its errors and never reaches the source."""
     errors = validate_spec(request.spec)
     if errors:
         return JSONResponse(status_code=400, content={"errors": errors})
-    return execute_spec(request.spec, catalog)
+    return execute_spec(request.spec, catalog).response
 
 
-@app.post("/api/ask")
-def question(
-    request: QuestionRequest,
-    catalog: Annotated[Catalog, Depends(source)],
-    writer: Annotated[Model, Depends(model)],
-    confirmations: Annotated[Confirmations, Depends(answers)],
-):
-    """A question, answered as the spec it produced and the rows that spec returned. The
-    model sees the profiles of the tables the question is about, and the question. The rows
-    it caused to be fetched go to the caller, never back to it.
+def answering(
+    question: str,
+    catalog: Catalog,
+    writer: Model,
+    confirmations: Confirmations,
+) -> Iterator[Step | Reply]:
+    """A question, as the steps it passes through and then the one answer it ends in.
+
+    A question is not one wait. It reads the profiles, builds the relationship graph, asks
+    the model up to three times and then runs the query, and on a large schema the metadata
+    in front of the model is the long part — measured at around 18 seconds on 152 tables,
+    before a token is requested. A caller shown one spinner over all of that cannot tell
+    whether the model is slow, the warehouse is cold, or nothing is happening.
+
+    So the steps are yielded as they start, and the answer is the last thing yielded rather
+    than returned: both endpoints below read one sequence, and the JSON one is the streaming
+    one with the steps dropped. That is what stops the two from answering differently.
 
     Profiling reaches the source before the model is asked anything, so the first thing a
-    question can fail on is the source rather than the model."""
+    question can fail on is the source rather than the model.
+    """
+    yield Step("profiles")
     try:
         tables = profiles(catalog)
         # What a join may be resolved through, so a table the answer has to join through is
@@ -669,23 +758,100 @@ def question(
         # a join, so a table only a suggestion reaches is not one this makes room for.
         confirmed = confirmations.usable(relationship_graph(catalog))
     except RuntimeError as failure:
-        return refused("source", failure)
+        yield refused("source", failure)
+        return
     try:
-        answer = ask(
-            request.question,
+        answer = yield from asking(
+            question,
             tables,
             writer,
             constrained=constrains(writer),
             relationships=confirmed,
         )
     except ModelError as failure:
-        return refused("model", failure)
+        yield refused("model", failure)
+        return
     if answer.spec is None:
-        return JSONResponse(status_code=400, content={"errors": answer.errors})
-    return execute_spec(answer.spec, catalog)
+        yield Reply(400, {"errors": answer.errors, "cost": answer.spent.as_dict()})
+        return
+    yield Step("query")
+    # What the question cost, beside what it produced. The central claim of this design is
+    # that sending metadata rather than data keeps token cost bounded, and the number that
+    # demonstrates it was in hand on every request and thrown away. A question that took
+    # three attempts costing three times one that took one is the thing worth seeing, which
+    # is why this is the loop's total and carries the count of calls that made it.
+    ran = execute_spec(answer.spec, catalog)
+    yield Reply(ran.status, {**ran.body, "cost": answer.spent.as_dict()})
 
 
-@app.post("/api/critique")
+def frames(events: Iterable[Step | Reply]) -> Iterator[str]:
+    """The same sequence as server-sent events.
+
+    The status line is 200 whatever happens, because the headers go out before the first
+    step runs and a refusal is decided after. So the refusal is an event named `refused`
+    carrying the status the JSON endpoint would have sent, and a reader goes by the name of
+    the event rather than by the status of the response. That is the cost of answering more
+    than once over one request, and it is why `spoke` was already on the body.
+    """
+    for event in events:
+        if isinstance(event, Reply):
+            yield frame("answer" if event.status == 200 else "refused", event.body)
+        else:
+            yield frame("step", event.as_dict())
+
+
+def frame(name: str, body: dict) -> str:
+    """One event. The body is one line of JSON, which is what keeps a value out of the
+    protocol: a frame ends at a blank line, and `json.dumps` has already escaped every
+    newline a source's own error message might carry."""
+    return f"event: {name}\ndata: {json.dumps(jsonable_encoder(body))}\n\n"
+
+
+# Asked for by a caller that wants the steps. `Accept` rather than a second path, because
+# it is the same question producing the same answer and only the channel differs — and a
+# path answering the same thing twice is two contracts to keep in step.
+EVENTS = "text/event-stream"
+
+
+@app.post("/api/ask", dependencies=[Depends(rationed(MODEL))])
+def question(
+    request: QuestionRequest,
+    http: Request,
+    catalog: Annotated[Catalog, Depends(source)],
+    writer: Annotated[Model, Depends(model)],
+    confirmations: Annotated[Confirmations, Depends(answers)],
+):
+    """A question, answered as the spec it produced and the rows that spec returned. The
+    model sees the profiles of the tables the question is about, and the question. The rows
+    it caused to be fetched go to the caller, never back to it.
+
+    Two channels, one answer. A caller that asks for `text/event-stream` is told which step
+    is running as it starts and gets the answer as the last event; a caller that does not is
+    answered with the body it has always been answered with, which is the last event of the
+    same sequence. Everything that decides what the answer is lives in `answering` above,
+    so there is no second account of what a question does.
+    """
+    events = answering(request.question, catalog, writer, confirmations)
+    if EVENTS in (http.headers.get("accept") or ""):
+        return StreamingResponse(
+            frames(events),
+            media_type=EVENTS,
+            # A proxy that buffers is a proxy that turns this back into one wait with the
+            # steps arriving all at once at the end. Both headers are advisory and neither
+            # costs anything where nothing is listening to them.
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return waited(events)
+
+
+def waited(events: Iterable[Step | Reply]) -> JSONResponse:
+    """The answer, with the steps dropped. What a caller that did not ask to hear them was
+    always going to be sent: the sequence ends in exactly one `Reply`, and this is it."""
+    replies = [event for event in events if isinstance(event, Reply)]
+    return replies[-1].response
+
+
+@app.post("/api/critique", dependencies=[Depends(rationed(MODEL))])
 def suggestion(
     request: SpecRequest,
     catalog: Annotated[Catalog, Depends(source)],
@@ -716,11 +882,11 @@ def suggestion(
     try:
         tables = profiles(catalog)
     except RuntimeError as failure:
-        return refused("source", failure)
+        return refused("source", failure).response
     try:
         return critique(request.spec, tables, writer, constrained=constrains(writer)).as_dict()
     except ModelError as failure:
-        return refused("model", failure)
+        return refused("model", failure).response
 
 
 if WEB_DIST.is_dir():

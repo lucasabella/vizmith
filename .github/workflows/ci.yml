@@ -36,22 +36,32 @@ env:
     pip install --require-hashes -r requirements.txt
     pip install -e . --no-deps
 
+# Every action is pinned to a commit, with the version it was in the comment beside it. A
+# tag is mutable and belongs to somebody else, so `@v7` means "whatever that repository
+# points v7 at when this runs", retroactively, for every commit already merged. What is at
+# risk here is smaller than usual and the block above says why — no secret is used or
+# granted, and the scope is read — but a compromised action still decides what CI reports
+# about a change, and the report is the thing this file exists to produce.
+#
+# Pinning without an update path is freezing, which is its own problem: `.github/dependabot.yml`
+# carries the actions ecosystem for exactly that, and a bump arrives as a pull request with
+# the new SHA and the new version in the same diff.
 jobs:
   suite:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Both versions are named rather than left to the runner's default. The fixture
       # reproducibility test compares committed Parquet against a fresh write, and that
       # is tied to the DuckDB version that wrote it, per DESIGN.md. An interpreter that
       # floats underneath changes which duckdb wheel gets installed and fails that test
       # for a reason that has nothing to do with the change under review.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -124,6 +134,29 @@ jobs:
           sys.exit(0 if "vizmith/web/index.html" in inside else f"{wheel} carries no interface")
           PY
 
+  # The floor, run rather than declared. `requires-python` says 3.11 because Debian stable
+  # ships it and nothing in the source needs 3.12, and a floor nobody runs is a floor that
+  # is true until somebody writes a match statement with a PEP 695 generic in it. So the
+  # suite runs on the oldest interpreter the package claims to install on, which is the
+  # cheapest way to keep that claim honest.
+  #
+  # Just the Python suite. The frontend does not care what interpreter serves it, and the
+  # browser job is slow enough once.
+  floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Install the package with its dev extra
+        run: ${{ env.INSTALL }}
+
+      - name: pytest
+        run: pytest
+
   # A separate job rather than a step in the one above, because a browser can fail for
   # reasons that belong to the runner rather than to the change under review, and a flake
   # inside the suite would read as the suite failing. It is here at all because the class
@@ -132,13 +165,13 @@ jobs:
   interface:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 

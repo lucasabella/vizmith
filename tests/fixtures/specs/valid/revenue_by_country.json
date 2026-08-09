@@ -23,7 +23,12 @@
     "mark": "bar",
     "encoding": {
       "x": { "field": "country", "type": "nominal" },
-      "y": { "field": "revenue", "type": "quantitative", "title": "Revenue (EUR)" }
+      "y": {
+        "field": "revenue",
+        "type": "quantitative",
+        "title": "Revenue (EUR)",
+        "format": { "kind": "currency", "symbol": "€" }
+      }
     }
   }
 }

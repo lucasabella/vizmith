@@ -14,16 +14,16 @@ import {
   clickedValue,
   instant,
   markText,
+  formatted,
   overSeriesLimit,
   seriesCount,
   NO_VALUE,
   SERIES,
   SERIES_LIMIT,
-  type Channel,
-  type Mark,
+  type Hovered,
   type Row,
-  type Spec,
 } from "./option";
+import type { Channel, Format, Spec } from "../spec/spec";
 
 const FIXTURES = fileURLToPath(new URL("../../../tests/fixtures/specs/valid", import.meta.url));
 
@@ -53,13 +53,21 @@ const rowsFor = (spec: Spec, count = 4): Row[] => {
   }));
 };
 
+/** What one axis would write on its ticks, as text: the formatter's output where the
+ * channel declares a format, and nothing where it does not. A closure compares unequal to
+ * an identical closure, so anything comparing two builds compares this instead. */
+const ticksOf = (option: ReturnType<typeof buildOption>, which: "xAxis" | "yAxis") => {
+  const { formatter } = axisOf(option, which).axisLabel as { formatter?: (value: number) => string };
+  return formatter === undefined ? "none" : formatter(1234.5);
+};
+
 const seriesOf = (option: ReturnType<typeof buildOption>) =>
   (option?.series ?? []) as Record<string, unknown>[];
 
 /** What ECharts would show on hover, taken from the option rather than from the formatter
  * on its own, so a formatter that is never wired in fails here. */
-const hover = (option: ReturnType<typeof buildOption>, mark: Mark) =>
-  (option?.tooltip as { formatter: (mark: Mark) => string }).formatter(mark);
+const hover = (option: ReturnType<typeof buildOption>, mark: Hovered) =>
+  (option?.tooltip as { formatter: (mark: Hovered) => string }).formatter(mark);
 
 const axisOf = (option: ReturnType<typeof buildOption>, which: "xAxis" | "yAxis") =>
   option?.[which] as {
@@ -69,7 +77,15 @@ const axisOf = (option: ReturnType<typeof buildOption>, which: "xAxis" | "yAxis"
     nameTextStyle: { color: string };
   };
 
-const spec = (chart: Spec["chart"], title = "Test"): Spec => ({ title, chart });
+// A whole spec, because a spec is one type now and the renderer takes the same object the
+// API answers with. The query is a real one and is not read here: what the renderer reads
+// is the encoding, which is the point of the assertion below about columns it was not given.
+const spec = (chart: Spec["chart"], title = "Test"): Spec => ({
+  spec_version: "1",
+  title,
+  query: { from: "orders", limit: 500 },
+  chart,
+});
 
 const named = (channel: Channel): string => channel.title ?? channel.field;
 
@@ -127,8 +143,11 @@ describe("valid fixtures", () => {
         value: measured ? first[y.field] : [first[x.field], first[y.field]],
       });
 
-      expect(text).toContain(`${named(x)}: ${first[x.field]}`);
-      expect(text).toContain(`${named(y)}: ${first[y.field]}`);
+      // Through `formatted` rather than through the raw value, because a channel that
+      // declares a format is read that way everywhere — which is the assertion, for the
+      // fixture that declares one.
+      expect(text).toContain(`${named(x)}: ${formatted(first[x.field], x.format)}`);
+      expect(text).toContain(`${named(y)}: ${formatted(first[y.field], y.format)}`);
     });
   }
 
@@ -409,7 +428,7 @@ describe("tooltip", () => {
 
   it("says the same thing whether it is called through the option or directly", () => {
     const chart = spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } });
-    const mark: Mark = { name: "A", value: 1 };
+    const mark: Hovered = { name: "A", value: 1 };
 
     expect(hover(buildOption(chart, [{ country: "A", revenue: 1 }]), mark)).toBe(markText(chart, mark));
   });
@@ -597,7 +616,9 @@ it("returns null for an empty result set", () => {
 
 describe("a question with no dimension", () => {
   const figure = (title?: string): Spec => ({
+    spec_version: "1",
     title,
+    query: { from: "orders", limit: 500 },
     chart: { mark: "bar", encoding: { y: { field: "revenue", type: "quantitative", title: "Revenue" } } },
   });
 
@@ -629,11 +650,16 @@ it("does not depend on the order of the keys in a row", () => {
   const reverse = (rows: Row[]) =>
     rows.map((row) => Object.fromEntries(Object.entries(row).reverse()) as Row);
 
-  /** The formatter closes over the spec, so two builds give two functions that behave the
-   * same and compare unequal. Its output stands in for it. */
+  /** Two formatters close over the spec — the tooltip's, and a formatted axis's — so two
+   * builds give functions that behave the same and compare unequal. Their output stands in
+   * for them. */
   const comparable = (option: ReturnType<typeof buildOption>) => ({
     ...option,
     tooltip: hover(option, { name: "one", value: 1 }),
+    // An arc has no axes at all, so there is no second formatter to stand in for.
+    ...(option !== null && "yAxis" in option
+      ? { yAxis: { ...axisOf(option, "yAxis"), axisLabel: ticksOf(option, "yAxis") } }
+      : {}),
   });
 
   for (const [name, fixture] of fixtures) {
@@ -644,4 +670,82 @@ it("does not depend on the order of the keys in a row", () => {
       comparable(buildOption(fixture, rows)),
     );
   }
+});
+
+/**
+ * How a number reads, which is the channel's to say.
+ *
+ * The vocabulary is four kinds and three modifiers, closed on purpose: a format string is
+ * a small language and a model that can write one is writing something this file then
+ * executes. What is asserted here is each kind's arithmetic and where the symbol lands,
+ * because those are the parts a person reads off an axis and cannot check.
+ */
+describe("a formatted channel", () => {
+  it.each([
+    ["a plain number keeps every digit it arrived with", { kind: "number" }, 86331297.4, "86,331,297.4"],
+    ["thousands can be turned off", { kind: "number", group: false }, 86331297.4, "86331297.4"],
+    ["decimals round rather than truncate", { kind: "number", decimals: 2 }, 1234.567, "1,234.57"],
+    ["a proportion is read as a percentage", { kind: "percent" }, 0.2317, "23%"],
+    ["a percentage keeps the places it asks for", { kind: "percent", decimals: 1 }, 0.2317, "23.2%"],
+    ["money takes two places without being asked", { kind: "currency", symbol: "€" }, 86331297.4, "€86,331,297.40"],
+    ["a currency symbol goes before the number", { kind: "currency", symbol: "$" }, 12, "$12.00"],
+    ["a unit goes after it, with a space", { kind: "unit", symbol: "kg" }, 12.4, "12.4 kg"],
+    ["a negative number groups the digits it has", { kind: "number" }, -1234567, "-1,234,567"],
+    ["four digits is the first group", { kind: "number" }, 1000, "1,000"],
+    ["three is not", { kind: "number" }, 999, "999"],
+  ] as [string, Format, number, string][])("%s", (_why, format, value, reads) => {
+    expect(formatted(value, format)).toBe(reads);
+  });
+
+  it("leaves anything that is not a number alone", () => {
+    // A format describes a number. A null is not one, and the word for a null is the same
+    // word the axis and the legend use for it, whatever the channel says.
+    expect(formatted(null, { kind: "currency", symbol: "€" })).toBe(NO_VALUE);
+    expect(formatted("Netherlands", { kind: "percent" })).toBe("Netherlands");
+    expect(formatted(1234.5)).toBe("1234.5");
+  });
+
+  it("writes the axis labels, so the numbers on screen are the formatted ones", () => {
+    // Through the built option rather than by calling the formatter directly: a formatter
+    // that is never wired into the axis would pass every assertion above.
+    const option = buildOption(
+      spec({
+        mark: "bar",
+        encoding: {
+          x: nominal("country"),
+          y: { field: "revenue", type: "quantitative", format: { kind: "currency", symbol: "€" } },
+        },
+      }),
+      [{ country: "A", revenue: 20481 }],
+    );
+
+    const labels = axisOf(option, "yAxis").axisLabel as { formatter: (value: number) => string };
+    expect(labels.formatter(20481)).toBe("€20,481.00");
+  });
+
+  it("writes the tooltip the same way, so the two do not disagree", () => {
+    const option = buildOption(
+      spec({
+        mark: "bar",
+        encoding: {
+          x: nominal("country"),
+          y: { field: "revenue", type: "quantitative", format: { kind: "currency", symbol: "€" } },
+        },
+      }),
+      [{ country: "A", revenue: 20481 }],
+    );
+
+    expect(hover(option, { name: "A", value: 20481 })).toBe("country: A\nrevenue: €20,481.00");
+  });
+
+  it("leaves an unformatted axis reading exactly what the source sent", () => {
+    // The default is unchanged and stays unchanged: nothing rounds unless a spec asked for
+    // it. `axisLabel` with no formatter is what ECharts writes its own labels under.
+    const option = buildOption(
+      spec({ mark: "bar", encoding: { x: nominal("country"), y: quantitative("revenue") } }),
+      [{ country: "A", revenue: 20481.4 }],
+    );
+
+    expect((axisOf(option, "yAxis").axisLabel as { formatter?: unknown }).formatter).toBeUndefined();
+  });
 });

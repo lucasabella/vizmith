@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { ColumnProfile, TableProfile } from "../api";
 import Table from "../chart/Table";
 import Visual from "../chart/Visual";
-import type { Row, Spec } from "../chart/option";
+import type { Row } from "../chart/option";
+import type { Spec } from "../spec/spec";
 import { SERIES_LIMIT } from "../chart/option";
 import Fields, { Profile, Unread, nullRate } from "./Fields";
 import { fromProfiles, fromShape } from "./fields";
@@ -34,7 +35,7 @@ const profile = (columns: ColumnProfile[]): TableProfile => ({
  * expanded. A static render only reaches the closed state, so the open one is built by
  * rendering the column node through a profile with a single column. */
 const tree = (columns: ColumnProfile[]) =>
-  drawn(<Fields tables={fromProfiles([profile(columns)])} failure={null} onDrag={() => {}} />);
+  drawn(<Fields tables={fromProfiles([profile(columns)])} failure={null} holding={null} onDrag={() => {}} />);
 
 describe("the fields tree", () => {
   it("lists a table with its row count", () => {
@@ -45,13 +46,13 @@ describe("the fields tree", () => {
   });
 
   it("says so when a source is not connected yet", () => {
-    expect(drawn(<Fields tables={[]} failure={null} onDrag={() => {}} />)).toContain(
+    expect(drawn(<Fields tables={[]} failure={null} holding={null} onDrag={() => {}} />)).toContain(
       "once a source is connected",
     );
   });
 
   it("shows what the source refused rather than an empty tree", () => {
-    expect(drawn(<Fields tables={null} failure="the warehouse said no" onDrag={() => {}} />)).toContain(
+    expect(drawn(<Fields tables={null} failure="the warehouse said no" holding={null} onDrag={() => {}} />)).toContain(
       "the warehouse said no",
     );
   });
@@ -67,7 +68,7 @@ describe("the tree before anything has been profiled", () => {
   const shaped = fromShape([
     { table: "vizmith.shop.customers", columns: [{ name: "country", type: "string" }] },
   ]);
-  const outline = drawn(<Fields tables={shaped} failure={null} onDrag={() => {}} />);
+  const outline = drawn(<Fields tables={shaped} failure={null} holding={null} onDrag={() => {}} />);
 
   it("draws the tree from the shape alone", () => {
     // What is on screen while the profiles are still being read, which on a schema nobody
@@ -182,13 +183,15 @@ const TOTAL: Field = { table: "vizmith.shop.orders", column: "total", type: "dec
 const ORDERED: Field = { table: "vizmith.shop.orders", column: "order_date", type: "date" };
 
 const wells = (draft: Draft | null) =>
-  drawn(<Wells draft={draft} dragging={null} onChange={() => {}} onRelationships={() => {}} />);
+  drawn(<Wells draft={draft} dragging={null} onChange={() => {}} onDrag={() => {}} onRelationships={() => {}} />);
 
 describe("the wells", () => {
   const revenue = place(place(null, "Axis", COUNTRY), "Values", TOTAL);
 
   it("offers a drop zone for every well while they are empty", () => {
-    expect(wells(null).match(/Drop a field here/g)).toHaveLength(5);
+    // Once per well, counted on the label rather than the text: the two say the same
+    // thing, because a control a person can see has to answer to what they can see.
+    expect(wells(null).match(/aria-label="Drop a field here, /g)).toHaveLength(5);
   });
 
   it("goes quiet for JSON that parses and is not a spec, rather than taking the tab down", () => {
@@ -244,11 +247,47 @@ describe("the wells", () => {
     expect(wells(revenue)).toContain("Remove from Axis");
     expect(wells(revenue)).toContain("Remove from Values");
   });
+
+  it("shows a filter as its column and what it tests", () => {
+    const markup = wells(place(revenue, "Filters", ORDERED));
+
+    expect(markup).toContain("order_date");
+    // Underscores are the grammar's word for it and not a person's.
+    expect(markup).toContain("is not null");
+  });
+
+  it("shows a disjunction as the columns it mentions and how many ways it lets a row in", () => {
+    // Nothing in the wells builds one — a drop writes `is_not_null` — so this is a spec
+    // that came back from a model or was typed into `{ } JSON`, and the well still has to
+    // read it. Naming both columns is what says which of them are narrowing the rows;
+    // `any of 2` is what says this chip is the loose kind.
+    const loose = {
+      ...revenue,
+      query: {
+        ...revenue.query,
+        filters: [
+          {
+            any: [
+              { column: "vizmith.shop.orders.status", op: "=" as const, value: "pending" },
+              { column: "vizmith.shop.orders.total", op: ">" as const, value: 500 },
+            ],
+          },
+        ],
+      },
+    };
+
+    const markup = wells(loose);
+
+    expect(markup).toContain("status or total");
+    expect(markup).toContain("any of 2");
+  });
 });
 
 describe("the visual card", () => {
   const spec: Spec = {
+    spec_version: "1",
     title: "Revenue per country",
+    query: { from: "orders", limit: 500 },
     chart: {
       mark: "bar",
       encoding: {

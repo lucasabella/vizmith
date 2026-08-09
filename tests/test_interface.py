@@ -363,6 +363,51 @@ def test_a_dashboard_is_renamed_in_one_gesture(page):
 
 
 @needs_built_frontend
+def test_one_filter_narrows_every_tile_it_reaches_and_says_which_it_did_not(page):
+    """#117, end to end: the control, the two answers it gives, and the round trip.
+
+    It belongs in a browser rather than in jsdom because what is being asserted crosses a
+    reload — a filter that has to be retyped after one is a control nobody keeps — and
+    because the two tiles have to actually run against the source under it. One reads
+    customers through a join and is narrowed; the other reads only orders, and is left
+    exactly as it was with a sentence saying so. A join invented to make it reach would
+    draw a plausible number, which is the failure this whole design exists to prevent.
+    """
+    run_spec(page, REVENUE_BY_COUNTRY)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+
+    page.get_by_role("button", name="Chart", exact=True).first.click()
+    run_spec(page, ORDERS_PER_MONTH)
+    chart_drawn(page)
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Add the chart on screen").click()
+    page.wait_for_selector(".grid__cell:nth-child(2) canvas", timeout=DRAWN)
+
+    page.get_by_label("Column to filter every tile by").select_option("customers.country")
+    page.get_by_label("Value").fill("Netherlands")
+    page.get_by_role("button", name="Add", exact=True).click()
+
+    page.wait_for_selector(".grid__unnarrowed", timeout=DRAWN)
+    assert page.locator(".grid__unnarrowed").count() == 1, "only the tile that cannot reach it"
+    assert "Not narrowed by country = Netherlands" in page.locator(".grid__unnarrowed").inner_text()
+    assert "1 tile" in page.locator(".across__chip").inner_text(), "and the chip says so too"
+
+    page.get_by_label("Dashboard name").fill("Trade, 2026")
+    page.get_by_role("button", name="Save").click()
+    page.wait_for_selector("text=Saved as Trade, 2026", timeout=DRAWN)
+
+    page.reload(wait_until="networkidle")
+    page.get_by_role("button", name="Dashboards").click()
+    page.get_by_role("button", name="Trade, 2026").click()
+    page.wait_for_selector(".grid__cell canvas", timeout=DRAWN)
+
+    assert "country = Netherlands" in page.locator(".across__chip").inner_text()
+    assert page.locator(".grid__unnarrowed").count() == 1
+
+
+@needs_built_frontend
 def test_arranging_a_dashboard_runs_no_query(page):
     """The bug this exists for: tiles keyed by position meant swapping two of them handed
     each component the other's spec, and both ran their query again. Arranging a dashboard
@@ -414,6 +459,53 @@ def test_a_column_row_opens_from_the_keyboard_the_way_it_says_it_does(page):
 
     # Space on a control that says it is a button opens it rather than scrolling the page.
     assert page.evaluate("window.scrollY") == 0
+
+
+@needs_built_frontend
+def test_a_chart_is_built_from_the_keyboard_alone(page):
+    """The interaction the README puts second, reached without a mouse.
+
+    Dragging a column into a well was HTML5 drag and drop and nothing else, so somebody
+    driving this from a keyboard could read the Fields panel, reach every control around it
+    and not build a chart at all. WCAG 2.1.1, level A. Driven with `press` throughout rather
+    than with `click`, because a click on the same buttons proves nothing this file did not
+    already prove.
+    """
+    page.locator(".tree__row--table", has_text="orders").click()
+    take = page.get_by_role("button", name="Pick up total")
+    take.focus()
+    take.press("Enter")
+
+    # Held, and said where a reader hears it rather than only where an eye sees it.
+    assert page.get_by_role("button", name="Put down total").count() == 1
+    assert "Holding total" in page.locator(".wells [role=status]").inner_text()
+
+    place = page.get_by_role("button", name="Place total in Values")
+    place.focus()
+    place.press("Enter")
+
+    chart_drawn(page)
+    assert page.get_by_role("button", name="Pick up total").count() == 1
+
+
+@needs_built_frontend
+def test_a_field_picked_up_can_be_put_down_again(page):
+    """A picked up field is a mode, and a mode with no way out is a trap. Two ways out, on
+    purpose: the control that picked it up, and Escape from wherever the person got to."""
+    page.locator(".tree__row--table", has_text="orders").click()
+    held = page.locator(".wells [role=status]")
+
+    take = page.get_by_role("button", name="Pick up status")
+    take.focus()
+    take.press("Enter")
+    assert "Holding status" in held.inner_text()
+
+    page.get_by_role("button", name="Put down status").press("Enter")
+    assert held.inner_text().strip() == ""
+
+    page.get_by_role("button", name="Pick up status").press("Enter")
+    page.get_by_role("button", name="Place status in Axis").press("Escape")
+    assert held.inner_text().strip() == ""
 
 
 @needs_built_frontend

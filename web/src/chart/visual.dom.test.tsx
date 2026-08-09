@@ -2,8 +2,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Visual from "./Visual";
-import type { Row, Spec } from "./option";
-import type { Draft, Field } from "../spec/spec";
+import type { Row } from "./option";
+import type { Spec } from "../spec/spec";
+import { type Draft, type Field, anyOf } from "../spec/spec";
 
 /**
  * The drill: a mark clicked, a dimension chosen, and the spec that produces.
@@ -95,7 +96,7 @@ describe("clicking a mark", () => {
     await waitFor(() => expect(onDrill).toHaveBeenCalled());
     const next = onDrill.mock.calls[0][0] as Draft;
     const filters = next.query.filters ?? [];
-    expect(filters.some((filter) => filter.value === "Netherlands")).toBe(true);
+    expect(filters.some((filter) => !anyOf(filter) && filter.value === "Netherlands")).toBe(true);
     expect(next.chart.encoding.x?.field).toBe("status");
   });
 
@@ -116,5 +117,96 @@ describe("clicking a mark", () => {
     await user.click(screen.getByRole("button", { name: "Table" }));
 
     expect(await screen.findByText("Netherlands")).toBeDefined();
+  });
+
+  it("shows the source's own number in the table, whatever the chart's format says", async () => {
+    // The other half of what makes a format legal. Rounding on an axis is a label, and the
+    // rule is that the value behind it stays reachable — so the table is the one place in
+    // the product that never formats, the same way it is the escape hatch for the three
+    // series colours that fail the contrast rule.
+    const formatted = {
+      ...SPEC,
+      chart: {
+        ...SPEC.chart,
+        encoding: {
+          ...SPEC.chart.encoding,
+          y: { field: "revenue", type: "quantitative", format: { kind: "currency", symbol: "€" } },
+        },
+      },
+    } as unknown as Spec;
+    const user = userEvent.setup();
+    render(
+      <Visual spec={formatted} rows={[{ country: "Netherlands", revenue: 91240.5 }]} columns={COLUMNS} onDrill={vi.fn()} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Table" }));
+
+    expect(await screen.findByText("91240.5")).toBeDefined();
+    expect(screen.queryByText("€91,240.50")).toBeNull();
+  });
+});
+
+/**
+ * The three ways out. The pure half — the escaping, the file name — is `exporting.test.ts`;
+ * this is the half that only exists once a control has been pressed, which is what the
+ * control does with what that produces.
+ *
+ * The stub above draws no canvas and therefore announces no instance, which is also the
+ * state a real card is in while the renderer is being fetched. That makes it exactly the
+ * right double for one of these: a control that saves a picture must be disabled when
+ * there is no picture.
+ */
+/** jsdom defines `navigator.clipboard` with a getter and no setter, so it is redefined
+ * rather than assigned. Restored by nothing, because each of these installs its own. */
+const clipboard = (writeText: (text: string) => Promise<void>) =>
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+describe("getting a chart out of the tab", () => {
+  it("puts the spec on the clipboard, and says so", async () => {
+    // `userEvent.setup()` installs its own clipboard, which is the closest thing to a real
+    // one here, so this reads what the control wrote rather than stubbing the write.
+    const { user } = visual();
+
+    await user.click(screen.getByRole("button", { name: "Copy the spec" }));
+
+    expect(JSON.parse(await navigator.clipboard.readText())).toEqual(SPEC);
+    expect(await screen.findByText("Spec copied.")).toBeDefined();
+  });
+
+  it("says it could not, where the browser refuses the clipboard", async () => {
+    // Absent on an insecure origin and refusable by permission. A control that says
+    // "Copied" when nothing was copied is worse than one that says it could not.
+    const { user } = visual();
+    // After `visual`, because `userEvent.setup` installs a clipboard of its own and would
+    // otherwise put a working one back over this.
+    clipboard(() => Promise.reject(new Error("denied")));
+
+    await user.click(screen.getByRole("button", { name: "Copy the spec" }));
+
+    expect(await screen.findByText(/would not let this page write to the clipboard/)).toBeDefined();
+  });
+
+  it("hands the rows over as a file named after the chart", async () => {
+    const saved: { name: string; type: string }[] = [];
+    const url = vi.fn(() => "blob:rows");
+    Object.assign(URL, { createObjectURL: url, revokeObjectURL: vi.fn() });
+    const clicking = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        saved.push({ name: this.download, type: this.href });
+      });
+    const { user } = visual();
+
+    await user.click(screen.getByRole("button", { name: "Rows as CSV" }));
+
+    expect(saved).toEqual([{ name: "revenue-by-country.csv", type: "blob:rows" }]);
+    expect(await screen.findByText("Saved revenue-by-country.csv.")).toBeDefined();
+    clicking.mockRestore();
+  });
+
+  it("will not offer a picture of a chart nothing has drawn", async () => {
+    visual();
+
+    expect(screen.getByRole("button", { name: "Chart as PNG" })).toHaveProperty("disabled", true);
   });
 });

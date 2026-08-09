@@ -47,35 +47,69 @@ const TYPED = {
 /** Every request the interface makes, answered — except `/api/execute`, which is held so a
  * test decides the order the answers come back in. */
 function serving() {
-  const waiting: ((rows: object[]) => void)[] = [];
+  const waiting: ((answer: object[] | { rows: object[]; cost?: object }) => void)[] = [];
+  const questions: Streamed[] = [];
 
   const fetching = vi.fn((url: string, options?: RequestInit) => {
     const path = String(url);
     if (path.endsWith("/api/health")) return answered(HEALTH);
     if (path.endsWith("/api/shape")) return answered(SHAPE);
     if (path.endsWith("/api/tables")) return answered({ tables: [] });
+    // A question is an event stream the test writes into a frame at a time, because what
+    // is under test is what the canvas says between the request and the answer.
+    if (path.endsWith("/api/ask")) {
+      let feed!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({ start: (controller) => void (feed = controller) });
+      const encoder = new TextEncoder();
+      questions.push({
+        say: (name, said) =>
+          feed.enqueue(encoder.encode(`event: ${name}\ndata: ${JSON.stringify(said)}\n\n`)),
+        end: () => feed.close(),
+      });
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "text/event-stream" }),
+        body,
+      } as unknown as Response);
+    }
     if (path.endsWith("/api/execute")) {
       const sent = JSON.parse(String(options?.body ?? "{}"));
       return new Promise((settle) => {
-        waiting.push((rows) =>
-          settle({ ok: true, json: () => Promise.resolve({ spec: sent.spec, rows }) } as Response),
+        waiting.push((answer) =>
+          settle({
+            ok: true,
+            // An answer is rows, and may carry what the question cost. A test that only
+            // cares about the rows passes an array, which is what most of them do.
+            json: () =>
+              Promise.resolve(
+                Array.isArray(answer)
+                  ? { spec: sent.spec, rows: answer }
+                  : { spec: sent.spec, ...answer },
+              ),
+          } as Response),
         );
       });
     }
     return answered({});
   });
 
-  return { fetching, waiting };
+  return { fetching, waiting, questions };
 }
+
+/** One question's stream, held open so a test can say a step and then look at the screen. */
+type Streamed = { say: (name: string, said: unknown) => void; end: () => void };
 
 const answered = (body: unknown) =>
   Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
 
-let waiting: ((rows: object[]) => void)[];
+let waiting: ((answer: object[] | { rows: object[]; cost?: object }) => void)[];
+let questions: Streamed[];
 
 beforeEach(() => {
   const serve = serving();
   waiting = serve.waiting;
+  questions = serve.questions;
   vi.stubGlobal("fetch", serve.fetching);
 });
 
@@ -167,12 +201,151 @@ describe("two answers arriving out of order", () => {
 describe("what the canvas announces", () => {
   it("says what is in flight, and then what landed", async () => {
     await started();
-    const said = () => screen.getByRole("status").textContent;
+    // The region that announces the canvas, which is the hidden one. The visual card has
+    // a second status region for what an export press just did — a different statement,
+    // and the reason this query names which region it means.
+    const said = () => document.querySelector(".visually-hidden[role='status']")?.textContent;
 
     await typeAndRun();
     await waitFor(() => expect(said()).toBe("Running the spec."));
 
     waiting[0](rows(1));
     await waitFor(() => expect(said()).toBe("One figure."));
+  });
+});
+
+describe("what a question cost", () => {
+  it("is shown beside the row count, with the attempts named", async () => {
+    // The claim the project is built on is that a profile rather than rows keeps token cost
+    // bounded, and the number that shows it was measured on every request and thrown away.
+    // Three attempts is the case worth naming: it cost three times what one attempt does.
+    await started();
+    await typeAndRun();
+    waiting[0]({
+      rows: rows(1),
+      cost: { calls: 3, prompt: 12000, completion: 600, total: 12600 },
+    });
+
+    expect(await screen.findByText(/12,600 tokens on this question, over 3 attempts/)).toBeDefined();
+  });
+
+  it("goes away when the next answer reached no model", async () => {
+    // Running a spec by hand reaches no model, so a cost left under it would be a figure
+    // about a question the chart on screen is not the answer to.
+    await started();
+    await typeAndRun();
+    waiting[0]({ rows: rows(1), cost: { calls: 1, prompt: 4000, completion: 200, total: 4200 } });
+    await screen.findByText(/4,200 tokens/);
+
+    // The same spec again, through the editor that is already open: `typeAndRun` toggles
+    // the panel, so pressing Run is the second run rather than a second visit.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Run spec" }));
+    await waitFor(() => expect(waiting).toHaveLength(2));
+    waiting[1]({ rows: rows(1) });
+
+    await waitFor(() => expect(screen.queryByText(/tokens/)).toBeNull());
+  });
+});
+
+/**
+ * The wait, which was one spinner over four very different things.
+ *
+ * A question reads the profiles, asks the model up to three times and then runs the query,
+ * and on a large schema the metadata in front of the model is the long part. What this
+ * drives is the whole path: the server says a step, the reader in `api.ts` hears it, and
+ * the canvas says which work is happening.
+ */
+describe("a question in flight", () => {
+  const ask = async () => {
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText(/Ask a question/), "revenue by country");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(questions).toHaveLength(1));
+    return questions[0];
+  };
+
+  it("says which step is running, and which attempt when there has been more than one", async () => {
+    await started();
+
+    const stream = await ask();
+    await screen.findByText("Answering the question");
+
+    stream.say("step", { step: "profiles", attempt: 0, of: 0 });
+    await screen.findByText("Reading the schema");
+
+    stream.say("step", { step: "model", attempt: 2, of: 3 });
+    await screen.findByText("Asking the model, attempt 2 of 3");
+
+    stream.say("step", { step: "query", attempt: 0, of: 0 });
+    await screen.findByText("Running the query");
+
+    stream.say("answer", { spec: TYPED, rows: rows(3) });
+    stream.end();
+    await waitFor(() => expect(screen.queryByText("Running the query")).toBeNull());
+  });
+
+  it("announces the step it moved to, since a blank wait is worst for a reader who cannot see it", async () => {
+    await started();
+    const stream = await ask();
+
+    stream.say("step", { step: "profiles", attempt: 0, of: 0 });
+
+    await waitFor(() =>
+      expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe("Reading the schema."),
+    );
+  });
+
+  it("shows the refusal an event carried, though the response was a 200", async () => {
+    await started();
+    const stream = await ask();
+
+    stream.say("step", { step: "profiles", attempt: 0, of: 0 });
+    stream.say("refused", { errors: ["the warehouse is asleep"], spoke: "source" });
+    stream.end();
+
+    await screen.findByText("What the source said");
+    await screen.findByText("the warehouse is asleep");
+  });
+});
+
+/**
+ * A chart built without a mouse.
+ *
+ * The whole path, because the halves are in two files and the point is that they meet:
+ * a column's row offers a control that picks the field up, the wells become buttons that
+ * place what is held, and what they press is the same `drop` a mouse reaches. WCAG 2.1.1,
+ * level A — the interaction the README puts second was reachable one way only.
+ */
+describe("building a chart from the keyboard", () => {
+  it("picks a column up from its row and places it in the well that was pressed", async () => {
+    const user = userEvent.setup();
+    await started();
+
+    await user.click(screen.getByRole("button", { name: /orders/ }));
+    await user.click(screen.getByRole("button", { name: "Pick up total" }));
+
+    // Held, and said so where a reader will hear it.
+    expect(screen.getByRole("button", { name: "Put down total" })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText(/Holding total/)).toBeTruthy(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Place total in Values" }));
+
+    // The same request a drop makes, with the same spec in it.
+    await waitFor(() => expect(waiting).toHaveLength(1));
+    waiting[0](rows(2));
+    await waitFor(() => expect(screen.queryByText(/Holding total/)).toBeNull());
+  });
+
+  it("puts a field down again on a second press, so nothing is stuck holding it", async () => {
+    const user = userEvent.setup();
+    await started();
+
+    await user.click(screen.getByRole("button", { name: /orders/ }));
+    await user.click(screen.getByRole("button", { name: "Pick up status" }));
+    await user.click(screen.getByRole("button", { name: "Put down status" }));
+
+    expect(screen.getByRole("button", { name: "Pick up status" })).toBeTruthy();
   });
 });

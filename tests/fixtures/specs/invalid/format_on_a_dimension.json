@@ -1,0 +1,17 @@
+{
+  "spec_version": "1",
+  "title": "Orders per country",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [{ "column": "country" }],
+    "aggregates": [{ "fn": "count", "as": "orders" }],
+    "limit": 100
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "country", "type": "nominal", "format": { "kind": "currency", "symbol": "€" } },
+      "y": { "field": "orders", "type": "quantitative" }
+    }
+  }
+}

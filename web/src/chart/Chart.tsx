@@ -8,7 +8,8 @@ import {
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { buildOption, clickedValue, label, type Row, type Spec } from "./option";
+import { SURF, buildOption, clickedValue, formatted, type Row } from "./option";
+import type { Spec } from "../spec/spec";
 import type { Clicked } from "../spec/drill";
 
 /**
@@ -35,14 +36,23 @@ echarts.use([
   CanvasRenderer,
 ]);
 
+/**
+ * A drawn chart, for whoever wants a picture of it. `getDataURL` is the instance's own,
+ * and the instance is private to this file, so this is the handle it hands out: one method,
+ * and nothing a caller could use to draw something the spec does not describe.
+ */
+export type Drawn = { png: () => string };
+
 export default function Chart({
   spec,
   rows,
   onSelect,
+  onDrawn,
 }: {
   spec: Spec;
   rows: Row[];
   onSelect?: (clicked: Clicked) => void;
+  onDrawn?: (drawn: Drawn | null) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
@@ -62,6 +72,15 @@ export default function Chart({
     clicking.current = { onSelect, spec, rows };
   });
 
+  // The same treatment for the export handle, and for the same reason: a parent that passes
+  // a new closure on every render would otherwise tear the instance down and build it again
+  // for nothing. It is announced when an instance exists and withdrawn when one does not, so
+  // a control that saves an image is disabled exactly while there is no image to save.
+  const drawn = useRef(onDrawn);
+  useEffect(() => {
+    drawn.current = onDrawn;
+  });
+
   // A question with no dimension. The validator has already established that the query
   // returns one row, so the measure is read off it and drawn as a figure. There is no
   // option to build for that, which is why this is read off the encoding.
@@ -76,9 +95,18 @@ export default function Chart({
   // whole lifecycle — canvas, renderer, click handler, resize observer — paid for what is
   // a data change, on every drop into a well and every tile of a dashboard.
   useEffect(() => {
-    if (!drawing || host.current === null) return;
+    if (!drawing || host.current === null) {
+      drawn.current?.(null);
+      return;
+    }
     const instance = echarts.init(host.current);
     chart.current = instance;
+    // Twice the pixels, on the surface the chart is drawn on. A canvas has no background of
+    // its own, so a PNG taken without one is a chart with transparent gaps that reads as
+    // dark ink on a dark background wherever it is pasted.
+    drawn.current?.({
+      png: () => instance.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: SURF }),
+    });
     // A click carries what the renderer drew: the category on the axis and the series
     // name where a colour channel made one. Both are labels, and what they stand for is
     // looked up in the result set rather than parsed back out of them. A time axis is
@@ -100,6 +128,7 @@ export default function Chart({
       observer.disconnect();
       instance.dispose();
       chart.current = null;
+      drawn.current?.(null);
     };
   }, [drawing]);
 
@@ -116,7 +145,7 @@ export default function Chart({
       <div className="figure">
         <div>
           <p className="figure__name">{spec.title ?? y.title ?? y.field}</p>
-          <p className="figure__value">{label(rows[0][y.field])}</p>
+          <p className="figure__value">{formatted(rows[0][y.field], y.format)}</p>
         </div>
       </div>
     );

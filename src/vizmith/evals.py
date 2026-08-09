@@ -31,10 +31,11 @@ from vizmith import query
 from vizmith.ask import ATTEMPTS, ask, prompt
 from vizmith.catalog import Catalog
 from vizmith.critique import critique, misreads
-from vizmith.model import Model, ModelError
+from vizmith.model import Model, ModelError, Spend
 from vizmith.profiler import TableProfile
 from vizmith.relevance import select
 from vizmith.spec import output_columns
+from vizmith.spec.validate import conditions
 from vizmith.state import hold
 
 VALIDATES = "validates"
@@ -91,6 +92,12 @@ class Score:
     note: str = ""
     repaired: bool | None = None
     suggestion: str = ""
+    # What this question spent, in tokens, across every attempt it took and the critique
+    # where one was asked for. A run already recorded the model and the endpoint that
+    # produced a score and not what the score cost, so two prompts could be compared on
+    # correctness and not on price — which is half of what a prompt change is judged on.
+    # Zero where the answer came out of the cache: nothing was spent this run.
+    tokens: int = 0
 
     @property
     def complete(self) -> bool:
@@ -130,6 +137,9 @@ class Run:
             # whether the assistant helps is a number a run is compared on.
             "critiqued": sum(score.repaired is not None for score in self.scores),
             "repaired": sum(score.repaired is True for score in self.scores),
+            # What the run cost. Only what was asked for this time: a cached answer spends
+            # nothing, and a total that counted it would make a re-run look expensive.
+            "tokens": sum(score.tokens for score in self.scores),
         }
 
     def as_dict(self) -> dict:
@@ -290,6 +300,8 @@ def _score(
 
     if stored is not None:
         spec, errors, taken, asked = stored["spec"], stored["errors"], stored["attempts"], False
+        # Nothing was spent to read a file, whatever the answer cost when it was written.
+        cost = 0
     else:
         asked = True
         try:
@@ -302,36 +314,42 @@ def _score(
                 relationships=relationships,
             )
         except ModelError as failure:
+            # A model that could not be reached. What the attempt cost is not knowable from
+            # here — the adapter raises rather than answering — so nothing is claimed.
             return Score(question.name, (), VALIDATES, str(failure), attempts=0, asked=True)
-        spec, errors, taken = answer.spec, answer.errors, answer.attempts
+        spec, errors, taken, cost = answer.spec, answer.errors, answer.attempts, answer.spent.total
         if cache:
             cache.write(key, {"spec": spec, "errors": errors, "attempts": taken})
 
     if spec is None:
-        return Score(question.name, (), VALIDATES, "; ".join(errors), attempts=taken, asked=asked)
+        return Score(question.name, (), VALIDATES, "; ".join(errors), attempts=taken, asked=asked, tokens=cost)
 
     passed = [VALIDATES]
 
     missing, extra = _difference(question, spec)
     if missing:
-        return Score(question.name, tuple(passed), REFERENCES, missing, attempts=taken, asked=asked)
+        return Score(question.name, tuple(passed), REFERENCES, missing, attempts=taken, asked=asked, tokens=cost)
     passed.append(REFERENCES)
 
     try:
         rows = query.execute(spec, catalog)
         expected = query.execute(question.reference, catalog)
     except (ValueError, RuntimeError) as failure:
-        return Score(question.name, tuple(passed), RESULT, str(failure), attempts=taken, asked=asked, note=extra)
+        return Score(question.name, tuple(passed), RESULT, str(failure), attempts=taken, asked=asked, note=extra, tokens=cost)
     if _comparable(rows, spec) != _comparable(expected, question.reference):
         reason = f"{len(rows)} rows, expected {len(expected)}"
         if len(rows) == len(expected):
             reason = f"{len(rows)} rows that are not the expected ones"
-        return Score(question.name, tuple(passed), RESULT, reason, attempts=taken, asked=asked, note=extra)
+        return Score(question.name, tuple(passed), RESULT, reason, attempts=taken, asked=asked, note=extra, tokens=cost)
     passed.append(RESULT)
 
     refused = indefensible(spec, rows)
     if refused:
-        suggested, said = _repaired(spec, tables, model, rows, constrained, attempts) if repair else (None, "")
+        suggested, said, spent = (
+            _repaired(spec, tables, model, rows, constrained, attempts)
+            if repair
+            else (None, "", Spend())
+        )
         return Score(
             question.name,
             tuple(passed),
@@ -342,10 +360,11 @@ def _score(
             note=extra,
             repaired=suggested,
             suggestion=said,
+            tokens=cost + spent.total,
         )
     passed.append(MARK)
 
-    return Score(question.name, tuple(passed), None, attempts=taken, asked=asked, note=extra)
+    return Score(question.name, tuple(passed), None, attempts=taken, asked=asked, note=extra, tokens=cost)
 
 
 def _repaired(
@@ -355,8 +374,9 @@ def _repaired(
     rows: list[dict],
     constrained: bool,
     attempts: int,
-) -> tuple[bool | None, str]:
-    """Whether the critique's suggestion gets past the layer that refused this mark.
+) -> tuple[bool | None, str, Spend]:
+    """Whether the critique's suggestion gets past the layer that refused this mark, and
+    what asking cost.
 
     Judged on the rows this question already fetched rather than on the profiles the
     critique reasoned from, because those rows are what the last layer refused and a
@@ -369,11 +389,12 @@ def _repaired(
     try:
         suggestion = critique(spec, tables, model, attempts=attempts, constrained=constrained)
     except ModelError as failure:
-        return None, str(failure)
+        return None, str(failure), Spend()
     if suggestion.spec is None:
-        return False, "; ".join(suggestion.errors) or "the critique found nothing to say"
+        said = "; ".join(suggestion.errors) or "the critique found nothing to say"
+        return False, said, suggestion.spent
     still = indefensible(suggestion.spec, rows)
-    return not still, still or f"{suggestion.spec['chart']['mark']} instead"
+    return not still, still or f"{suggestion.spec['chart']['mark']} instead", suggestion.spent
 
 
 def _difference(question: Question, spec: dict) -> tuple[str, str]:
@@ -404,7 +425,9 @@ def _referenced(spec: dict) -> tuple[set[str], set[str]]:
 
     columns = {
         _normalised(item["column"], default)
-        for item in [*asked.get("select", []), *asked.get("group_by", []), *asked.get("filters", [])]
+        # `conditions` rather than `filters`: a filter may be a disjunction, which names no
+        # column of its own and holds the ones that do.
+        for item in [*asked.get("select", []), *asked.get("group_by", []), *conditions(asked)]
     }
     columns |= {
         _normalised(aggregate["column"], default)

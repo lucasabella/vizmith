@@ -7,12 +7,15 @@ import {
   WellRefusal,
   type Draft,
   type Field,
+  type Filter,
   type Fn,
   type Join,
   type Unit,
   type Well,
+  anyOf,
   clear,
   inQuery,
+  nameOf,
   place,
   ranksRequired,
   reaggregate,
@@ -41,11 +44,13 @@ export default function Wells({
   draft,
   dragging,
   onChange,
+  onDrag,
   onRelationships,
 }: {
   draft: Draft | null;
   dragging: Field | null;
   onChange: (draft: Draft) => void;
+  onDrag: (field: Field | null) => void;
   onRelationships: () => void;
 }) {
   const [over, setOver] = useState<Well | null>(null);
@@ -69,8 +74,14 @@ export default function Wells({
     }
     try {
       onChange(place(draft, well, field, joins));
+      // Put down what was picked up. A mouse drop clears this on `dragEnd` anyway; a
+      // placement made from the keyboard has no such moment, and a field still held after
+      // it landed is a well that places it again on the next Return.
+      onDrag(null);
     } catch (error) {
       if (!(error instanceof WellRefusal)) throw error;
+      // Still held, on purpose: the drop was refused and the next thing somebody does is
+      // try another well, which they cannot do having been made to pick it up again.
       setRefusal({ well, lines: [error.message], path: false });
     }
   };
@@ -85,9 +96,15 @@ export default function Wells({
       event.preventDefault();
       void drop(well);
     },
+    // The keyboard's half of the same gesture. A well is a button, so Return and Space
+    // already reach this; what is left is the way out, because a field picked up with no
+    // way to put it down is a mode somebody is stuck in.
+    onClick: () => void drop(well),
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (event.key === "Escape") onDrag(null);
+    },
   });
 
-  const encoding = draft?.chart.encoding;
   const required = draft !== null && ranksRequired(draft);
   const missing = required && draft.query.limit_by === undefined;
 
@@ -111,18 +128,23 @@ export default function Wells({
               onChange={onChange}
               well={well}
               over={over}
+              holding={dragging}
               zone={zone}
             />
           ) : null}
 
           {well === "Values" ? (
             <div className="well__slot">
-              {encoding?.y ? (
+              {/* The null is shed by the guard rather than by a cast. `encoding?.y` alone
+                  told the checker nothing about `draft`, so the three controls under here
+                  asserted it away — an assertion about a null in the middle of a file whose
+                  other casts were about a type. */}
+              {draft !== null && draft.chart.encoding.y ? (
                 <span className="chip">
                   <select
                     className="chip__pick"
                     value={aggregateOf(draft)}
-                    onChange={(event) => onChange(reaggregate(draft as Draft, event.target.value as Fn))}
+                    onChange={(event) => onChange(reaggregate(draft, event.target.value as Fn))}
                     aria-label="Aggregate"
                   >
                     {FNS.map((fn) => (
@@ -131,19 +153,17 @@ export default function Wells({
                       </option>
                     ))}
                   </select>
-                  <span className="chip__name">{encoding.y.field}</span>
+                  <span className="chip__name">{draft.chart.encoding.y.field}</span>
                   <button
                     className="chip__off"
-                    onClick={() => onChange(clear(draft as Draft, "Values"))}
+                    onClick={() => onChange(clear(draft, "Values"))}
                     aria-label="Remove from Values"
                   >
                     ×
                   </button>
                 </span>
               ) : (
-                <div className={dropClass(over === well, false)} {...zone(well)}>
-                  Drop a field here
-                </div>
+                <Zone well={well} over={over} holding={dragging} zone={zone} />
               )}
             </div>
           ) : null}
@@ -173,31 +193,29 @@ export default function Wells({
                   </button>
                 </span>
               ) : (
-                <div className={dropClass(over === well, missing)} {...zone(well)}>
-                  Drop a field here
-                </div>
+                <Zone well={well} over={over} holding={dragging} zone={zone} missing={missing} />
               )}
             </div>
           ) : null}
 
           {well === "Filters" ? (
             <div className="well__slot">
-              {(draft?.query.filters ?? []).map((filter, at) => (
-                <span key={`${filter.column}-${at}`} className="chip">
-                  <span className="chip__name">{filter.column.split(".").slice(-1)[0]}</span>
-                  <span className="chip__said">{filter.op.replace(/_/g, " ")}</span>
-                  <button
-                    className="chip__off"
-                    onClick={() => onChange(clear(draft as Draft, "Filters", at))}
-                    aria-label="Remove from Filters"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <div className={dropClass(over === well, false)} {...zone(well)}>
-                Drop a field here
-              </div>
+              {draft === null
+                ? null
+                : (draft.query.filters ?? []).map(chip).map(({ name, said }, at) => (
+                    <span key={`${name}-${at}`} className="chip">
+                      <span className="chip__name">{name}</span>
+                      <span className="chip__said">{said}</span>
+                      <button
+                        className="chip__off"
+                        onClick={() => onChange(clear(draft, "Filters", at))}
+                        aria-label="Remove from Filters"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+              <Zone well={well} over={over} holding={dragging} zone={zone} />
             </div>
           ) : null}
 
@@ -224,13 +242,43 @@ export default function Wells({
 
       {draft === null ? (
         <p className="wells__note">
-          Drag a column from Fields into a well. What a well infers, an aggregate or a date
-          unit, is shown in the well and can be changed there.
+          Drag a column from Fields into a well, or pick one up from its row and place it in
+          the well you want. What a well infers, an aggregate or a date unit, is shown in
+          the well and can be changed there.
         </p>
       ) : null}
+
+      {/* What is held, for somebody who cannot see that a row has gone into its pressed
+          state. Silent otherwise: a region that says something on every drag is a region
+          that gets turned off. */}
+      <p className="visually-hidden" role="status">
+        {dragging === null
+          ? ""
+          : `Holding ${dragging.column}. Choose a well to place it in, or press Escape.`}
+      </p>
     </div>
   );
 }
+
+/**
+ * What a filter chip reads. A condition is its column and its operator, which is the whole
+ * of it. A disjunction is every column it mentions, joined by the word the grammar joins
+ * them with, and the count rather than the operators: `status = or total >` on one chip
+ * reads as two filters, and three of them read as a chip nobody can parse.
+ *
+ * The well's job here is to say which columns are narrowing the rows and that one of these
+ * chips is the loose kind. What each condition actually says is in `{ } JSON`, which is the
+ * other view of the same spec and the one that shows a filter in full. A disjunction is not
+ * something a drop can build — a drop writes `is_not_null` — so this is the reading half of
+ * the feature, and the chip's × still takes the whole filter out.
+ */
+function chip(filter: Filter): { name: string; said: string } {
+  if (!anyOf(filter)) return { name: short(filter.column), said: filter.op.replace(/_/g, " ") };
+  const columns = [...new Set(filter.any.map((condition) => short(condition.column)))];
+  return { name: columns.join(" or "), said: `any of ${filter.any.length}` };
+}
+
+const short = (column: string): string => column.split(".").slice(-1)[0];
 
 /** A well holding a dimension: the column, and the unit a date is truncated to, which is
  * the other thing a drop infers and therefore the other thing that has to be visible. */
@@ -239,6 +287,7 @@ function Channel({
   channel,
   well,
   over,
+  holding,
   zone,
   onChange,
 }: {
@@ -246,6 +295,7 @@ function Channel({
   channel: "x" | "color";
   well: Well;
   over: Well | null;
+  holding: Field | null;
   zone: (well: Well) => object;
   onChange: (draft: Draft) => void;
 }) {
@@ -253,15 +303,13 @@ function Channel({
   if (draft === undefined || draft === null || bound === undefined) {
     return (
       <div className="well__slot">
-        <div className={dropClass(over === well, false)} {...zone(well)}>
-          Drop a field here
-        </div>
+        <Zone well={well} over={over} holding={holding} zone={zone} />
       </div>
     );
   }
 
   const item = (draft.query.group_by ?? []).find(
-    (each) => (each.as ?? each.column.split(".").slice(-1)[0]) === bound.field,
+    (each) => nameOf(each) === bound.field,
   );
 
   return (
@@ -300,6 +348,44 @@ function Channel({
         </button>
       </span>
     </div>
+  );
+}
+
+/**
+ * A well's empty slot: where a drop lands, and the keyboard's way to the same place.
+ *
+ * It was a `div` with drag handlers on it, which is the whole of #143 in one element — the
+ * primary interaction of the product was reachable with a mouse and with nothing else. A
+ * button is reachable by both, and the drag handlers are unchanged, so this is an input
+ * path rather than a second way of placing a field: what it presses is the same `drop`.
+ *
+ * What it says depends on whether something is held, because a control whose label is
+ * "drop a field here" is describing a gesture the keyboard does not have. The visible text
+ * is inside the accessible name rather than replaced by it, so somebody driving this by
+ * voice can say what they can see.
+ */
+function Zone({
+  well,
+  over,
+  holding,
+  zone,
+  missing = false,
+}: {
+  well: Well;
+  over: Well | null;
+  holding: Field | null;
+  zone: (well: Well) => object;
+  missing?: boolean;
+}) {
+  const said = holding === null ? "Drop a field here" : `Place ${holding.column}`;
+  return (
+    <button
+      className={dropClass(over === well, missing)}
+      {...zone(well)}
+      aria-label={holding === null ? `${said}, ${well}` : `${said} in ${well}`}
+    >
+      {said}
+    </button>
   );
 }
 

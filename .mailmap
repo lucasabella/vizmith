@@ -1,0 +1,10 @@
+# One person, one name in `git log` and `git shortlog`.
+#
+# The same address wrote commits under four spellings, which reads as four contributors in
+# any tool that counts them and as an inconsistency in the one place a reader looks first.
+# A mailmap fixes the display without rewriting a single commit — the history is unchanged
+# and every hash still resolves, which is the point: the repository's cross references are
+# `#nnn` and commit hashes, and rewriting to tidy a name would break them for nothing.
+Luca Sabella <lucasabella@icloud.com> <lucasabella@icloud.com>
+Luca Sabella <lucasabella@icloud.com> Lucasabella <lucasabella@icloud.com>
+Luca Sabella <lucasabella@icloud.com> LucaSabella84 <lucasabella@icloud.com>

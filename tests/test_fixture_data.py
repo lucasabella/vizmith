@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from generate_data import COLUMNS, DATA_DIR, write
 
+from vizmith.spec.validate import conditions
+
 VALID_SPECS = sorted((Path(__file__).parent / "fixtures" / "specs" / "valid").glob("*.json"))
 
 
@@ -38,7 +40,7 @@ def _column_references(query):
             return column
         return f"{default_table}.{column}"
 
-    for item in query.get("select", []) + query.get("group_by", []) + query.get("filters", []):
+    for item in query.get("select", []) + query.get("group_by", []) + [*conditions(query)]:
         yield qualify(item["column"])
     for aggregate in query.get("aggregates", []):
         if "column" in aggregate:

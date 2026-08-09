@@ -5,6 +5,7 @@ import {
   clear,
   draftIn,
   inQuery,
+  nameOf,
   outputColumns,
   place,
   qualified,
@@ -254,6 +255,19 @@ describe("what the editor is holding", () => {
     expect(draftIn(JSON.stringify({ ...filtered, query: { ...filtered.query, filters: [{ column: "a" }] } }))).toBeNull();
   });
 
+  it("holds a disjunction, and nothing for one whose conditions a chip cannot name", () => {
+    // The other filter shape. A chip is built out of the conditions it holds, so the
+    // question the flat kind is asked is asked of each of them — and `{"any": []}` builds
+    // a chip out of nothing, which draws an empty chip with an × on it.
+    const spec = revenue();
+    const filters = (any: unknown) => JSON.stringify({ ...spec, query: { ...spec.query, filters: [any] } });
+
+    expect(draftIn(filters({ any: [{ column: "a", op: "=" }, { column: "b", op: ">" }] }))).not.toBeNull();
+    expect(draftIn(filters({ any: [{ column: "a" }] }))).toBeNull();
+    expect(draftIn(filters({ any: [] }))).toBeNull();
+    expect(draftIn(filters({ any: "status" }))).toBeNull();
+  });
+
   it("holds nothing for a group_by item a panel cannot name", () => {
     const spec = revenue();
     const nameless = { ...spec, query: { ...spec.query, group_by: [{ truncate: "month" }] } };
@@ -285,5 +299,51 @@ describe("what the editor is holding", () => {
     expect(
       draftIn('{"query":{"filters":[{"column":"a","op":"sideways"}]},"chart":{"encoding":{}}}'),
     ).not.toBeNull();
+  });
+});
+
+/**
+ * The other shape an item comes in.
+ *
+ * Nothing in the wells builds one — a drop writes a column — so this is the reading half,
+ * the same way a disjunction is. What has to hold is that every place that names an item
+ * asks `nameOf` and none of them reaches for a column that is not there: a `TypeError`
+ * during render unmounts the tree in React 19, so the whole interface goes rather than
+ * the panel.
+ */
+describe("an item that computes rather than naming a column", () => {
+  const spread = {
+    expression: { left: "orders.total", op: "-" as const, right: "orders.item_count" },
+    as: "spread",
+  };
+
+  it("is named by its alias, which is the only name it has", () => {
+    expect(nameOf(spread)).toBe("spread");
+    expect(nameOf({ column: "vizmith.shop.orders.total" })).toBe("total");
+    expect(nameOf({ column: "vizmith.shop.orders.total", as: "revenue" })).toBe("revenue");
+  });
+
+  it("is an output column under that name, in the builder's order", () => {
+    const query = {
+      from: "orders",
+      group_by: [spread],
+      aggregates: [{ fn: "count" as const, as: "order_count" }],
+      limit: 10,
+    };
+
+    expect(outputColumns(query)).toEqual(["spread", "order_count"]);
+  });
+
+  it("is a shape the panels will draw rather than one they go quiet on", () => {
+    const spec = revenue();
+    const computed = {
+      ...spec,
+      query: {
+        ...spec.query,
+        group_by: [{ expression: { left: "a", op: "*", right: 2 }, as: "spread" }],
+      },
+    };
+
+    expect(draftIn(JSON.stringify(computed))).not.toBeNull();
   });
 });
