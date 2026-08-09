@@ -88,7 +88,9 @@ that does not skip a tie. Six edits, and the one whose absence is *silent* is 3.
 
 1. **`src/vizmith/spec/v1/spec.schema.json`** — the `window.fn` enum, and the `if`/`then`
    beside it if the function reads the rows in an order, since that is what requires `along`
-   and what refuses it for the two that do not.
+   and what refuses it for the two that do not. There is a second `if`/`then` for the same
+   job on `direction`: a key a function makes no use of is refused there rather than accepted
+   and ignored, which is why `share` cannot carry one.
 
 2. **`src/vizmith/spec/validate.py`** — a rule in `_read_errors`, *if the function's answer
    depends on the walk being unambiguous*. The two that are there are the shape to copy: a
