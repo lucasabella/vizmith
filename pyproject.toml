@@ -47,7 +47,7 @@ snowflake = ["snowflake-connector-python>=3.12"]
 
 # The PostgreSQL source. The credential is libpq's own business: a service in
 # ~/.pg_service.conf, or the standard PG* environment.
-postgres = ["psycopg[binary]>=3.2"]
+postgres = ["psycopg[binary]>=3.3.4"]
 
 # DuckDB is the test harness, not part of the product: it writes the fixture Parquet
 # and builds the local database the deterministic tests run against. httpx is not here
@@ -62,7 +62,7 @@ dev = [
     "duckdb>=1.1",
     "google-cloud-bigquery>=3.25",
     "snowflake-connector-python>=3.12",
-    "psycopg[binary]>=3.2",
+    "psycopg[binary]>=3.3.4",
     "playwright>=1.49",
 ]
 
