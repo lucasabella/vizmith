@@ -120,6 +120,7 @@ EXPECTED_ERROR = {
     # The schema's half: a rank is taken over its own measure, so there is nowhere for a
     # column to be walked and `along` is refused rather than ignored.
     "rank_walking_a_column.json": "should not be valid under {'required': ['along']}",
+    "share_with_a_direction.json": "should not be valid under {'required': ['direction']}",
     "limit_by_ranks_a_window.json": (
         "query.limit_by.column: 'share_of_revenue' is a window, which is worked out over the "
         "rows the ranking keeps and so does not exist where the ranking runs"

@@ -722,6 +722,36 @@ def test_the_same_query_without_the_ranking_shares_out_a_bigger_total(catalog):
         assert share > everything[country]
 
 
+def test_a_query_can_be_ordered_by_the_window_it_takes(catalog):
+    """A window is an output column, so the order can name it, and it lands in the ORDER BY
+    of the same SELECT that works it out. That is an alias referring to itself, which is the
+    one place SQL allows it — and it is the order somebody asking for a ranking meant."""
+    spec = load(RANKED)
+    spec["query"]["order_by"] = [{"column": "place", "direction": "asc"}]
+
+    rows = execute(spec, catalog)
+
+    assert [row["place"] for row in rows] == sorted(row["place"] for row in rows)
+
+
+def test_the_row_cap_does_not_decide_what_a_share_is_of(catalog):
+    """The other narrowing, and it works the other way round on purpose. `limit` is a cap on
+    what comes back and `limit_by` is what picks the series, which is what the schema already
+    says of the two. So the cap sits outside the SELECT the window is worked out in: the
+    shares are of everything the grouping produced and the cap then truncates the rows, which
+    is why a Top N is asked for with `limit_by` and not by making the cap small."""
+    spec = load(SHARE)
+    del spec["query"]["limit_by"]
+    spec["query"]["limit"] = 3
+
+    sql, _ = build(spec, catalog)
+    rows = execute(spec, catalog)
+
+    assert sql.index(" FROM base") < sql.index(" LIMIT ")
+    assert len(rows) == 3, "the fixture stopped returning more countries than the cap"
+    assert sum(row["share_of_revenue"] for row in rows) < 1.0
+
+
 def test_the_first_row_has_nothing_before_it_and_says_so(catalog):
     rows = execute(load(AGAINST_LAST_MONTH), catalog)
 

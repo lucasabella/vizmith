@@ -73,7 +73,9 @@ total per category restarts inside each rather than accumulating across all of t
 share and a rank take a partition_by too and never an "along", since one is over a whole
 partition and the other is over its own measure. "direction" is desc for a rank and asc for
 a walk unless it says otherwise. A share and a change are fractions, so a channel drawing
-one reads {"kind": "percent"}.
+one reads {"kind": "percent"}. A window is worked out over the rows limit_by keeps, so a
+share of the top ten is a share of those ten; narrowing with 'limit' instead leaves it a
+share of everything, and picking rows is what limit_by is for.
 
 A value the tables do not hold can still be charted, where it is one operation over two of
 the ones they do. Anywhere a column goes — in select, in group_by, in an aggregate — write

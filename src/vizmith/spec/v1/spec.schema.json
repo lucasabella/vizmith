@@ -444,7 +444,7 @@
       }
     },
     "window": {
-      "description": "One row of the result read against the others: a running total, a share of the total, a rank, the value one row back, the difference from it, or that difference as a proportion. `of` names one of the query's own aggregate aliases, because what a window compares is a measure. `partition_by` names the dimensions the comparison restarts inside, so a running total can be per category rather than one line across all of them. `along` names the output column the rows are walked in, which the four ordered functions require and which `share` and `rank` refuse: a share is over a whole partition and a rank is over its own measure. `direction` is what the word means unless it says otherwise — a rank counts down from the largest, an ordered walk goes forwards.",
+      "description": "One row of the result read against the others: a running total, a share of the total, a rank, the value one row back, the difference from it, or that difference as a proportion. `of` names one of the query's own aggregate aliases, because what a window compares is a measure. `partition_by` names the dimensions the comparison restarts inside, so a running total can be per category rather than one line across all of them. `along` names the output column the rows are walked in, which the four ordered functions require and which `share` and `rank` refuse: a share is over a whole partition and a rank is over its own measure. `direction` is what the word means unless it says otherwise — a rank counts down from the largest, an ordered walk goes forwards — and `share` refuses it, since a share of a partition is the same number whichever end the rows are read from.",
       "type": "object",
       "required": [
         "fn",
@@ -514,6 +514,25 @@
             "not": {
               "required": [
                 "along"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "fn"
+            ],
+            "properties": {
+              "fn": {
+                "const": "share"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "direction"
               ]
             }
           }
