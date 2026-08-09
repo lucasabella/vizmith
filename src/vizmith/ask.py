@@ -58,6 +58,23 @@ rows are grouped and names a column; a having applies after and names one of the
 aggregate aliases. "Countries with revenue over a million" is
 having: [{"aggregate": "revenue", "op": ">", "value": 1000000}].
 
+A question that reads one row against the other rows is a window, not a second query.
+'windows' sits beside 'aggregates' and each entry reads one of their aliases, so a query
+that groups by nothing has no window to take. The functions are running_total, share, rank,
+previous, difference and change: a total accumulated so far, a share of the total as a
+fraction, a place counting down from the largest, the measure one row back, the movement
+from it, and that movement as a proportion. The four that read the rows in an order also
+say which output column they walk. So revenue by month with the year so far beside it is
+windows: [{"fn": "running_total", "of": "revenue", "along": "month", "as": "revenue_so_far"}],
+and "how did each month compare with the one before" is {"fn": "change", "of": "revenue",
+"along": "month", "as": "against_last_month"}. Where the query groups by more than one
+dimension, every dimension except the one being walked goes in "partition_by", so a running
+total per category restarts inside each rather than accumulating across all of them; a
+share and a rank take a partition_by too and never an "along", since one is over a whole
+partition and the other is over its own measure. "direction" is desc for a rank and asc for
+a walk unless it says otherwise. A share and a change are fractions, so a channel drawing
+one reads {"kind": "percent"}.
+
 A value the tables do not hold can still be charted, where it is one operation over two of
 the ones they do. Anywhere a column goes — in select, in group_by, in an aggregate — write
 "expression": {"left": L, "op": O, "right": R} instead of "column", with "as" saying what to

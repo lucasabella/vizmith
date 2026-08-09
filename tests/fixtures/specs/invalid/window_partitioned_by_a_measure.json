@@ -1,0 +1,20 @@
+{
+  "spec_version": "1",
+  "title": "Revenue per country by status, ranked inside its own measure",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [{ "column": "country" }, { "column": "status" }],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [{ "fn": "rank", "of": "revenue", "partition_by": ["revenue"], "as": "place" }],
+    "limit_by": { "column": "country", "by": "revenue", "limit": 10 },
+    "limit": 500
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "country", "type": "nominal" },
+      "y": { "field": "revenue", "type": "quantitative" },
+      "color": { "field": "status", "type": "nominal" }
+    }
+  }
+}

@@ -60,7 +60,8 @@ else. No explanation, no code fence.
 
 Change the chart only. The query is the question the person asked, and an answer that
 changes it answers a different question, so send the query back exactly as it is here: the
-same tables, joins, filters, grouping, aggregates, order and limits, in the same order.
+same tables, joins, filters, grouping, aggregates, windows, order and limits, in the same
+order.
 Everything outside the chart comes back unchanged too, the title included.
 
 Pick the mark the shape of the result supports. The rule that refused this one does not

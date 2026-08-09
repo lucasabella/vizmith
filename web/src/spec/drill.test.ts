@@ -117,6 +117,24 @@ describe("clicking a mark", () => {
     expect(narrowed.query.order_by).toEqual([{ column: "status", direction: "asc" }]);
   });
 
+  it("moves a window onto it as well, so a running total is still read along the axis", () => {
+    // A window names output columns, and the drilled one is about to stop being one. Left
+    // alone it names a column the query no longer has, which the validator refuses for
+    // something the person did not do: they clicked a bar.
+    const accumulating = chart();
+    accumulating.query.windows = [
+      { fn: "running_total", of: "revenue", along: "country", as: "revenue_so_far" },
+      { fn: "rank", of: "revenue", partition_by: ["country"], as: "place" },
+    ];
+
+    const narrowed = drill(spec(accumulating), rows, { category: "Germany" }, STATUS);
+
+    expect(narrowed.query.windows).toEqual([
+      { fn: "running_total", of: "revenue", along: "status", as: "revenue_so_far" },
+      { fn: "rank", of: "revenue", partition_by: ["status"], as: "place" },
+    ]);
+  });
+
   it("truncates a date it groups by, the way a well would have", () => {
     const monthly = drill(spec(chart()), rows, { category: "Germany" }, {
       table: "vizmith.shop.customers",

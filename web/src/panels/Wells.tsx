@@ -21,6 +21,7 @@ import {
   reaggregate,
   retop,
   retruncate,
+  windowFor,
 } from "../spec/spec";
 
 /**
@@ -141,18 +142,7 @@ export default function Wells({
                   other casts were about a type. */}
               {draft !== null && draft.chart.encoding.y ? (
                 <span className="chip">
-                  <select
-                    className="chip__pick"
-                    value={aggregateOf(draft)}
-                    onChange={(event) => onChange(reaggregate(draft, event.target.value as Fn))}
-                    aria-label="Aggregate"
-                  >
-                    {FNS.map((fn) => (
-                      <option key={fn} value={fn}>
-                        {fn}
-                      </option>
-                    ))}
-                  </select>
+                  <Measure draft={draft} onChange={onChange} />
                   <span className="chip__name">{draft.chart.encoding.y.field}</span>
                   <button
                     className="chip__off"
@@ -394,11 +384,45 @@ const dropClass = (over: boolean, missing: boolean): string =>
     .filter(Boolean)
     .join(" ");
 
+/**
+ * What the measure on screen is: the aggregate it was taken with, or the window it was read
+ * with where a window is what the chart is drawing.
+ *
+ * The select is the aggregate's, and it is not offered for a window. A window is taken over
+ * an aggregate rather than instead of one — `running_total` of a `sum` — so a select here
+ * would be changing something two steps behind what the well names, and the one it used to
+ * show was `sum` whatever the window said, because no aggregate carried the drawn column's
+ * alias. A well that names an inference nobody made is the failure this panel exists to
+ * prevent. The window is named instead, and it is changed in `{ } JSON`: nothing in the
+ * browser writes a window, the same way nothing in it writes a computed column.
+ */
+function Measure({ draft, onChange }: { draft: Draft; onChange: (draft: Draft) => void }) {
+  const field = draft.chart.encoding.y?.field;
+  // Not called `window`, which is a global this file could reasonably want one day.
+  const read = windowFor(draft, field);
+  if (read !== undefined) {
+    return <span className="chip__said">{`${read.fn} of ${read.of}`}</span>;
+  }
+  return (
+    <select
+      className="chip__pick"
+      value={aggregateOf(draft, field)}
+      onChange={(event) => onChange(reaggregate(draft, event.target.value as Fn))}
+      aria-label="Aggregate"
+    >
+      {FNS.map((fn) => (
+        <option key={fn} value={fn}>
+          {fn}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** The function the measure on screen was taken with, read off the query rather than
  * remembered, because the JSON is the other view of the same spec and may have changed
  * it. */
-function aggregateOf(draft: Draft | null): Fn {
-  const measure = draft?.chart.encoding.y?.field;
-  const aggregate = (draft?.query.aggregates ?? []).find((each) => each.as === measure);
+function aggregateOf(draft: Draft, field: string | undefined): Fn {
+  const aggregate = (draft.query.aggregates ?? []).find((each) => each.as === field);
   return aggregate?.fn ?? "sum";
 }

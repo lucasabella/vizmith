@@ -1,0 +1,18 @@
+{
+  "spec_version": "1",
+  "title": "Revenue per country, with a share of a category",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [{ "column": "country" }],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [{ "fn": "share", "of": "country", "as": "share_of_revenue" }],
+    "limit": 500
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "country", "type": "nominal" },
+      "y": { "field": "share_of_revenue", "type": "quantitative" }
+    }
+  }
+}

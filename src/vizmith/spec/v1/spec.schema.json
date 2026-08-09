@@ -171,6 +171,14 @@
             "$ref": "#/$defs/having"
           }
         },
+        "windows": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/window"
+          }
+        },
         "order_by": {
           "type": "array",
           "maxItems": 4,
@@ -434,6 +442,83 @@
           ]
         }
       }
+    },
+    "window": {
+      "description": "One row of the result read against the others: a running total, a share of the total, a rank, the value one row back, the difference from it, or that difference as a proportion. `of` names one of the query's own aggregate aliases, because what a window compares is a measure. `partition_by` names the dimensions the comparison restarts inside, so a running total can be per category rather than one line across all of them. `along` names the output column the rows are walked in, which the four ordered functions require and which `share` and `rank` refuse: a share is over a whole partition and a rank is over its own measure. `direction` is what the word means unless it says otherwise — a rank counts down from the largest, an ordered walk goes forwards.",
+      "type": "object",
+      "required": [
+        "fn",
+        "of",
+        "as"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fn": {
+          "enum": [
+            "running_total",
+            "share",
+            "rank",
+            "previous",
+            "difference",
+            "change"
+          ]
+        },
+        "of": {
+          "$ref": "#/$defs/identifier"
+        },
+        "along": {
+          "$ref": "#/$defs/identifier"
+        },
+        "partition_by": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "direction": {
+          "enum": [
+            "asc",
+            "desc"
+          ]
+        },
+        "as": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "fn"
+            ],
+            "properties": {
+              "fn": {
+                "enum": [
+                  "running_total",
+                  "previous",
+                  "difference",
+                  "change"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "along"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "along"
+              ]
+            }
+          }
+        }
+      ]
     },
     "operand": {
       "description": "One side of a computed column: a column reference, or a number bound as a parameter like every other value. A number on the left is legal because '-' and '/' are not commutative, so '1 - rate' is a question and '(1 - rate)' written the other way round is a different one.",

@@ -1,0 +1,23 @@
+{
+  "spec_version": "1",
+  "title": "Revenue per month by status, accumulated across both",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [
+      { "column": "order_date", "truncate": "month", "as": "month" },
+      { "column": "status" }
+    ],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [{ "fn": "running_total", "of": "revenue", "along": "month", "as": "revenue_so_far" }],
+    "limit_by": { "column": "status", "by": "revenue", "limit": 5 },
+    "limit": 500
+  },
+  "chart": {
+    "mark": "line",
+    "encoding": {
+      "x": { "field": "month", "type": "temporal" },
+      "y": { "field": "revenue_so_far", "type": "quantitative" },
+      "color": { "field": "status", "type": "nominal" }
+    }
+  }
+}
