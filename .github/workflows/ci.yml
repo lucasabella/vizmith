@@ -79,10 +79,13 @@ jobs:
         run: pytest --cov
 
       # ci rather than install, because the lockfile is committed and a review should see
-      # the dependency versions the author had.
+      # the dependency versions the author had. The ESLint 10 update is compatible with
+      # the flat configs in use, but eslint-plugin-jsx-a11y 6.10.2 still declares a peer
+      # range ending at ESLint 9. Keep this exception explicit until that upstream metadata
+      # catches up; lint is still the runtime check for the combination.
       - name: Install the frontend
         working-directory: web
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       # Not a formatter. `tsc --noEmit` in the build already covers most of what a linter
       # would say here, so this is the part it cannot see: a hook with the wrong
@@ -185,7 +188,7 @@ jobs:
 
       - name: Build the frontend the server serves
         working-directory: web
-        run: npm ci && npm run build
+        run: npm ci --legacy-peer-deps && npm run build
 
       - name: pytest tests/test_interface.py
         run: pytest tests/test_interface.py
