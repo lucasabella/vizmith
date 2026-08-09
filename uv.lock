@@ -1870,7 +1870,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "snowflake-connector-python", marker = "extra == 'dev'", specifier = ">=3.12" },
     { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=3.12" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
 ]
 provides-extras = ["duckdb", "bigquery", "snowflake", "postgres", "dev"]
 
