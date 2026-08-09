@@ -38,7 +38,10 @@ class BuildInterface(BuildHookInterface):
                 "building a vizmith wheel needs npm, because the interface it serves is "
                 "built into it. Install Node, or build from a checkout with pip install -e ."
             )
-        subprocess.run([npm, "ci"], cwd=WEB, check=True)
+        # Keep wheel builds on the same explicit peer-resolution exception as CI. The
+        # current ESLint flat-config plugins run together, but one still publishes a peer
+        # range ending at ESLint 9 while this dependency update uses ESLint 10.
+        subprocess.run([npm, "ci", "--legacy-peer-deps"], cwd=WEB, check=True)
         subprocess.run([npm, "run", "build"], cwd=WEB, check=True)
 
         if INTO.exists():
