@@ -149,8 +149,10 @@ function valueOf(spec: Spec, rows: Row[], clicked: Clicked): Value {
   return match[x.field];
 }
 
-/** `order_by` and `limit_by` follow the column that replaced the drilled one, so a chart
- * that ranked its axis still ranks the axis it now has. */
+/** `order_by`, `limit_by` and any window follow the column that replaced the drilled one, so
+ * a chart that ranked its axis still ranks the axis it now has, and a running total drawn
+ * along it is still drawn along it. A window left naming the column that has gone is a spec
+ * the validator refuses for something the person did not do — they clicked a bar. */
 function retargeted(query: Draft["query"], was: string, now: string) {
   const order_by = (query.order_by ?? []).map((order) =>
     order.column === was ? { ...order, column: now } : order,
@@ -159,10 +161,18 @@ function retargeted(query: Draft["query"], was: string, now: string) {
     query.limit_by && query.limit_by.column === was
       ? { ...query.limit_by, column: now }
       : query.limit_by;
+  const windows = (query.windows ?? []).map((window) => ({
+    ...window,
+    ...(window.along === was ? { along: now } : {}),
+    ...(window.partition_by?.includes(was) === true
+      ? { partition_by: window.partition_by.map((column) => (column === was ? now : column)) }
+      : {}),
+  }));
   return {
     ...query,
     ...(order_by.length > 0 ? { order_by } : {}),
     ...(limit_by ? { limit_by } : {}),
+    ...(windows.length > 0 ? { windows } : {}),
   };
 }
 

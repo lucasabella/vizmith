@@ -93,6 +93,38 @@ EXPECTED_ERROR = {
         "here and the filter does not mean what it says"
     ),
     "relative_start_without_a_unit.json": ("'unit' is a required property"),
+    "window_over_a_dimension.json": (
+        "query.windows: 'share_of_revenue' is taken over 'country', which is not one of this "
+        "query's aggregate aliases ['revenue']. A window compares a measure across rows"
+    ),
+    "window_on_a_figure.json": (
+        "query.windows: 'share_of_revenue' reads a row against the other rows, and a query "
+        "that groups by nothing produces one row"
+    ),
+    "window_partitioned_by_a_measure.json": (
+        "query.windows: 'place' partitions by 'revenue', which is not among this query's "
+        "dimensions ['country', 'status']"
+    ),
+    "window_partitioned_by_every_dimension.json": (
+        "query.windows: 'share_of_revenue' partitions by every dimension the query has, so "
+        "each partition holds one row and there is nothing to read it against"
+    ),
+    "window_crossing_a_dimension.json": (
+        "query.windows: 'revenue_so_far' walks 'month' and the query also groups by "
+        "'status', so one step of the window crosses from one value of 'status' to another"
+    ),
+    "previous_along_a_measure.json": (
+        "query.windows: 'month_before' walks 'revenue', which is a measure. Two rows can hold "
+        "the same measure and which of them comes first is then the source's to decide"
+    ),
+    # The schema's half: a rank is taken over its own measure, so there is nowhere for a
+    # column to be walked and `along` is refused rather than ignored.
+    "rank_walking_a_column.json": "should not be valid under {'required': ['along']}",
+    "share_with_a_direction.json": "should not be valid under {'required': ['direction']}",
+    "limit_by_ranks_a_window.json": (
+        "query.limit_by.column: 'share_of_revenue' is a window, which is worked out over the "
+        "rows the ranking keeps and so does not exist where the ranking runs"
+    ),
     "ambiguous_table_qualifier.json": (
         "query.group_by: 'orders.status' is ambiguous, 'orders' names "
         "'vizmith.archive.orders' and 'vizmith.shop.orders', so qualify it with more segments"
@@ -131,6 +163,18 @@ def test_every_invalid_fixture_has_a_stated_expectation():
 def test_valid_set_covers_every_mark_the_schema_allows():
     allowed = set(json.loads(SCHEMA_PATH.read_text())["$defs"]["chart"]["properties"]["mark"]["enum"])
     covered = {load(path)["chart"]["mark"] for path in VALID}
+
+    assert covered == allowed
+
+
+def test_valid_set_covers_every_window_the_schema_allows():
+    """The same gate the marks get, for the same reason. A window the schema allows and no
+    fixture uses is one nothing compiles, nothing runs against DuckDB, and nothing renders —
+    six functions with one template each is exactly where a wrong one hides."""
+    allowed = set(json.loads(SCHEMA_PATH.read_text())["$defs"]["window"]["properties"]["fn"]["enum"])
+    covered = {
+        window["fn"] for path in VALID for window in load(path)["query"].get("windows", [])
+    }
 
     assert covered == allowed
 
@@ -228,6 +272,118 @@ def test_a_format_on_a_dimension_is_refused_in_words():
             "'nominal'. Only a quantitative channel carries one"
         )
     ]
+
+
+class TestAWindowReadsTheRowsItWasWrittenFor:
+    """The rules the schema cannot state, because every one of them is about a name that
+    only exists once the rest of the query has been read.
+
+    Each of these is a window that compiles, runs, and answers a question nobody asked —
+    which is the class of failure this project spends its effort on, and the reason the
+    grammar refuses rather than computing something plausible."""
+
+    def monthly(self, **window: object) -> dict:
+        """A month by month query carrying one window, which is the shape most of these
+        rules are about."""
+        spec = load(FIXTURES / "valid" / "revenue_running_total.json")
+        spec["query"]["windows"] = [{"of": "revenue", "as": "read", **window}]
+        spec["chart"]["encoding"]["y"] = {"field": "read", "type": "quantitative"}
+        return spec
+
+    def test_a_running_total_walks_the_dimension_the_query_groups_by(self):
+        assert validate_spec(self.monthly(fn="running_total", along="month")) == []
+
+    def test_a_running_total_may_walk_its_own_measure_because_its_frame_survives_a_tie(self):
+        """A cumulative total under a RANGE frame gives every tied row the total through the
+        tie, so the answer does not depend on the order the source returned them in. That is
+        what makes the descending-measure walk — a Pareto curve — askable at all."""
+        assert validate_spec(self.monthly(fn="running_total", along="revenue", direction="desc")) == []
+
+    @pytest.mark.parametrize("fn", ["previous", "difference", "change"])
+    def test_a_window_that_reaches_back_a_row_may_not_walk_a_measure(self, fn):
+        errors = validate_spec(self.monthly(fn=fn, along="revenue"))
+
+        assert errors and f"so '{fn}' walks a dimension" in errors[0]
+
+    def test_a_window_that_walks_what_it_partitions_by_never_moves(self):
+        errors = validate_spec(self.monthly(fn="previous", along="month", partition_by=["month"]))
+
+        assert errors == [
+            (
+                "query.windows: 'read' walks 'month' and partitions by it as well, so every step "
+                "stays inside one value of it and the window never moves"
+            )
+        ]
+
+    def test_a_window_walking_something_the_query_does_not_produce_is_refused_by_name(self):
+        errors = validate_spec(self.monthly(fn="running_total", along="quarter"))
+
+        assert errors == [
+            "query.windows: 'read' walks 'quarter', which is not an output column of the query"
+        ]
+
+    def test_a_running_total_walking_a_measure_still_leaves_one_dimension_to_walk_over(self):
+        """The Pareto walk is over the rows of one dimension in the order of their measure.
+        Where two dimensions are left, a partition holds a row per combination of them and
+        each step of the total crosses between them, which is the same crossing the walk
+        along a dimension is refused for."""
+        spec = load(FIXTURES / "valid" / "category_rank_by_country.json")
+        spec["query"]["windows"] = [
+            {"fn": "running_total", "of": "revenue", "along": "revenue", "as": "read"}
+        ]
+
+        errors = validate_spec(spec)
+
+        assert errors == [
+            (
+                "query.windows: 'read' walks the measure 'revenue' over rows that are one per "
+                "combination of 'country' and 'category', so each step crosses from one of them "
+                "to another. Partition by all of them but one"
+            )
+        ]
+
+    def test_a_window_cannot_be_read_along_another_window(self):
+        """Which is an output column, so the sentence below it — 'not an output column' —
+        would have been false. They are all worked out in one pass over the same rows, so
+        the one being walked does not exist yet where the walking happens."""
+        spec = self.monthly(fn="running_total", along="month")
+        spec["query"]["windows"].append(
+            {"fn": "previous", "of": "revenue", "along": "read", "as": "before"}
+        )
+
+        errors = validate_spec(spec)
+
+        assert errors == [
+            (
+                "query.windows: 'before' walks 'read', which is a window. They are all "
+                "worked out in one pass over the same rows, so one cannot be read along another"
+            )
+        ]
+
+    def test_a_share_is_over_the_whole_result_where_nothing_partitions_it(self):
+        assert validate_spec(self.monthly(fn="share")) == []
+
+    def test_a_window_alias_that_collides_with_a_measure_is_an_output_produced_twice(self):
+        spec = self.monthly(fn="share")
+        spec["query"]["windows"][0]["as"] = "revenue"
+        spec["chart"]["encoding"]["y"] = {"field": "revenue", "type": "quantitative"}
+
+        assert validate_spec(spec) == ["query: output column 'revenue' is produced more than once"]
+
+    def test_a_window_is_an_output_column_a_chart_may_bind_and_an_order_may_name(self):
+        spec = self.monthly(fn="running_total", along="month")
+        spec["query"]["order_by"] = [{"column": "read", "direction": "desc"}]
+
+        assert validate_spec(spec) == []
+
+    def test_each_window_is_refused_for_the_first_thing_wrong_with_it_and_not_for_three(self):
+        """A window over something that is not a measure has no measure to partition or walk,
+        so the rules below it would report the same mistake twice more. A retry loop reading
+        three sentences about one mistake is one that changes three things."""
+        errors = validate_spec(self.monthly(fn="running_total", of="month", along="revenue"))
+
+        assert len(errors) == 1
+        assert "is taken over 'month'" in errors[0]
 
 
 def qualified(column: str) -> dict:

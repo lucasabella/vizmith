@@ -1,0 +1,20 @@
+{
+  "spec_version": "1",
+  "title": "Revenue per country by status, ranked by a share",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [{ "column": "country" }, { "column": "status" }],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [{ "fn": "share", "of": "revenue", "partition_by": ["country"], "as": "share_of_revenue" }],
+    "limit_by": { "column": "share_of_revenue", "by": "revenue", "limit": 10 },
+    "limit": 500
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "country", "type": "nominal" },
+      "y": { "field": "revenue", "type": "quantitative" },
+      "color": { "field": "status", "type": "nominal" }
+    }
+  }
+}

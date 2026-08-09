@@ -78,6 +78,22 @@
       "columns": ["shipment_scans.location_code"],
       "reference": "../specs/valid/scans_per_location.json",
       "notes": "Five hundred locations, so an arc of the top ten is refused for being unreadable rather than for being wrong about the data. The tenth and eleventh are far enough apart that the cut is not a tie."
+    },
+    {
+      "name": "revenue_running_total",
+      "question": "How much revenue had been taken by the end of each month, counting every month from the first one onwards? Count an order's total as revenue and leave out orders that carry no order date. Each month should show the revenue accumulated up to and including it, rather than the revenue of that month alone.",
+      "tables": ["orders"],
+      "columns": ["orders.total", "orders.order_date"],
+      "reference": "../specs/valid/revenue_running_total.json",
+      "notes": "Thirty months of data, so any limit at or above thirty gives the same rows. The question names the accumulation rather than the month's own figure, because a monthly sum is a correct answer to a differently worded question and would be scored against the wrong result set. An answer that leaves the month's own sum in the result set as well matches, since the comparison is over the columns the query produces and the reference produces both."
+    },
+    {
+      "name": "revenue_share_by_country",
+      "question": "Of the ten countries that produced the most revenue, what share of those ten countries' revenue did each one produce? Count an order's total as revenue, and express each share as a fraction of the revenue of the ten.",
+      "tables": ["orders", "customers"],
+      "columns": ["customers.country", "orders.total"],
+      "reference": "../specs/valid/revenue_share_by_country.json",
+      "notes": "Fourteen countries have revenue, so the ranking is what implements the word ten and the shares add up to one over the ten kept. The question says which total the share is of, because a share of every country's revenue and a share of the ten are different numbers and both are defensible readings of a shorter question. The eleventh is well below the tenth, so the cut is not a tie."
     }
   ]
 }

@@ -78,6 +78,28 @@ export const anyOf = (filter: Filter): filter is Disjunction => "any" in filter;
  * the rows are grouped. */
 export type Having = { aggregate: string; op: Comparison; value: string | number };
 
+/**
+ * One row of the result read against the others: a running total, a share of the total, a
+ * rank, the value one row back, the difference from it, or that difference as a proportion.
+ *
+ * `of` is one of the query's own aggregate aliases, because what a window compares is a
+ * measure. `along` is the output column the rows are walked in, which the four ordered
+ * functions carry and which `share` and `rank` have nowhere to put — a share is over a
+ * whole partition and a rank is over its own measure. `partition_by` names the dimensions
+ * the reading restarts inside.
+ *
+ * The browser reads one and never writes one, the way it reads a computed item: a drop
+ * writes a column, and what would write a window is a control that does not exist yet.
+ */
+export type Window = {
+  fn: WindowFn;
+  of: string;
+  along?: string;
+  partition_by?: string[];
+  direction?: Direction;
+  as: string;
+};
+
 export type Query = {
   from: string;
   joins?: Join[];
@@ -86,6 +108,7 @@ export type Query = {
   group_by?: Item[];
   aggregates?: Aggregate[];
   having?: Having[];
+  windows?: Window[];
   order_by?: { column: string; direction?: Direction }[];
   limit_by?: { column: string; by: string; limit: number; direction?: Direction };
   limit: number;
@@ -229,7 +252,7 @@ export const draftIn = (text: string): Draft | null => {
   const { query, chart } = parsed;
   if (!anObject(query) || !anObject(chart) || !anObject(chart.encoding)) return null;
 
-  const lists = ["select", "group_by", "aggregates", "having", "filters", "order_by"];
+  const lists = ["select", "group_by", "aggregates", "having", "windows", "filters", "order_by"];
   if (!lists.every((key) => aListOfRecords(query[key]))) return null;
 
   const items = [...((query.select ?? []) as never[]), ...((query.group_by ?? []) as never[])];
@@ -280,6 +303,19 @@ export type FormatKind = (typeof FORMAT_KINDS)[number];
 
 export const FNS = ["sum", "avg", "min", "max", "count", "count_distinct"] as const;
 export type Fn = (typeof FNS)[number];
+
+/** The six ways a measure is read against the other rows. Closed the way the aggregate
+ * functions are, and for the same reason: what a window may say is the grammar's, and the
+ * interface names one where a well would otherwise show the aggregate a window is not. */
+export const WINDOW_FNS = [
+  "running_total",
+  "share",
+  "rank",
+  "previous",
+  "difference",
+  "change",
+] as const;
+export type WindowFn = (typeof WINDOW_FNS)[number];
 
 export const UNITS = ["year", "quarter", "month", "week", "day", "hour"] as const;
 export type Unit = (typeof UNITS)[number];
@@ -365,12 +401,23 @@ export function qualified(field: Field, query?: Query): string {
 /** Every name the query produces, in the builder's order. The same rule as
  * `output_columns` in the validator, which is what these names are checked against. */
 export function outputColumns(query: Query): string[] {
-  const items = [...(query.select ?? []), ...(query.group_by ?? [])];
   return [
-    ...items.map(nameOf),
+    ...dimensionsIn(query),
     ...(query.aggregates ?? []).map((aggregate) => aggregate.as),
+    ...(query.windows ?? []).map((window) => window.as),
   ];
 }
+
+/** What the query produces a row per. Separate from `outputColumns` because a window tells
+ * the two apart: it is read across dimensions and taken over a measure. */
+export const dimensionsIn = (query: Query): string[] =>
+  [...(query.select ?? []), ...(query.group_by ?? [])].map(nameOf);
+
+/** The window the measure on screen is, where it is one rather than an aggregate. A well
+ * showing `sum` over a running total would be naming a function nobody asked for, which is
+ * the quiet kind of wrong the wells exist to prevent. */
+export const windowFor = (draft: Draft, field: string | undefined): Window | undefined =>
+  field === undefined ? undefined : (draft.query.windows ?? []).find((window) => window.as === field);
 
 /**
  * What this column will be called in the result set. Its own name, unless the query
@@ -583,13 +630,17 @@ function unbind(draft: Draft, alias: string): Draft {
     (item) => nameOf(item) !== alias,
   );
   const aggregates = (query.aggregates ?? []).filter((aggregate) => aggregate.as !== alias);
+  // A window is an output column too, so clearing the well that draws one takes the window
+  // out. Everything else a window pointed at — the measure it reads, a dimension it walks —
+  // is `pruned`'s, because those go dangling rather than being what was removed.
+  const windows = (query.windows ?? []).filter((window) => window.as !== alias);
   const encoding = { ...draft.chart.encoding };
   for (const channel of ["x", "y", "color"] as const) {
     if (encoding[channel]?.field === alias) delete encoding[channel];
   }
   return {
     ...draft,
-    query: pruned({ ...query, group_by, aggregates }),
+    query: pruned({ ...query, group_by, aggregates, windows }),
     chart: { ...draft.chart, encoding },
   };
 }
@@ -598,11 +649,28 @@ function unbind(draft: Draft, alias: string): Draft {
  * a spec somebody wrote rather than as the wreckage of one. */
 function pruned(query: Query): Query {
   const out: Query = { ...query };
-  const outputs = outputColumns(out);
 
   if (out.group_by?.length === 0) delete out.group_by;
   if (out.aggregates?.length === 0) delete out.aggregates;
   if (out.filters?.length === 0) delete out.filters;
+
+  // Windows first, because they are output columns themselves: a window left pointing at a
+  // measure that has gone is one the validator refuses for a reason the person did not
+  // cause, and an order naming that window has to go with it.
+  const dimensions = dimensionsIn(out);
+  const measures = (out.aggregates ?? []).map((aggregate) => aggregate.as);
+  const windows = (out.windows ?? []).filter(
+    (window) =>
+      measures.includes(window.of) &&
+      (window.along === undefined ||
+        dimensions.includes(window.along) ||
+        measures.includes(window.along)) &&
+      (window.partition_by ?? []).every((column) => dimensions.includes(column)),
+  );
+  if (windows.length > 0) out.windows = windows;
+  else delete out.windows;
+
+  const outputs = outputColumns(out);
 
   const order_by = (out.order_by ?? []).filter((order) => outputs.includes(order.column));
   if (order_by.length > 0) out.order_by = order_by;
@@ -610,7 +678,6 @@ function pruned(query: Query): Query {
 
   // 'by' is held to the aggregate aliases rather than to the output columns, because that is
   // the rule the validator applies: ranking a dimension has no measure to rank it by.
-  const measures = (out.aggregates ?? []).map((aggregate) => aggregate.as);
   if (out.limit_by && !(outputs.includes(out.limit_by.column) && measures.includes(out.limit_by.by))) {
     delete out.limit_by;
   }

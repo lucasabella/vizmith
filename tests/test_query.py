@@ -649,3 +649,238 @@ def test_a_computed_column_can_be_grouped_by_and_named_by_its_alias(catalog):
 
     assert output_columns(spec["query"]) == ["spread", "revenue"]
     assert re.search(r'GROUP BY \(\S*"total" - \S*"item_count"\)', sql), sql
+
+
+RUNNING_TOTAL = FIXTURES / "valid" / "revenue_running_total.json"
+SHARE = FIXTURES / "valid" / "revenue_share_by_country.json"
+AGAINST_LAST_MONTH = FIXTURES / "valid" / "revenue_against_last_month.json"
+RANKED = FIXTURES / "valid" / "category_rank_by_country.json"
+
+
+def test_a_window_is_worked_out_over_the_query_rather_than_inside_it(catalog):
+    """A window reads rows the query has already produced, so it is compiled in a second
+    SELECT over `base` — the term `limit_by` already wraps a query in. Computing it in the
+    same SELECT as the aggregate it reads would be an aggregate inside an aggregate, which
+    the dialects spell differently and which puts the window before the ranking."""
+    sql, _ = build(load(RUNNING_TOTAL), catalog)
+
+    assert sql.startswith("WITH base AS (")
+    # The term itself, which is everything up to the SELECT that reads it.
+    term = sql[: sql.index(") SELECT ")]
+    assert "OVER (" not in term, "the window was compiled inside base"
+    assert "sum(" in term, "the measure stopped being aggregated in base"
+
+
+def test_a_running_total_accumulates_and_ends_at_the_total(catalog):
+    rows = execute(load(RUNNING_TOTAL), catalog)
+
+    assert len(rows) > 2, "the fixture returned too few rows to accumulate anything"
+    accumulated = 0.0
+    for row in rows:
+        accumulated += row["revenue"]
+        assert row["revenue_so_far"] == pytest.approx(accumulated, rel=1e-9)
+    assert rows[-1]["revenue_so_far"] == pytest.approx(sum(row["revenue"] for row in rows), rel=1e-9)
+
+
+def test_a_running_total_states_its_frame_so_that_a_tie_does_not_depend_on_row_order(catalog):
+    """The frame is written out rather than left to the default it happens to be, and it is
+    RANGE rather than ROWS: where two rows hold the same value of the walked column, a RANGE
+    frame gives both of them the total through the tie, so the answer does not depend on
+    which of them the source returned first. That property is what lets `running_total`
+    walk a measure at all, where the three that reach back a row may not."""
+    sql, _ = build(load(RUNNING_TOTAL), catalog)
+
+    assert "RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" in sql
+
+
+def test_a_share_is_a_share_of_the_rows_the_chart_draws(catalog):
+    """The decision this feature had to make. `limit_by` keeps the top ten countries, and
+    the window is worked out in the SELECT that reads the narrowed rows, so the shares are
+    of those ten and they add up on the chart. A share of a total that includes rows nobody
+    can see is a number that cannot be checked against the picture it is drawn on."""
+    rows = execute(load(SHARE), catalog)
+
+    drawn = sum(row["revenue"] for row in rows)
+    assert len(rows) == 10, "the fixture stopped ranking, so this proves nothing"
+    assert sum(row["share_of_revenue"] for row in rows) == pytest.approx(1.0)
+    for row in rows:
+        assert row["share_of_revenue"] == pytest.approx(row["revenue"] / drawn)
+
+
+def test_the_same_query_without_the_ranking_shares_out_a_bigger_total(catalog):
+    """The other half of the same decision, driven rather than argued: the fixture schema
+    holds more countries than the ranking keeps, so the shares of the kept ten are larger
+    than the same countries' shares of everything."""
+    spec = load(SHARE)
+    del spec["query"]["limit_by"]
+
+    everything = {row["country"]: row["share_of_revenue"] for row in execute(spec, catalog)}
+    drawn = {row["country"]: row["share_of_revenue"] for row in execute(load(SHARE), catalog)}
+
+    assert len(everything) > len(drawn), "every country is drawn, so nothing was narrowed"
+    for country, share in drawn.items():
+        assert share > everything[country]
+
+
+def test_a_query_can_be_ordered_by_the_window_it_takes(catalog):
+    """A window is an output column, so the order can name it, and it lands in the ORDER BY
+    of the same SELECT that works it out. That is an alias referring to itself, which is the
+    one place SQL allows it — and it is the order somebody asking for a ranking meant."""
+    spec = load(RANKED)
+    spec["query"]["order_by"] = [{"column": "place", "direction": "asc"}]
+
+    rows = execute(spec, catalog)
+
+    assert [row["place"] for row in rows] == sorted(row["place"] for row in rows)
+
+
+def test_the_row_cap_does_not_decide_what_a_share_is_of(catalog):
+    """The other narrowing, and it works the other way round on purpose. `limit` is a cap on
+    what comes back and `limit_by` is what picks the series, which is what the schema already
+    says of the two. So the cap sits outside the SELECT the window is worked out in: the
+    shares are of everything the grouping produced and the cap then truncates the rows, which
+    is why a Top N is asked for with `limit_by` and not by making the cap small."""
+    spec = load(SHARE)
+    del spec["query"]["limit_by"]
+    spec["query"]["limit"] = 3
+
+    sql, _ = build(spec, catalog)
+    rows = execute(spec, catalog)
+
+    assert sql.index(" FROM base") < sql.index(" LIMIT ")
+    assert len(rows) == 3, "the fixture stopped returning more countries than the cap"
+    assert sum(row["share_of_revenue"] for row in rows) < 1.0
+
+
+def test_the_first_row_has_nothing_before_it_and_says_so(catalog):
+    rows = execute(load(AGAINST_LAST_MONTH), catalog)
+
+    first, *rest = rows
+    assert (first["month_before"], first["movement"], first["change"]) == (None, None, None)
+    for before, row in zip(rows, rest):
+        assert row["month_before"] == pytest.approx(before["revenue"])
+        assert row["movement"] == pytest.approx(row["revenue"] - before["revenue"])
+        assert row["change"] == pytest.approx(row["movement"] / before["revenue"])
+
+
+def test_a_rank_restarts_inside_the_dimension_it_partitions_by(catalog):
+    """What `partition_by` buys: a category's place is its place in its own country, so
+    every country drawn has a first, and the rank of a row does not depend on how big the
+    country it is in happens to be."""
+    rows = execute(load(RANKED), catalog)
+
+    countries: dict[str, list[tuple[int, float]]] = {}
+    for row in rows:
+        countries.setdefault(row["country"], []).append((row["place"], row["revenue"]))
+
+    assert len(countries) == 5, "the fixture stopped ranking countries, so this proves nothing"
+    for places in countries.values():
+        ordered = sorted(places, key=lambda place: place[0])
+        assert [place for place, _ in ordered] == list(range(1, len(ordered) + 1))
+        assert [revenue for _, revenue in ordered] == sorted(
+            (revenue for _, revenue in ordered), reverse=True
+        )
+
+
+def test_a_rank_counts_down_from_the_largest_unless_it_says_otherwise(catalog):
+    """The one key with two defaults, because they are what each word means: a rank counts
+    down from the biggest, the way `limit_by` does, and an ordered walk goes forwards."""
+    spec = load(RANKED)
+    del spec["query"]["windows"][0]["direction"]
+
+    biggest = {row["country"]: row for row in execute(spec, catalog) if row["place"] == 1}
+    spec["query"]["windows"][0]["direction"] = "asc"
+    smallest = {row["country"]: row for row in execute(spec, catalog) if row["place"] == 1}
+
+    assert set(biggest) == set(smallest)
+    for country, row in biggest.items():
+        assert row["revenue"] > smallest[country]["revenue"]
+
+
+def test_a_window_is_the_last_output_column_and_the_row_carries_it(catalog):
+    """The result set contract, extended by one rule: a window is worked out over the rows
+    the rest of the query produced, so it is written after them."""
+    spec = load(AGAINST_LAST_MONTH)
+
+    assert output_columns(spec["query"]) == ["month", "revenue", "month_before", "movement", "change"]
+    assert list(execute(spec, catalog)[0]) == output_columns(spec["query"])
+
+
+def test_a_share_of_two_counts_is_a_fraction_rather_than_integer_division(catalog):
+    """`count / sum(count)` is integer division on PostgreSQL, which is a column of zeroes
+    rather than an error — the quiet kind of wrong. The builder multiplies by 1.0 in front
+    of every division a window writes, which promotes both sides on all five sources."""
+    spec = load(SHARE)
+    spec["query"]["aggregates"] = [{"fn": "count", "as": "orders"}]
+    spec["query"]["windows"] = [{"fn": "share", "of": "orders", "as": "share_of_orders"}]
+    spec["query"]["order_by"] = [{"column": "orders", "direction": "desc"}]
+    spec["query"]["limit_by"] = {"column": "country", "by": "orders", "limit": 10}
+    spec["chart"]["encoding"]["y"] = {"field": "share_of_orders", "type": "quantitative"}
+
+    sql, _ = build(spec, catalog)
+    rows = execute(spec, catalog)
+
+    assert "1.0 * " in sql
+    assert sum(row["share_of_orders"] for row in rows) == pytest.approx(1.0)
+    assert all(0 < row["share_of_orders"] < 1 for row in rows)
+
+
+def test_a_window_over_something_that_is_not_a_measure_is_refused_by_the_builder_too(catalog):
+    """The validator refuses it first, and the builder does not take that on trust: the rule
+    `_ranked` and `_having` already keep. A dimension here compiles to a sum over a category
+    and answers with a number."""
+    spec = load(RUNNING_TOTAL)
+    spec["query"]["windows"][0]["of"] = "month"
+
+    with pytest.raises(ValueError, match="revenue_so_far"):
+        build(spec, catalog)
+
+
+def test_a_window_and_a_ranking_compile_into_one_query_rather_than_two_wrappers(catalog):
+    """They share the term. `limit_by` wrapped the query in `base` before windows existed,
+    and a window is worked out in the SELECT that reads it — which is also what puts the
+    window after the narrowing rather than before it."""
+    sql, _ = build(load(RANKED), catalog)
+
+    assert sql.count("WITH ") == 1
+    assert sql.index("), ranked AS (") < sql.index("rank() OVER (")
+    assert sql.index("rank() OVER (") < sql.index("FROM base WHERE")
+
+
+def test_a_window_is_written_in_the_source_s_own_quoting_and_nothing_else_of_its(catalog):
+    """What a window costs a connector, which is nothing. The clause is the grammar's own
+    function names and the dialect's quoting, so a source with different quoting gets the
+    same window and no source has an opinion about it — unlike truncation, which needed a
+    field on `Dialect` because the spelling differs. This asserts that without needing four
+    connectors."""
+
+    class Elsewhere:
+        dialect = replace(catalog.dialect, quote="`", parameter="@{name}")
+        scope = catalog.scope
+
+        def describe(self, name):
+            return catalog.describe(name)
+
+    sql, parameters = build(load(RUNNING_TOTAL), Elsewhere())
+
+    assert "sum(`revenue`) OVER (ORDER BY `month` ASC RANGE BETWEEN" in sql
+    assert '"' not in sql, "another source's quoting reached the statement"
+    assert "@p0" in sql and parameters, "the row limit stopped being bound"
+
+
+def test_a_condition_on_a_measure_is_applied_before_a_window_reads_the_rows(catalog):
+    """The same rule `having` already keeps, seen from the other side: it applies at the
+    grouping the query declares, which is inside `base`, so a window reads what survived it.
+    A share is then a share of the rows that are drawn, which is what a person filtering a
+    chart means, and it is the same answer `limit_by` gets."""
+    spec = load(SHARE)
+    everything = execute(spec, catalog)
+    threshold = sorted(row["revenue"] for row in everything)[-3]
+    spec["query"]["having"] = [{"aggregate": "revenue", "op": ">=", "value": threshold}]
+
+    sql, _ = build(spec, catalog)
+    rows = execute(spec, catalog)
+
+    assert sql.index("HAVING") < sql.index("), ranked AS ("), "the condition escaped base"
+    assert len(rows) == 3
+    assert sum(row["share_of_revenue"] for row in rows) == pytest.approx(1.0)

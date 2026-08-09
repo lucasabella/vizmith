@@ -13,6 +13,7 @@ import {
   reaggregate,
   retop,
   retruncate,
+  windowFor,
   type Draft,
   type Field,
 } from "./spec";
@@ -345,5 +346,81 @@ describe("an item that computes rather than naming a column", () => {
     };
 
     expect(draftIn(JSON.stringify(computed))).not.toBeNull();
+  });
+});
+
+/**
+ * A window is an output column the browser reads and never writes, the way a computed item
+ * is. What it costs the interface is not a control but three questions the panels have to
+ * answer about a spec somebody typed: what the measure on screen is, what happens to a
+ * window when the column it reads is taken away, and whether the whole thing still draws.
+ */
+describe("a window, which is read across rows rather than out of one", () => {
+  const monthly = (): Draft => ({
+    spec_version: "1",
+    query: {
+      from: "orders",
+      group_by: [{ column: "orders.order_date", truncate: "month", as: "month" }],
+      aggregates: [{ fn: "sum", column: "orders.total", as: "revenue" }],
+      windows: [{ fn: "running_total", of: "revenue", along: "month", as: "revenue_so_far" }],
+      order_by: [{ column: "revenue_so_far", direction: "desc" }],
+      limit: 60,
+    },
+    chart: {
+      mark: "area",
+      encoding: {
+        x: { field: "month", type: "temporal" },
+        y: { field: "revenue_so_far", type: "quantitative" },
+      },
+    },
+  });
+
+  it("is an output column, after every measure, the way the builder writes it", () => {
+    expect(outputColumns(monthly().query)).toEqual(["month", "revenue", "revenue_so_far"]);
+  });
+
+  it("is the measure on screen where the chart draws it", () => {
+    const draft = monthly();
+
+    expect(windowFor(draft, draft.chart.encoding.y?.field)).toMatchObject({ fn: "running_total" });
+    expect(windowFor(draft, "revenue")).toBeUndefined();
+  });
+
+  it("is taken out with the well that drew it, and takes its order with it", () => {
+    const cleared = clear(monthly(), "Values");
+
+    expect(cleared.query.windows).toBeUndefined();
+    expect(cleared.query.order_by).toBeUndefined();
+    expect(cleared.chart.encoding.y).toBeUndefined();
+    expect(cleared.query.aggregates).toEqual([
+      { fn: "sum", column: "orders.total", as: "revenue" },
+    ]);
+  });
+
+  it("goes when the measure it reads goes, rather than being left pointing at nothing", () => {
+    const draft = monthly();
+    draft.chart.encoding.y = { field: "revenue", type: "quantitative" };
+
+    const cleared = clear(draft, "Values");
+
+    expect(cleared.query.aggregates).toBeUndefined();
+    expect(cleared.query.windows).toBeUndefined();
+  });
+
+  it("goes when the dimension it walks goes, for the same reason", () => {
+    const cleared = clear(monthly(), "Axis");
+
+    expect(cleared.query.group_by).toBeUndefined();
+    expect(cleared.query.windows).toBeUndefined();
+  });
+
+  it("is a shape the panels will draw rather than one they go quiet on", () => {
+    expect(draftIn(JSON.stringify(monthly()))).not.toBeNull();
+  });
+
+  it("is refused as a draft where it is not a list, because a panel walks it", () => {
+    const broken = { ...monthly(), query: { ...monthly().query, windows: "running_total" } };
+
+    expect(draftIn(JSON.stringify(broken))).toBeNull();
   });
 });

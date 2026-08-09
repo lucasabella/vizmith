@@ -1,0 +1,14 @@
+{
+  "spec_version": "1",
+  "title": "Total revenue, accumulated",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [{ "fn": "share", "of": "revenue", "as": "share_of_revenue" }],
+    "limit": 1
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": { "y": { "field": "share_of_revenue", "type": "quantitative" } }
+  }
+}

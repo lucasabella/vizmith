@@ -81,6 +81,46 @@ without raising.
    missing registration, because a blank canvas is what an unregistered series looks like
    and jsdom has no canvas to be blank.
 
+## Adding a window function
+
+A seventh way to read a row against the other rows — a moving average, a percentile, a rank
+that does not skip a tie. Six edits, and the one whose absence is *silent* is 3.
+
+1. **`src/vizmith/spec/v1/spec.schema.json`** — the `window.fn` enum, and the `if`/`then`
+   beside it if the function reads the rows in an order, since that is what requires `along`
+   and what refuses it for the two that do not. There is a second `if`/`then` for the same
+   job on `direction`: a key a function makes no use of is refused there rather than accepted
+   and ignored, which is why `share` cannot carry one.
+
+2. **`src/vizmith/spec/validate.py`** — a rule in `_read_errors`, *if the function's answer
+   depends on the walk being unambiguous*. The two that are there are the shape to copy: a
+   walk leaves exactly one dimension unpartitioned, and anything that reaches back a row
+   walks a dimension rather than a measure, because two rows can hold the same measure and
+   which of them comes first is then the source's to decide. `LAGGING` is that list.
+
+3. **`src/vizmith/query.py`, `_window()`** — the template, and this is the quiet one: what
+   the source is asked to compute. A frame that is left to the default is a frame the
+   dialects choose, and a division that is not promoted is integer division on PostgreSQL —
+   a column of zeroes rather than an error. Neither fails a test that only checks the SQL
+   compiles.
+
+4. **`src/vizmith/ask.py`, `INSTRUCTIONS`** — the sentence naming it. The schema says the
+   word exists; the instructions are where a model learns which question it answers, and
+   they are sent whether or not the endpoint honours a schema.
+
+5. **`web/src/spec/spec.ts`, `WINDOW_FNS`** — the browser's one copy of the enum.
+   `mirrors.test.ts` reads the schema and fails when the two disagree, so this step
+   announces itself. Nothing in the browser *writes* a window; the Values well names the one
+   the chart draws, which is `windowFor`.
+
+6. **A fixture in `tests/fixtures/specs/valid/`** —
+   `test_valid_set_covers_every_window_the_schema_allows` in `tests/test_spec_validation.py`
+   fails the moment step 1 lands without one, the same gate the marks get. The fixture is
+   then compiled, run against DuckDB, checked against the result set contract and rendered,
+   which is most of the coverage for one JSON file. Add the refusal case to
+   `tests/fixtures/specs/invalid/` too where step 2 added a rule, with its expected message
+   in `EXPECTED_ERROR`.
+
 ## Adding a well
 
 A well is a drop target that rewrites the spec. Four edits, all in the browser.

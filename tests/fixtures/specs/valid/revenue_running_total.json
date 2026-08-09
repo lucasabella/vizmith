@@ -1,0 +1,27 @@
+{
+  "spec_version": "1",
+  "title": "Revenue accumulated month by month",
+  "query": {
+    "from": "orders",
+    "filters": [{ "column": "order_date", "op": "is_not_null" }],
+    "group_by": [{ "column": "order_date", "truncate": "month", "as": "month" }],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [
+      { "fn": "running_total", "of": "revenue", "along": "month", "as": "revenue_so_far" }
+    ],
+    "order_by": [{ "column": "month", "direction": "asc" }],
+    "limit": 60
+  },
+  "chart": {
+    "mark": "area",
+    "encoding": {
+      "x": { "field": "month", "type": "temporal" },
+      "y": {
+        "field": "revenue_so_far",
+        "type": "quantitative",
+        "title": "Revenue so far",
+        "format": { "kind": "currency", "symbol": "€" }
+      }
+    }
+  }
+}

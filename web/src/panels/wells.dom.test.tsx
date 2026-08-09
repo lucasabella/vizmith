@@ -234,3 +234,71 @@ describe("a field placed without a mouse", () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain("Holding country");
   });
 });
+
+/**
+ * What the Values well says the measure is.
+ *
+ * The select is the aggregate's, and a window is not an aggregate: it is taken over one.
+ * The well used to show `sum` for a chart drawing a running total, because no aggregate
+ * carried the drawn column's alias and the lookup fell back — a well naming an inference
+ * nobody made, which is the thing this panel exists to prevent.
+ */
+describe("the measure the Values well names", () => {
+  const monthly = (): Draft => ({
+    spec_version: "1",
+    query: {
+      from: "orders",
+      group_by: [{ column: "orders.order_date", truncate: "month", as: "month" }],
+      aggregates: [{ fn: "sum", column: "orders.total", as: "revenue" }],
+      windows: [{ fn: "running_total", of: "revenue", along: "month", as: "revenue_so_far" }],
+      limit: 60,
+    },
+    chart: {
+      mark: "area",
+      encoding: {
+        x: { field: "month", type: "temporal" },
+        y: { field: "revenue_so_far", type: "quantitative" },
+      },
+    },
+  });
+
+  it("is a control where the measure is an aggregate", async () => {
+    const user = userEvent.setup();
+    const { onChange } = wells(revenue(), null);
+
+    await user.selectOptions(screen.getByLabelText("Aggregate"), "avg");
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({ aggregates: [expect.objectContaining({ fn: "avg" })] }),
+      }),
+    );
+  });
+
+  it("is the window and its measure where the chart draws a window", () => {
+    const { container } = render(
+      <Wells
+        draft={monthly()}
+        dragging={null}
+        onChange={() => {}}
+        onDrag={() => {}}
+        onRelationships={() => {}}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Aggregate")).toBeNull();
+    expect(container.textContent).toContain("running_total of revenue");
+    expect(container.textContent).toContain("revenue_so_far");
+  });
+
+  it("still offers the way back out, because a drop with no way back is a trap", async () => {
+    const user = userEvent.setup();
+    const { onChange } = wells(monthly(), null);
+
+    await user.click(screen.getByRole("button", { name: "Remove from Values" }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ query: expect.not.objectContaining({ windows: expect.anything() }) }),
+    );
+  });
+});

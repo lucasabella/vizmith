@@ -176,21 +176,35 @@ class _Builder:
     def build(self) -> tuple[str, dict]:
         query = self._query
         limit_by = query.get("limit_by")
-        names = output_columns(query)
-        columns = ", ".join(self._quoted(name) for name in names)
+        windows = query.get("windows", [])
+        # Every output the body itself produces, which is `output_columns` without the window
+        # aliases it appends: those belong to the second SELECT, and the body has no idea of
+        # them. Paired strictly with the expressions, so a name with nothing to compile — or
+        # an expression with nothing to call it — raises here rather than being dropped by a
+        # zip that stopped at the shorter of the two.
+        produced = output_columns(query)
+        names = produced[: len(produced) - len(windows)]
 
         select = ", ".join(
-            f"{expression} AS {self._quoted(name)}" for name, expression in zip(names, self._expressions())
+            f"{expression} AS {self._quoted(name)}"
+            for name, expression in zip(names, self._expressions(), strict=True)
         )
         body = f"SELECT {select} FROM {self._from()}{self._where()}{self._group_by()}{self._having()}"
 
-        if limit_by:
-            ranked = self._ranked(limit_by)
-            outer = self._quoted(limit_by["column"])
-            body = (
-                f"WITH base AS ({body}), ranked AS ({ranked}) "
-                f"SELECT {columns} FROM base WHERE {outer} IN (SELECT {outer} FROM ranked)"
+        if limit_by or windows:
+            columns = ", ".join(
+                [
+                    *(self._quoted(name) for name in names),
+                    *(f"{self._window(window)} AS {self._quoted(window['as'])}" for window in windows),
+                ]
             )
+            kept = ""
+            terms = f"WITH base AS ({body})"
+            if limit_by:
+                outer = self._quoted(limit_by["column"])
+                terms += f", ranked AS ({self._ranked(limit_by)})"
+                kept = f" WHERE {outer} IN (SELECT {outer} FROM ranked)"
+            body = f"{terms} SELECT {columns} FROM base{kept}"
 
         return f"{body}{self._order_by()} LIMIT {self._bind(query['limit'])}", self._parameters
 
@@ -279,6 +293,73 @@ class _Builder:
                 f"{self._aggregate(aggregate)} {condition['op']} {self._bind(condition['value'])}"
             )
         return f" HAVING {' AND '.join(conditions)}" if conditions else ""
+
+    def _window(self, window: dict) -> str:
+        """One row read against the others, over the rows this query draws.
+
+        It is compiled in the SELECT that reads `base`, which is what makes "the rows this
+        query draws" true rather than approximate: a window there is worked out after that
+        query's own WHERE, so where `limit_by` narrowed to the top ten countries, a share is
+        a share of those ten and a running total ends where the last drawn bar does. A number
+        on a chart that cannot be checked against the chart is the quiet kind of wrong this
+        project exists to avoid.
+
+        Two function calls the builder writes and the grammar cannot ask for. `NULLIF` guards
+        every division, the same way an expression's does and for the same reason: the
+        dialects disagree about a zero divisor and a chart whose bars depend on which
+        warehouse ran the query is the failure this design is about. And the multiplication
+        by 1.0 in front of a division is what stops two integers dividing as integers, which
+        is what PostgreSQL does with `count / sum(count)` and is a column of zeroes rather
+        than an error.
+        """
+        measure = self._quoted(window["of"])
+        # Not taken on trust: the validator refuses a window over anything but the query's
+        # own measures, and what the builder compiles is never an assumption nobody checked.
+        # A dimension here would compile to a sum over a category and answer with a number.
+        if window["of"] not in {aggregate["as"] for aggregate in self._query.get("aggregates", [])}:
+            raise ValueError(
+                f"query.windows: '{window['of']}' is not one of the query's aggregate aliases, "
+                f"and '{window['as']}' reads a measure across rows"
+            )
+
+        over = self._over(window)
+        fn = window["fn"]
+        if fn == "rank":
+            return f"rank() OVER ({over})"
+        if fn == "share":
+            return f"(1.0 * {measure} / NULLIF(sum({measure}) OVER ({over}), 0))"
+        if fn == "running_total":
+            # The frame is stated rather than left to the default it happens to be, and it is
+            # RANGE rather than ROWS: where two rows hold the same value of the walked column
+            # a RANGE frame gives both of them the total through the tie, so the answer does
+            # not depend on which of them the source returned first.
+            return f"sum({measure}) OVER ({over} RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
+
+        previous = f"lag({measure}) OVER ({over})"
+        if fn == "previous":
+            return previous
+        if fn == "difference":
+            return f"({measure} - {previous})"
+        return f"(1.0 * ({measure} - {previous}) / NULLIF({previous}, 0))"
+
+    def _over(self, window: dict) -> str:
+        """What the window is read across: the partition it restarts inside, and the order
+        the rows are read in.
+
+        A rank reads its own measure and everything else reads the column it walks, which is
+        why the direction has two defaults. They are what each word means: a rank counts down
+        from the largest, the way `limit_by` does, and a walk goes forwards."""
+        parts = []
+        partition = window.get("partition_by", [])
+        if partition:
+            parts.append("PARTITION BY " + ", ".join(self._quoted(column) for column in partition))
+
+        ranking = window["fn"] == "rank"
+        ordered = window.get("along") or (window["of"] if ranking else None)
+        if ordered is not None:
+            direction = window.get("direction", "desc" if ranking else "asc").upper()
+            parts.append(f"ORDER BY {self._quoted(ordered)} {direction}")
+        return " ".join(parts)
 
     def _ranked(self, limit_by: dict) -> str:
         """The top N values of the outer dimension, ranked over the grouped rows. A plain

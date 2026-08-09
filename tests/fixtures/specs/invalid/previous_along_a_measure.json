@@ -1,0 +1,18 @@
+{
+  "spec_version": "1",
+  "title": "Revenue per month, against the month with the revenue below it",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [{ "column": "order_date", "truncate": "month", "as": "month" }],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [{ "fn": "previous", "of": "revenue", "along": "revenue", "as": "month_before" }],
+    "limit": 60
+  },
+  "chart": {
+    "mark": "line",
+    "encoding": {
+      "x": { "field": "month", "type": "temporal" },
+      "y": { "field": "month_before", "type": "quantitative" }
+    }
+  }
+}

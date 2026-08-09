@@ -177,6 +177,46 @@
         "spread",
         "order_count"
       ]
+    },
+    {
+      "why": "a window is an output column, and it comes after every measure",
+      "query": {
+        "from": "orders",
+        "group_by": [
+          {
+            "column": "orders.order_date",
+            "truncate": "month",
+            "as": "month"
+          }
+        ],
+        "aggregates": [
+          {
+            "fn": "sum",
+            "column": "orders.total",
+            "as": "revenue"
+          }
+        ],
+        "windows": [
+          {
+            "fn": "running_total",
+            "of": "revenue",
+            "along": "month",
+            "as": "revenue_so_far"
+          },
+          {
+            "fn": "share",
+            "of": "revenue",
+            "as": "share_of_revenue"
+          }
+        ],
+        "limit": 60
+      },
+      "columns": [
+        "month",
+        "revenue",
+        "revenue_so_far",
+        "share_of_revenue"
+      ]
     }
   ]
 }

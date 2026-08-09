@@ -1,0 +1,29 @@
+{
+  "spec_version": "1",
+  "title": "Revenue against the month before",
+  "query": {
+    "from": "orders",
+    "filters": [{ "column": "order_date", "op": "is_not_null" }],
+    "group_by": [{ "column": "order_date", "truncate": "month", "as": "month" }],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [
+      { "fn": "previous", "of": "revenue", "along": "month", "as": "month_before" },
+      { "fn": "difference", "of": "revenue", "along": "month", "as": "movement" },
+      { "fn": "change", "of": "revenue", "along": "month", "as": "change" }
+    ],
+    "order_by": [{ "column": "month", "direction": "asc" }],
+    "limit": 60
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "month", "type": "temporal" },
+      "y": {
+        "field": "change",
+        "type": "quantitative",
+        "title": "Against the month before",
+        "format": { "kind": "percent", "decimals": 1 }
+      }
+    }
+  }
+}

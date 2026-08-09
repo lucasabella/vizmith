@@ -1,0 +1,18 @@
+{
+  "spec_version": "1",
+  "title": "Revenue per country, ranked along the country name",
+  "query": {
+    "from": "vizmith.shop.orders",
+    "group_by": [{ "column": "country" }],
+    "aggregates": [{ "fn": "sum", "column": "total", "as": "revenue" }],
+    "windows": [{ "fn": "rank", "of": "revenue", "along": "country", "as": "place" }],
+    "limit": 500
+  },
+  "chart": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "country", "type": "nominal" },
+      "y": { "field": "revenue", "type": "quantitative" }
+    }
+  }
+}
