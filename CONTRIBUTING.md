@@ -56,6 +56,17 @@ repository's CI — the reasoning is in `.github/workflows/ci.yml` and in `DESIG
 offline suite reaches 98% of the package without any of them. If your change touches the
 live half, say so in the pull request; nobody can check it for you.
 
+Before a pre-release, run the live eval against the target Databricks schema and model:
+
+```
+.venv/bin/vizmith eval --no-cache
+```
+
+Keep the generated run outside the repository. Also run a smoke check for every connector
+you intend to advertise as supported. A deterministic connector test is not evidence that
+the vendor SDK, credentials and server-side SQL all agree. Connectors without that smoke
+check stay experimental in the README and in [docs/compatibility.md](docs/compatibility.md).
+
 ## Where a decision goes
 
 **`DESIGN.md` holds decisions, argued rather than asserted.** If your change makes a

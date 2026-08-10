@@ -1,6 +1,6 @@
 [project]
 name = "vizmith"
-version = "0.0.1"
+version = "0.1.0a1"
 description = "Natural language question to validated chart spec, driven by database metadata"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Database :: Front-Ends",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
@@ -26,6 +28,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.52.1",
     "databricks-sdk>=0.123",
+    "cryptography>=50.0.0",
     "jsonschema>=4.23",
     "python-dotenv>=1.0",
     "httpx>=0.27",

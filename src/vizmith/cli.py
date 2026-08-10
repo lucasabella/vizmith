@@ -5,7 +5,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from vizmith import config
+from vizmith import __version__, config
 
 # What `--host` can be without the server being reachable from anywhere else. `0.0.0.0`
 # and `::` are absent on purpose: they are every interface, which is the case this warns
@@ -25,6 +25,7 @@ def main() -> None:
     config.load()
 
     parser = argparse.ArgumentParser(prog="vizmith")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     serve = commands.add_parser("serve", help="Start the local server and open the browser")

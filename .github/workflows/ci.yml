@@ -137,22 +137,24 @@ jobs:
           sys.exit(0 if "vizmith/web/index.html" in inside else f"{wheel} carries no interface")
           PY
 
-  # The floor, run rather than declared. `requires-python` says 3.11 because Debian stable
-  # ships it and nothing in the source needs 3.12, and a floor nobody runs is a floor that
-  # is true until somebody writes a match statement with a PEP 695 generic in it. So the
-  # suite runs on the oldest interpreter the package claims to install on, which is the
-  # cheapest way to keep that claim honest.
+  # The floor and the newest supported interpreter, run rather than declared. `requires-python`
+  # says 3.11 because Debian stable ships it, and the forward check catches library and
+  # scheduling changes before a new local interpreter exposes them. The suite runs on both
+  # ends of the claimed range, which keeps the floor honest without multiplying every job.
   #
   # Just the Python suite. The frontend does not care what interpreter serves it, and the
   # browser job is slow enough once.
   floor:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.14']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install the package with its dev extra
         run: ${{ env.INSTALL }}

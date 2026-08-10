@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from vizmith import cli, config
+from vizmith import __version__, cli, config
 
 PROFILE = "VIZMITH_DATABRICKS_PROFILE"
 KEY = "VIZMITH_MODEL_KEY"
@@ -162,6 +162,13 @@ def test_a_command_is_required(monkeypatch, capsys):
     own message lists the commands."""
     assert run(monkeypatch, "") == 2
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_version_prints_the_package_version(monkeypatch, capsys):
+    code = run(monkeypatch, "--version")
+
+    assert code == 0
+    assert capsys.readouterr().out.strip() == f"vizmith {__version__}"
 
 
 def test_a_command_that_never_serves_does_not_import_a_server():

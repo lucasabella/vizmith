@@ -1373,7 +1373,7 @@ def test_a_panel_load_asks_when_a_table_changed_once_per_table(client, catalog):
 
     names = catalog.tables()
     assert [table["table"] for table in body["tables"]] == names
-    assert catalog.freshness_checks == names, "a warm panel load asked twice per table"
+    assert sorted(catalog.freshness_checks) == names, "a warm panel load asked twice per table"
     assert catalog.statements == [], "a warm panel load re-profiled something"
 
 

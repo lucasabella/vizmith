@@ -16,7 +16,7 @@ where.
 
 **M4, LLM adapter. Built.** OpenAI-compatible `base_url`, user supplied key and endpoint. Question plus profile in, spec out, validated, rejected and retried on failure with the validator errors as feedback. Structured output support differs across providers; what that check found is recorded above.
 
-**M5, eval harness. Built, never run.** A fixture question set scored for correctness. This is what makes prompt changes measurable instead of anecdotal — and it has never produced a number, because it needs a model endpoint and a workspace and neither belongs in a public repository's CI. Until it does, every prompt change here is defended by argument. That is [#61](https://github.com/lucasabella/vizmith/issues/61), and it blocks more than itself.
+**M5, eval harness. Built, live validation required for each pre-release.** A fixture question set is scored for correctness. The deterministic harness is covered by CI, but the score still depends on the configured model and workspace, so every pre-release needs one recorded live run before prompt changes can be treated as measured.
 
 **M6, dashboards. Built.** Several specs saved together, arranged, reloaded, and narrowed by one filter that crosses every tile it can reach.
 

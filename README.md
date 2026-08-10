@@ -28,7 +28,7 @@ the first two. Then [why metadata and not the data](#why-metadata-and-not-the-da
 [stack](#stack) and [contributing](#contributing). The arguments behind the built parts are
 in [DESIGN.md](DESIGN.md), what is next is in [ROADMAP.md](ROADMAP.md).
 
-**Status: early development.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one.
+**Status: alpha, local-first.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one. The alpha is intended for a local machine, not for an unauthenticated shared server.
 
 ## Running it
 
@@ -52,9 +52,9 @@ then give it the path to a `.duckdb` file and the database and schema inside it.
 file on your own machine, opened read only, and it is the same interface and the same specs
 with no bill attached.
 
-When there is a release, the first three lines collapse to `pipx install vizmith`, or to
-nothing at all with `uvx vizmith configure` and `uvx vizmith serve`. That is the plan
-rather than the present, and this file will say so when it is true.
+This repository is preparing the `0.1.0a1` pre-release. It is not on PyPI yet, so the
+checkout instructions above remain the supported installation path until the package is
+published.
 
 ### What `configure` asks for
 
@@ -189,7 +189,11 @@ asks the endpoint with the schema it is about to send and believes the answer.
 
 ## Stack
 
-Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. Sources: Databricks Unity Catalog, DuckDB — a file on your own machine, opened read only, which is what makes this runnable without a warehouse and a bill — BigQuery, Snowflake and PostgreSQL. All five go through the same catalog interface, and the DuckDB one is what the deterministic half of the suite runs against, so it cannot rot without the suite going red. What each source answers for the contracts that have a `None` in them, and how each was checked, is in [docs/compatibility.md](docs/compatibility.md); BigQuery, Snowflake and PostgreSQL have not been run against a real project, account or server yet, and that table says so.
+Python (FastAPI, httpx) backend, React frontend, ECharts for rendering. The alpha release
+support boundary is Databricks Unity Catalog and DuckDB, a local file opened read only.
+BigQuery, Snowflake and PostgreSQL have connectors and deterministic tests, but they are
+experimental until each has passed a live smoke test. The details are in
+[docs/compatibility.md](docs/compatibility.md).
 
 Vizmith runs on your machine and serves a browser. The frontend talks to the backend over HTTP and nothing else, which keeps a desktop build possible later without touching application code.
 
