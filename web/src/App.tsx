@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getHealth, getShape, getTables, type Cost, type Suggestion } from "./api";
-import { fromProfiles, fromShape, merged, type TableFields } from "./panels/fields";
+import { fromProfiles, fromShape, merged, type TableFields } from "./panels/field-data";
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";

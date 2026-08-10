@@ -49,9 +49,9 @@ export const fromProfiles = (tables: TableProfile[]): TableFields[] =>
  *
  * The profiles win wherever they exist, and the shape is what fills the gaps. That is not
  * only for the window between the two requests: a table that a profile refused — a view
- * `DESCRIBE DETAIL` will not describe, a table the credential can list and not scan — is a
- * table the shape still has, and dropping it from the tree because its figures could not be
- * read would be the panel quietly disagreeing with the schema.
+ * `DESCRIBE DETAIL` will not describe, a table the credential can list and not scan — is
+ * a table the shape still has, and dropping it from the tree because its figures could not
+ * be read would be the panel quietly disagreeing with the schema.
  *
  * Order is the shape's, which is the source's own listing order, so the tree does not
  * rearrange itself under somebody's hand as the profiles land.

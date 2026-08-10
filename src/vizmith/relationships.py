@@ -98,8 +98,8 @@ def resolve(relationships: Sequence[Relationship], left: str, right: str) -> lis
         if arrived:
             if len(arrived) > 1:
                 raise ValueError(
-                    f"'{left}' and '{right}' are related through {len(arrived)} paths of the same "
-                    f"length, so which one is meant cannot be read off the relationships"
+                    f"'{left}' and '{right}' are connected by {len(arrived)} confirmed paths of "
+                    f"the same length, so Vizmith cannot choose a join safely."
                 )
             return arrived[0]
 
@@ -113,8 +113,8 @@ def resolve(relationships: Sequence[Relationship], left: str, right: str) -> lis
         frontier = following
 
     raise ValueError(
-        f"'{left}' and '{right}' have no confirmed relationship between them, directly or "
-        f"through another table"
+        f"No confirmed relationship connects '{left}' to '{right}', directly or through "
+        f"another table."
     )
 
 

@@ -562,8 +562,8 @@ def join_path(
     """How to get from one table to another, as the joins a spec would carry.
 
     Resolution walks confirmed relationships only, so an ambiguity and an absence are
-    both refusals rather than a guess. They answer 400 with the resolver's own words,
-    because that message is what a person who dragged a field reads."""
+    both refusals rather than a guess. They answer 400 with the resolver's own words and
+    a next step, because both are what a person who dragged a field reads."""
     try:
         known = relationship_graph(catalog)
     except RuntimeError as failure:
@@ -571,7 +571,18 @@ def join_path(
     try:
         path = resolve(confirmations.usable(known), left, right)
     except ValueError as failure:
-        return JSONResponse(status_code=400, content={"errors": [str(failure)]})
+        return JSONResponse(
+            status_code=400,
+            content={
+                "errors": [
+                    str(failure),
+                    (
+                        "Review Data > Relationships and make sure there is one confirmed path "
+                        "between these tables, then try again."
+                    ),
+                ]
+            },
+        )
     return {"joins": _joins(left, path)}
 
 

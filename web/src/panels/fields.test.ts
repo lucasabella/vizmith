@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TableProfile, TableShape } from "../api";
-import { fromProfiles, fromShape, merged } from "./fields";
+import { fromProfiles, fromShape, merged } from "./field-data";
 
 const shape: TableShape[] = [
   { table: "vizmith.shop.customers", columns: [{ name: "country", type: "string" }] },

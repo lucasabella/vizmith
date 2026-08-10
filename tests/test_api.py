@@ -989,7 +989,16 @@ def test_confirming_a_suggestion_makes_it_resolve(browsing):
     resolved = browsing.get("/api/join-path", params={"left": SHIPMENTS, "right": CARRIERS})
 
     assert refused.status_code == 400
-    assert "no confirmed relationship" in refused.json()["errors"][0]
+    assert refused.json()["errors"] == [
+        (
+            f"No confirmed relationship connects '{SHIPMENTS}' to '{CARRIERS}', directly or "
+            "through another table."
+        ),
+        (
+            "Review Data > Relationships and make sure there is one confirmed path between these "
+            "tables, then try again."
+        ),
+    ]
     assert resolved.json()["joins"] == [
         {
             "table": CARRIERS,

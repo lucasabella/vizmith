@@ -102,17 +102,21 @@ describe("a column dropped into a well", () => {
   it("refuses under the well when nothing confirms a path, in the server's own words", async () => {
     // The failure the whole design exists to prevent: a wrong join produces a plausible
     // number rather than an error, so a pair with no confirmed relationship is refused
-    // rather than guessed at, and the refusal is the server's sentence and not one here.
+    // rather than guessed at. The server's diagnostic stays intact, and the well adds the
+    // placement context the resolver cannot know.
     vi.mocked(getJoinPath).mockRejectedValue(
       new Refused([
-        "no confirmed relationship joins vizmith.shop.customers to vizmith.shop.products",
+        "No confirmed relationship connects 'vizmith.shop.customers' to 'vizmith.shop.products', directly or through another table.",
+        "Review Data > Relationships and make sure there is one confirmed path between these tables, then try again.",
       ]),
     );
     const { drop, onChange } = wells(revenue(), CATEGORY);
 
     drop("Legend");
 
-    expect(await screen.findByText(/no confirmed relationship/)).toBeDefined();
+    expect(await screen.findByText(/Could not add/)).toBeDefined();
+    expect(screen.getByText(/No confirmed relationship connects/)).toBeDefined();
+    expect(screen.getByText(/Review Data > Relationships/)).toBeDefined();
     expect(onChange).not.toHaveBeenCalled();
   });
 

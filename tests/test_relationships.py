@@ -127,7 +127,7 @@ def test_a_suggestion_does_not_resolve_until_it_is_confirmed(tmp_path):
     confirmations = Confirmations(tmp_path / "relationships.json")
     carriers = next(r for r in known if r.right_table == "vizmith.shop.carriers")
 
-    with pytest.raises(ValueError, match="no confirmed relationship"):
+    with pytest.raises(ValueError, match="No confirmed relationship"):
         resolve(confirmations.usable(known), "vizmith.shop.shipments", "vizmith.shop.carriers")
 
     confirmations.record(carriers, CONFIRMED)
@@ -146,7 +146,7 @@ def test_two_paths_of_the_same_length_report_ambiguity_rather_than_choosing():
         Relationship("d", "c_id", "c", "id"),
     ]
 
-    with pytest.raises(ValueError, match="2 paths of the same length"):
+    with pytest.raises(ValueError, match="2 confirmed paths of the same length"):
         resolve(known, "a", "d")
 
 

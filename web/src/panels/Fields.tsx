@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ColumnProfile } from "../api";
 import type { Field } from "../spec/spec";
-import type { ColumnFields, TableFields } from "./fields";
+import type { ColumnFields, TableFields } from "./field-data";
 
 /**
  * The tables, their columns, and what the profile says about a column.

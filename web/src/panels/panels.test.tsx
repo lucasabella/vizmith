@@ -7,7 +7,7 @@ import type { Row } from "../chart/option";
 import type { Spec } from "../spec/spec";
 import { SERIES_LIMIT } from "../chart/option";
 import Fields, { Profile, Unread, nullRate } from "./Fields";
-import { fromProfiles, fromShape } from "./fields";
+import { fromProfiles, fromShape } from "./field-data";
 import Wells from "./Wells";
 import { draftIn, place, type Draft, type Field } from "../spec/spec";
 

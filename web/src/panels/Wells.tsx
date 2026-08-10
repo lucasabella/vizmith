@@ -68,7 +68,9 @@ export default function Wells({
       try {
         joins = (await getJoinPath(draft.query.from, field.table)).joins;
       } catch (error) {
-        const lines = error instanceof Refused ? error.errors : [(error as Error).message];
+        const context = `Could not add '${field.table}.${field.column}' to ${well}.`;
+        const lines =
+          error instanceof Refused ? [context, ...error.errors] : [context, (error as Error).message];
         setRefusal({ well, lines, path: true });
         return;
       }
