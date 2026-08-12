@@ -174,6 +174,13 @@ def chart_drawn(page: Page) -> None:
     page.wait_for_selector(".chart canvas, .figure", timeout=DRAWN)
 
 
+def dashboard_list_settled(page: Page) -> None:
+    """The saved pane has left loading when it shows a list or its empty state."""
+    page.locator(".dash__saved .dash__list, .dash__saved .dash__empty").wait_for(
+        state="attached", timeout=DRAWN
+    )
+
+
 @needs_built_frontend
 def test_a_pasted_spec_draws_a_chart(page):
     run_spec(page, REVENUE_BY_COUNTRY)
@@ -358,7 +365,9 @@ def test_a_dashboard_is_renamed_in_one_gesture(page):
     page.reload(wait_until="networkidle")
     page.get_by_role("button", name="Dashboards").click()
 
-    names = page.locator(".dash__name").all_inner_texts()
+    dashboard_list_settled(page)
+    assert page.locator(".dash__saved .dash__list").count() == 1
+    names = page.locator(".dash__saved .dash__name").all_inner_texts()
     assert names == ["Trade, 2026"]
 
 
