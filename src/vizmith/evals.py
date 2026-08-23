@@ -98,6 +98,13 @@ class Score:
     # correctness and not on price — which is half of what a prompt change is judged on.
     # Zero where the answer came out of the cache: nothing was spent this run.
     tokens: int = 0
+    # The tables the selector put in front of the model for this question, in short names,
+    # and whether any word of the question matched anything. A spec that missed a table it
+    # needed is only diagnosable if the record says what the prompt carried — otherwise a
+    # selection failure and a model failure read identically, and one gets fixed while the
+    # other is retried.
+    selected: tuple[str, ...] = ()
+    fallback: bool = False
 
     @property
     def complete(self) -> bool:
@@ -288,6 +295,10 @@ def _score(
     # to a prompt carrying six tables is not an answer to one carrying three.
     relationships = catalog.relationships()
     chosen = select(question.question, tables, relationships)
+    # On every score this question produces, so a record says what the prompt carried
+    # however the question ended.
+    selected = tuple(table.table.rsplit(".", 1)[-1] for table in chosen.tables)
+    fell_back = not chosen.words_matched
     written = prompt(
         question.question,
         chosen.tables,
@@ -316,31 +327,31 @@ def _score(
         except ModelError as failure:
             # A model that could not be reached. What the attempt cost is not knowable from
             # here — the adapter raises rather than answering — so nothing is claimed.
-            return Score(question.name, (), VALIDATES, str(failure), attempts=0, asked=True)
+            return Score(question.name, (), VALIDATES, str(failure), attempts=0, asked=True, selected=selected, fallback=fell_back)
         spec, errors, taken, cost = answer.spec, answer.errors, answer.attempts, answer.spent.total
         if cache:
             cache.write(key, {"spec": spec, "errors": errors, "attempts": taken})
 
     if spec is None:
-        return Score(question.name, (), VALIDATES, "; ".join(errors), attempts=taken, asked=asked, tokens=cost)
+        return Score(question.name, (), VALIDATES, "; ".join(errors), attempts=taken, asked=asked, tokens=cost, selected=selected, fallback=fell_back)
 
     passed = [VALIDATES]
 
     missing, extra = _difference(question, spec)
     if missing:
-        return Score(question.name, tuple(passed), REFERENCES, missing, attempts=taken, asked=asked, tokens=cost)
+        return Score(question.name, tuple(passed), REFERENCES, missing, attempts=taken, asked=asked, tokens=cost, selected=selected, fallback=fell_back)
     passed.append(REFERENCES)
 
     try:
         rows = query.execute(spec, catalog)
         expected = query.execute(question.reference, catalog)
     except (ValueError, RuntimeError) as failure:
-        return Score(question.name, tuple(passed), RESULT, str(failure), attempts=taken, asked=asked, note=extra, tokens=cost)
+        return Score(question.name, tuple(passed), RESULT, str(failure), attempts=taken, asked=asked, note=extra, tokens=cost, selected=selected, fallback=fell_back)
     if _comparable(rows, spec) != _comparable(expected, question.reference):
         reason = f"{len(rows)} rows, expected {len(expected)}"
         if len(rows) == len(expected):
             reason = f"{len(rows)} rows that are not the expected ones"
-        return Score(question.name, tuple(passed), RESULT, reason, attempts=taken, asked=asked, note=extra, tokens=cost)
+        return Score(question.name, tuple(passed), RESULT, reason, attempts=taken, asked=asked, note=extra, tokens=cost, selected=selected, fallback=fell_back)
     passed.append(RESULT)
 
     refused = indefensible(spec, rows)
@@ -361,10 +372,12 @@ def _score(
             repaired=suggested,
             suggestion=said,
             tokens=cost + spent.total,
+            selected=selected,
+            fallback=fell_back,
         )
     passed.append(MARK)
 
-    return Score(question.name, tuple(passed), None, attempts=taken, asked=asked, note=extra, tokens=cost)
+    return Score(question.name, tuple(passed), None, attempts=taken, asked=asked, note=extra, tokens=cost, selected=selected, fallback=fell_back)
 
 
 def _repaired(
