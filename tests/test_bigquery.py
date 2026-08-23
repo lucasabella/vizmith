@@ -40,10 +40,16 @@ ORDERS_PER_MONTH = FIXTURES / "orders_per_month.json"
 LIVE_PROJECT = os.environ.get("VIZMITH_BIGQUERY_PROJECT")
 LIVE_DATASET = os.environ.get("VIZMITH_BIGQUERY_DATASET")
 LIVE_LOCATION = os.environ.get("VIZMITH_BIGQUERY_LOCATION")
+EMULATOR_ENDPOINT = os.environ.get("VIZMITH_BIGQUERY_EMULATOR_ENDPOINT")
 
 needs_project = pytest.mark.skipif(
     not LIVE_PROJECT or not LIVE_DATASET,
     reason="set VIZMITH_BIGQUERY_PROJECT and VIZMITH_BIGQUERY_DATASET to use a project",
+)
+
+needs_emulator = pytest.mark.skipif(
+    not EMULATOR_ENDPOINT,
+    reason="set VIZMITH_BIGQUERY_EMULATOR_ENDPOINT to use the local emulator",
 )
 
 # How long the metadata is given to publish a write before a candidate that has not moved
@@ -357,3 +363,43 @@ def test_whether_the_modified_time_moves_when_the_data_changes():
         f"cannot key the profile cache and None is the connector's answer for good"
     )
     print(f"\nlast_modified_time moved from {before} to {after}: it is a candidate")
+
+
+@needs_emulator
+def test_the_connector_runs_against_a_local_bigquery_emulator():
+    """The client, metadata, profiler and one complete query run without a cloud project."""
+    from google.api_core.client_options import ClientOptions
+    from google.auth.credentials import AnonymousCredentials
+    from google.cloud import bigquery
+
+    local = type("LocalBigQueryCatalog", (BigQueryCatalog,), {"_declared": lambda self, table: ()})
+    client = bigquery.Client(
+        "acme",
+        credentials=AnonymousCredentials(),
+        client_options=ClientOptions(api_endpoint=EMULATOR_ENDPOINT),
+    )
+    catalog = local("acme", "shop")
+    catalog._local.client = client
+
+    assert catalog.tables() == ["acme.shop.customers", "acme.shop.orders"]
+    described = catalog.describe("orders")
+    assert {column.name: column.type for column in described.columns} == {
+        "id": "integer",
+        "customer_id": "integer",
+        "order_date": "date",
+        "status": "string",
+        "total": "decimal",
+        "item_count": "integer",
+    }
+
+    profile = profile_table(catalog, "orders")
+    assert profile.row_count == 5
+    assert profile.columns[3].samples == ("cancelled", "delivered", "pending", "shipped")
+
+    spec = {
+        "spec_version": "1",
+        "title": "Orders",
+        "query": {"from": "orders", "aggregates": [{"fn": "count", "as": "orders"}], "limit": 1},
+        "chart": {"mark": "bar", "encoding": {"y": {"field": "orders", "type": "quantitative"}}},
+    }
+    assert execute(spec, catalog) == [{"orders": 5}]
