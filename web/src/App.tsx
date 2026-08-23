@@ -520,11 +520,14 @@ function SecondOpinion({
  * the first.
  */
 function Spent({ cost, what }: { cost: Cost; what: string }) {
-  const tokens = cost.total.toLocaleString();
+  // The locale is pinned rather than left to the machine, because the same page is read
+  // everywhere and a figure that renders as 12.600 on one person's Windows and 12,600 in
+  // CI is a screenshot nobody can compare. Fields.tsx pins en-GB for the same reason.
+  const tokens = cost.total.toLocaleString("en-GB");
   return (
     <span
       className="pages__spent"
-      title={`${cost.prompt.toLocaleString()} in the prompt, ${cost.completion.toLocaleString()} in the answer`}
+      title={`${cost.prompt.toLocaleString("en-GB")} in the prompt, ${cost.completion.toLocaleString("en-GB")} in the answer`}
     >
       {`· ${tokens} tokens on ${what}${cost.calls > 1 ? `, over ${cost.calls} attempts` : ""}`}
     </span>
