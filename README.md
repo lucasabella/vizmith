@@ -32,8 +32,7 @@ in [DESIGN.md](DESIGN.md), what is next is in [ROADMAP.md](ROADMAP.md).
 
 ## Running it
 
-There is no PyPI release yet, so installing means building the wheel. That needs Node,
-because the interface is built into the package:
+A versioned tag produces a verified release on its own — wheel, source distribution, checksums, provenance, GitHub release and PyPI publication — through [the release workflow](.github/workflows/release.yml); [docs/release.md](docs/release.md) documents that process and its recovery paths. Until the first beta is published from it, installing means building the wheel. That needs Node, because the interface is built into the package:
 
 ```
 git clone https://github.com/lucasabella/vizmith && cd vizmith
@@ -52,9 +51,7 @@ then give it the path to a `.duckdb` file and the database and schema inside it.
 file on your own machine, opened read only, and it is the same interface and the same specs
 with no bill attached.
 
-This repository is preparing the `0.1.0a1` pre-release. It is not on PyPI yet, so the
-checkout instructions above remain the supported installation path until the package is
-published.
+The package metadata carries `0.1.0a1` and the checkout instructions above remain the supported installation path until the first version is published from a tag. What a tag produces from then on, and how a half-finished publication is recovered, is [docs/release.md](docs/release.md).
 
 ### What `configure` asks for
 

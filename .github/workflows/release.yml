@@ -1,0 +1,164 @@
+# A tag that passes becomes a release, with no human between the tag and the artefacts.
+# What stands between them is everything this file can prove mechanically: that the tag
+# names the version the tree carries, that both distributions install into environments
+# that have never seen this checkout, that the interface travelled inside the wheel, and
+# that every byte is accounted for by a checksum and an attestation.
+#
+# This workflow is itself a publishing credential — PyPI's guidance on Trusted Publishing
+# says exactly that (https://docs.pypi.org/trusted-publishers/). It publishes with
+# short-lived OIDC tokens minted per run and holds no long-lived secret, and it is
+# protected the way a credential is protected: it runs only on a tag of the protected
+# main history, its jobs are split so nothing that holds write access to releases also
+# builds, and branch protection keeps the history it trusts from being rewritten. When
+# Actions gain required checks (#139), these jobs belong on that list.
+#
+# Recovery from anything below is documented in docs/release.md, which is where the
+# yank-and-retag decisions are written down rather than improvised.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two tags pushed in one moment are serialised rather than raced, and a rerun is never
+  # cancelled halfway through a publish by its own retry arriving.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build, prove, and record the artefacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # The build hook runs `npm ci` against the committed lockfile, so the interface in
+      # the wheel is the locked frontend rather than whatever npm resolves today.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: The tag names the version this tree carries
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+
+          with open("pyproject.toml", "rb") as held:
+              version = tomllib.load(held)["project"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          if tag != f"v{version}":
+              raise SystemExit(
+                  f"{tag} does not name this tree's version, which is v{version}. "
+                  "Move the tag or bump the package metadata; a release whose name "
+                  "disagrees with what it contains is found out here or by whoever "
+                  "installs it, and here is cheaper."
+              )
+          print(f"releasing {tag}")
+          PY
+
+      - name: Build the wheel and the source distribution
+        run: |
+          pip install build
+          python -m build
+
+      # Both smoke tests install into an environment that has never seen this checkout,
+      # because the question an installed package has to answer is whether it works where
+      # the repository is not.
+      - name: Install the wheel somewhere clean and ask it for its life
+        run: |
+          python -m venv .smoke-wheel
+          .smoke-wheel/bin/pip install dist/*.whl
+          .smoke-wheel/bin/vizmith --version
+          .smoke-wheel/bin/python - <<'PY'
+          import pathlib
+          import vizmith
+
+          carried = pathlib.Path(vizmith.__file__).parent / "web" / "index.html"
+          if not carried.is_file():
+              raise SystemExit("the wheel carries no interface")
+          print("the interface is inside the wheel")
+          PY
+          .smoke-wheel/bin/vizmith serve --no-browser &
+          for waited in $(seq 1 30); do
+            curl --silent --fail http://127.0.0.1:8000/api/health && break
+            sleep 1
+          done
+          curl --silent --fail http://127.0.0.1:8000/api/health
+          kill %1
+
+      # The source distribution has to be more than a shape: it is rebuilt from source in
+      # a clean environment, which runs the frontend build again through the hook, so a
+      # tarball that lost a file npm needs fails here rather than on its first user.
+      - name: Install the source distribution somewhere clean
+        run: |
+          python -m venv .smoke-sdist
+          .smoke-sdist/bin/pip install dist/*.tar.gz
+          .smoke-sdist/bin/vizmith --version
+
+      - name: Record what every file hashes to
+        working-directory: dist
+        run: |
+          sha256sum * | tee SHA256SUMS
+
+      - name: Sign the build's provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/*
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist/
+
+  github:
+    name: Publish the GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: dist
+          path: dist
+
+      - name: Create the release carrying the exact artefacts this tag built
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            dist/*
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted Publishing mints this job's credential from the environment name, which is
+    # why it is named rather than inherited: the publisher configured on PyPI answers for
+    # exactly this repository, this workflow and this environment, and nothing else.
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
