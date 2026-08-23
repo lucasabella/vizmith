@@ -199,6 +199,12 @@ an assistant, the same applies: keep the trailer, and own the diff.
 Nothing about your own workflow is asked for beyond that. A pull request is read for what it
 does and what it argues, and there is no separate bar for one written with help.
 
+The same policy is why the history keeps its AI co-authorship and session URLs rather than
+being scrubbed: rewriting public history to remove them would break every `#nnn` reference
+and quoted hash this repository argues from, for a cosmetic result. Names are normalized by
+`.mailmap` — one person, one name in `git log` — on the same terms. If a commit lands under a
+spelling or address not yet mapped, add the line there rather than amending anything.
+
 ## Reporting things
 
 Security holes go through
