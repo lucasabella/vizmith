@@ -724,6 +724,46 @@ button:focus-visible {
   color: var(--ink-2);
 }
 
+/* The one control a shared server starts with: the field a token is pasted into. It sits
+   in the Setup card because it is the same kind of sentence — here is what is missing and
+   the command that produces it — so it borrows that card's surface rather than growing
+   one of its own. */
+.signin {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 9px;
+}
+
+.signin input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--surf);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  padding: 4px 7px;
+}
+
+.signin input:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+
+.signin button {
+  font-size: 11px;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  padding: 4px 9px;
+}
+
+.signin button:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
 /* the Data view, behind the rail's second icon */
 .canvas--data {
   overflow: auto;

@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { getHealth, getShape, getTables, type Cost, type Suggestion } from "./api";
+import {
+  accessToken,
+  getHealth,
+  getShape,
+  getTables,
+  Refused,
+  type Cost,
+  type Suggestion,
+} from "./api";
 import { fromProfiles, fromShape, merged, type TableFields } from "./panels/field-data";
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
@@ -57,6 +65,11 @@ export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
   const [source, setSource] = useState(false);
   const [model, setModel] = useState(false);
+  // A shared server refuses every request that reads data or state until it carries a
+  // token, so whether one is held decides whether the app is usable at all. Health says
+  // which mode this is; the token holder says whether an answer is already in hand.
+  const [shared, setShared] = useState(false);
+  const [authed, setAuthed] = useState(() => accessToken.get() !== null);
   const [question, setQuestion] = useState("");
   const [view, setView] = useState<ViewId>("chart");
   const [visualisationOpen, setVisualisationOpen] = useState(true);
@@ -81,6 +94,7 @@ export default function App() {
         setBackend(said.version);
         setSource(said.source);
         setModel(said.model);
+        setShared(said.shared);
       })
       .catch(() => setBackend(null));
   }, []);
@@ -101,7 +115,11 @@ export default function App() {
   // Both write through the same state, and the profiles win: `merged` keeps a table the
   // shape knows and the profiles could not read, which is what a view looks like from here.
   useEffect(() => {
-    if (!source) return;
+    // A shared server is not asked for the schema until there is a token to ask with,
+    // because the first thing a tokenless request would earn is a refusal. On a server
+    // that answers to one person there is no such thing as unauthenticated, so the
+    // absence of a token is only a hold where health said this mode is on.
+    if (!source || (shared && !authed)) return;
     let live = true;
     let outline: TableFields[] = [];
     getShape()
@@ -117,11 +135,22 @@ export default function App() {
       .catch(() => {});
     getTables()
       .then((body) => live && setTables(merged(outline, fromProfiles(body.tables))))
-      .catch((error: Error) => live && setSchemaFailure(error.message));
+      .catch((error: Error) => {
+        if (!live) return;
+        // The token stopped answering for anybody — revoked, expired past its tab or
+        // mistyped. Asking for it again is the remedy, and reading the refusal as a
+        // schema failure would be one more sentence nobody can act on.
+        if (error instanceof Refused && error.status === 401) {
+          accessToken.clear();
+          setAuthed(false);
+          return;
+        }
+        setSchemaFailure(error.message);
+      });
     return () => {
       live = false;
     };
-  }, [source]);
+  }, [source, shared, authed]);
 
   /** Every column of every table, which is what a well drags and what a drill offers. */
   const columns = useMemo<Field[]>(
@@ -279,6 +308,25 @@ export default function App() {
   };
 
   const current = views[view];
+
+  // The gate, not the app: a shared server answers nothing else, so drawing wells and
+  // tabs around a refusal would be chrome around an error. Health is the one open
+  // answer, which is how this knows to ask.
+  if (shared && !authed) {
+    return (
+      <div className="app">
+        <header className="chrome">
+          <span className="chrome__brand">vizmith</span>
+          <span className="chrome__spacer" />
+          <span className="pill">
+            <i className={backend ? "pill__dot pill__dot--live" : "pill__dot"} />
+            {backend ? `backend ${backend}` : "backend unreachable"}
+          </span>
+        </header>
+        <SignIn onSignedIn={() => setAuthed(true)} />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -689,6 +737,51 @@ function Setup({ source, model }: { source: boolean; model: boolean }) {
         environment variable, or a <code>.env</code> where you started the server, wins over
         what the command wrote.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The one control a shared server starts with: the token its operator issued, asked for
+ * once and kept for this visit only. It is drawn with the Setup vocabulary because it is
+ * the same kind of sentence — here is what is missing and the command that produces it —
+ * and submitting it re-runs the same load a first visit runs.
+ */
+function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+  const [token, setToken] = useState("");
+  return (
+    <div className="empty">
+      <form
+        className="setup"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (token.trim() === "") return;
+          accessToken.set(token);
+          onSignedIn();
+        }}
+      >
+        <p className="setup__head">This server answers to more than one person</p>
+        <p className="setup__line">
+          <span className="setup__what">The access token</span>
+        </p>
+        <div className="signin">
+          <input
+            type="password"
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+            placeholder="paste the token you were given"
+            aria-label="Access token"
+          />
+          <button type="submit" disabled={token.trim() === ""}>
+            Sign in
+          </button>
+        </div>
+        <p className="setup__note">
+          Whoever runs this server issues tokens with <code>vizmith user add NAME</code>.
+          Yours is shown once when it is issued and kept here only for this visit — closing
+          this tab forgets it.
+        </p>
+      </form>
     </div>
   );
 }

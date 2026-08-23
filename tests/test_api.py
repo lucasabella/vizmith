@@ -1474,6 +1474,7 @@ def test_health_reports_which_kind_of_source_is_configured(monkeypatch):
         "source": False,
         "kind": "duckdb",
         "model": False,
+        "shared": False,
     }
 
     for name in ("VIZMITH_DUCKDB_PATH", "VIZMITH_DUCKDB_DATABASE", "VIZMITH_DUCKDB_SCHEMA"):

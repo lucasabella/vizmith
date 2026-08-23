@@ -40,6 +40,7 @@ from pydantic import BaseModel
 
 from vizmith import __version__, query
 from vizmith.ask import SCHEMA, Step, asking
+from vizmith.auth import Principal, Principals, scoped, shared_mode
 from vizmith.catalog import (
     DECLARED,
     METADATA_WORKERS,
@@ -113,10 +114,9 @@ def _hostname(value: str | None) -> str | None:
 
 @app.middleware("http")
 async def only_this_machine(request: Request, call_next):
-    """Refuse anything that did not arrive addressed to this machine, by this machine.
-
-    There is no authentication on this API, and until there is, these two headers are what
-    stands between a warehouse and any page the person happens to have open in another tab.
+    """Refuse anything that did not arrive addressed to this machine, by this machine —
+    and, in a shared deployment, anything that did not arrive with a token this server
+    issued.
 
     The `Host` check is what stops DNS rebinding. Same origin policy keys on the name in
     the URL rather than on the address it resolves to, so a page on a name that has been
@@ -131,6 +131,14 @@ async def only_this_machine(request: Request, call_next):
     warehouse bill or confirm a relationship nobody confirmed. It cannot forge `Origin`.
     Absent is allowed, because a same origin GET does not always carry one; present and
     foreign is refused.
+
+    The token check exists only where shared mode does (`VIZMITH_SHARED_MODE`), and it
+    runs here rather than as a dependency for two reasons. It answers before any endpoint
+    dependency is built, so an unauthenticated request reaches no source and no model and
+    pays nothing; and it is what decides who the request is, which the per-principal state
+    stores below read off `request.state`. `/api/health` stays open: it is what a
+    deployment check runs, it names nothing but which knobs are set, and the interface
+    needs it before it knows whether to ask for a token.
     """
     allowed = _allowed_hosts()
     if _hostname(request.headers.get("host")) not in allowed:
@@ -151,7 +159,42 @@ async def only_this_machine(request: Request, call_next):
             status_code=403,
             content={"errors": [f"A request from {origin} is not one this server answers."]},
         )
+    principal = Principals().verify(_bearer(request))
+    if principal is None and _gated(request.url.path):
+        return JSONResponse(
+            status_code=401,
+            content={
+                "errors": [
+                    (
+                        "This is a shared deployment, and every request that reads data or "
+                        "state carries a token. Issue one with `vizmith user add NAME`, then "
+                        "send it as `Authorization: Bearer <token>`."
+                    )
+                ]
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    request.state.principal = principal
     return await call_next(request)
+
+
+def _bearer(request: Request) -> str | None:
+    """The token out of an `Authorization: Bearer` header, or None where there is none.
+
+    Compared case-insensitively on the scheme because clients capitalise it differently;
+    the token itself is compared exactly, since a token is not a name."""
+    carried = request.headers.get("authorization")
+    if not carried:
+        return None
+    scheme, _, token = carried.partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else None
+
+
+def _gated(path: str) -> bool:
+    """Whether this path answers for data or state, in shared mode. The health check is
+    the deliberate exception; everything else under `/api` reads a source, a store or a
+    model, or writes one of the two files a person owns."""
+    return shared_mode() and path.startswith("/api") and path != "/api/health"
 
 
 @app.exception_handler(Damaged)
@@ -201,8 +244,12 @@ def rationed(what: str):
 
     def ration(request: Request):
         allowance = rations()
-        client = request.client.host if request.client else "unknown"
-        allowance.spend(client, what)
+        who = getattr(request.state, "principal", None) or (request.client.host if request.client else "unknown")
+        # A shared deployment reaches the server through a proxy or a NAT, where every
+        # request arrives from one address and per-address buckets become one bucket for
+        # everybody. A principal's name is what their own spending is keyed by, so one
+        # busy person cannot starve the rest.
+        allowance.spend(getattr(who, "name", who), what)
         allowance.enter()
         try:
             yield
@@ -210,6 +257,12 @@ def rationed(what: str):
             allowance.leave()
 
     return ration
+
+
+def principal(request: Request) -> Principal | None:
+    """Who this request is, as the middleware decided it. None wherever shared mode is
+    not on, which is the single local user every store has always served."""
+    return getattr(request.state, "principal", None)
 
 
 @lru_cache
@@ -278,18 +331,27 @@ def profile(catalog: Catalog, name: str) -> TableProfile:
     return Profiles(state_dir() / "profiles.json").read(catalog, name)
 
 
-def saved() -> Dashboards:
+def saved(principal: Annotated[Principal | None, Depends(principal)]) -> Dashboards:
     """The dashboards a person saved, read from disk on every request for the same reason
     the relationship answers are: the file is small, and a copy held between requests is
-    one more thing that can answer with what was true a moment ago."""
-    return Dashboards(state_dir() / "dashboards.json")
+    one more thing that can answer with what was true a moment ago.
+
+    In a shared deployment the file is the requesting principal's, under their own
+    directory in the state tree — one person's saved work is not another's to read or to
+    overwrite. In the default mode there is one principal and it has no name, which lands
+    exactly where this file has always been."""
+    return Dashboards(scoped("dashboards.json", principal))
 
 
-def answers() -> Confirmations:
+def answers(principal: Annotated[Principal | None, Depends(principal)]) -> Confirmations:
     """What a person has said about the suggested relationships, read from disk on every
     request rather than cached, because the file is small and a cache would be one more
-    thing that can hold a stale answer."""
-    return Confirmations(state_dir() / "relationships.json")
+    thing that can hold a stale answer.
+
+    Scoped per principal in shared mode for the same reason the dashboards are: a
+    relationship answer is knowledge about the source, but it was given by somebody on
+    the strength of what they were shown, so it stays theirs."""
+    return Confirmations(scoped("relationships.json", principal))
 
 
 def relationship_graph(catalog: Catalog) -> list[Relationship]:
@@ -375,13 +437,16 @@ class AnswerRequest(BaseModel):
 def health() -> dict[str, str | bool]:
     """Answerable without a source, because it is what a deployment check runs. It says
     what is configured so that the interface can name the missing piece rather than
-    letting it arrive as a failed query."""
+    letting it arrive as a failed query. `shared` is what tells the interface to ask for
+    a token before its first real request, and it is the one answer here that stays open
+    in a shared deployment."""
     return {
         "status": "ok",
         "version": __version__,
         "source": bool(source_settings()) and all(os.environ.get(name) for name in source_settings()),
         "kind": kind(),
         "model": all(os.environ.get(name) for name in MODEL_CONFIGURATION),
+        "shared": shared_mode(),
     }
 
 
