@@ -18,6 +18,14 @@ from vizmith.api import WEB_DIST, _web
 PROFILE = "VIZMITH_DATABRICKS_PROFILE"
 KEY = "VIZMITH_MODEL_KEY"
 
+# The permission tests below pin down POSIX file modes. Windows has no such bits: chmod
+# there only toggles a read-only flag, and stat reports 0666 whatever the write did, so
+# the promise these assert is checked where the promise can exist.
+posix_modes = pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX file modes do not exist on Windows",
+)
+
 
 @pytest.fixture(autouse=True)
 def elsewhere(tmp_path, monkeypatch):
@@ -68,6 +76,7 @@ def test_the_file_answers_where_nothing_nearer_does(elsewhere):
     assert os.environ[KEY] == "from the checkout"
 
 
+@posix_modes
 def test_the_file_holding_a_key_is_readable_by_nobody_else(elsewhere):
     path = config.write({KEY: "sekrit"})
 
@@ -144,6 +153,7 @@ def test_the_interface_is_served_from_the_package_where_one_was_built_into_it(tm
     assert WEB_DIST.name == "dist"
 
 
+@posix_modes
 def test_the_key_is_never_on_disk_at_a_wider_mode_than_the_file_keeps(elsewhere, monkeypatch):
     """The narrowing happens before the content, not after it. Writing the file and then
     restricting it leaves a window, one chmod long, where a key sits at whatever the umask
@@ -183,6 +193,7 @@ def test_two_writes_cannot_share_one_temporary_path(elsewhere, monkeypatch):
     assert list(config.state_dir().iterdir()) == [config.config_path()]
 
 
+@posix_modes
 def test_re_writing_keeps_what_was_not_mentioned(elsewhere):
     config.write({PROFILE: "work", KEY: "sekrit"})
     config.write({PROFILE: "other"})
@@ -191,6 +202,7 @@ def test_re_writing_keeps_what_was_not_mentioned(elsewhere):
     assert stat.S_IMODE(config.config_path().stat().st_mode) == 0o600
 
 
+@posix_modes
 def test_the_state_directory_is_the_owner_s_and_nobody_else_s(tmp_path, monkeypatch):
     """The files inside were always 0600, because mkstemp makes them that way whatever the
     umask is. The directory was not: created without a mode it lands at 0755, and another
