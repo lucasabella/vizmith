@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ask, execute, getHealth, Refused, type Step } from "./api";
+import { accessToken, ask, execute, getHealth, Refused, type Step } from "./api";
 import type { Spec } from "./spec/spec";
 
 /**
@@ -145,6 +145,53 @@ describe("the requests themselves", () => {
 
     expect(health.source).toBe(true);
     expect(health.model).toBe(false);
+  });
+});
+
+/**
+ * The token a shared deployment asks for.
+ *
+ * What is under test is the one place every request grows its header from: a stored token
+ * rides on everything, its absence changes nothing — which is every single-user server —
+ * and a refusal that arrived with a status carries that status, because the 401 is not
+ * shown as words but acted on as a sign-in to ask for again.
+ */
+describe("the token a shared server asks for", () => {
+  afterEach(() => accessToken.clear());
+
+  it("rides on the request as a bearer header once it is stored", async () => {
+    accessToken.set("issued-once");
+    const fetching = responding(200, { spec, rows: [] });
+    vi.stubGlobal("fetch", fetching);
+
+    await execute(spec);
+
+    const [, options] = fetching.mock.calls[0] as unknown as [string, RequestInit];
+    expect((options.headers as Record<string, string>).Authorization).toBe("Bearer issued-once");
+  });
+
+  it("is asked for by nothing where no token was given", async () => {
+    const fetching = responding(200, { spec, rows: [] });
+    vi.stubGlobal("fetch", fetching);
+
+    await execute(spec);
+
+    const [, options] = fetching.mock.calls[0] as unknown as [string, RequestInit];
+    expect((options.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect((options.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+  });
+
+  it("carries the status of a refusal that arrived with one", async () => {
+    const error = await refused(401, { errors: ["every request carries a token"] });
+
+    expect(error.status).toBe(401);
+    expect(error.errors).toEqual(["every request carries a token"]);
+  });
+
+  it("trims what it keeps, since a pasted token often arrives with a trailing newline", () => {
+    accessToken.set("issued-once\n");
+
+    expect(accessToken.get()).toBe("issued-once");
   });
 });
 

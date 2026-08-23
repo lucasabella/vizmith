@@ -69,33 +69,64 @@ export class Refused extends Error {
    * attempts and produced nothing is the expensive case, so the number rides on the
    * failure as well as on the answer. */
   readonly cost?: Cost;
+  /** The status the refusal arrived with, where there was one. An event on a stream has
+   * none, because the stream's own status line went out first. */
+  readonly status?: number;
 
-  constructor(errors: string[], carried: { spoke?: Spoke; said?: boolean; cost?: Cost } = {}) {
+  constructor(errors: string[], carried: { spoke?: Spoke; said?: boolean; cost?: Cost; status?: number } = {}) {
     super(errors[0] ?? "the server refused the request");
     this.errors = errors;
     this.spoke = carried.spoke;
     this.said = carried.said ?? true;
     this.cost = carried.cost;
+    this.status = carried.status;
   }
 }
 
+type Refusing = { errors?: string[]; spoke?: Spoke; cost?: Cost };
+
 /** A refusal out of a body the server sent. One reading of it, because a refusal arrives
  * two ways now — as a status with a body, and as an event named `refused` on a stream that
- * could not use a status — and the two have to become the same thing. */
-const refusedBy = (body: Refusing, fallback: string): Refused =>
+ * could not use a status — and the two have to become the same thing.
+ *
+ * The status is carried where the wire had one. Most refusals are shown as words, but one
+ * is acted on instead: a 401 means the token stopped answering for anybody, which is not
+ * a message to read so much as a sign-in to ask for again. */
+const refusedBy = (body: Refusing, fallback: string, status?: number): Refused =>
   new Refused(body.errors ?? [fallback], {
     spoke: body.spoke,
     said: Array.isArray(body.errors),
     cost: body.cost,
+    status,
   });
 
-type Refusing = { errors?: string[]; spoke?: Spoke; cost?: Cost };
+/**
+ * The access token a shared deployment asks for.
+ *
+ * A server answered beyond one person refuses every request that reads data or state
+ * until it carries the token its operator issued with `vizmith user add`. It sits in
+ * session storage rather than local storage on purpose: closing the tab forgets it, and
+ * a credential that outlives its tab is a standing offer to whoever shares the machine.
+ */
+const TOKEN_KEY = "vizmith-token";
+
+export const accessToken = {
+  get: (): string | null => sessionStorage.getItem(TOKEN_KEY),
+  set: (token: string): void => void sessionStorage.setItem(TOKEN_KEY, token.trim()),
+  clear: (): void => sessionStorage.removeItem(TOKEN_KEY),
+};
+
+/** The header a stored token adds, or nothing where there is none. */
+const bearer = (): Record<string, string> => {
+  const token = accessToken.get();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 async function json<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { ...options, headers: { ...options?.headers, ...bearer() } });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw refusedBy(body, `${response.status} ${response.statusText}`);
+    throw refusedBy(body, `${response.status} ${response.statusText}`, response.status);
   }
   return body as T;
 }
@@ -107,9 +138,10 @@ const posted = (payload: object): RequestInit => ({
 });
 
 /** What the server says about itself, and what the interface gates on: a question needs a
- * model, and everything else needs a source. Three flags that decide what is enabled were
- * the one part of this API with no declared shape. */
-export type Health = { status: string; version: string; source: boolean; model: boolean };
+ * model, everything else needs a source, and a shared server needs a token before any of
+ * it. Four flags that decide what is enabled were the one part of this API with no declared
+ * shape. */
+export type Health = { status: string; version: string; source: boolean; model: boolean; shared: boolean };
 
 export const getHealth = (): Promise<Health> => json("/api/health");
 
@@ -184,12 +216,12 @@ export async function ask(question: string, watching?: (step: Step) => void): Pr
   const request = posted({ question });
   const response = await fetch("/api/ask", {
     ...request,
-    headers: { ...request.headers, Accept: `${EVENTS}, application/json` },
+    headers: { ...request.headers, Accept: `${EVENTS}, application/json`, ...bearer() },
   });
   const streaming = (response.headers.get("content-type") ?? "").includes(EVENTS);
   if (!streaming || response.body === null) {
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw refusedBy(body, `${response.status} ${response.statusText}`);
+    if (!response.ok) throw refusedBy(body, `${response.status} ${response.statusText}`, response.status);
     return body as Answered;
   }
   return await heard(response.body, watching);

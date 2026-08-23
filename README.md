@@ -28,7 +28,7 @@ the first two. Then [why metadata and not the data](#why-metadata-and-not-the-da
 [stack](#stack) and [contributing](#contributing). The arguments behind the built parts are
 in [DESIGN.md](DESIGN.md), what is next is in [ROADMAP.md](ROADMAP.md).
 
-**Status: alpha, local-first.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one. The alpha is intended for a local machine, not for an unauthenticated shared server.
+**Status: alpha, local-first.** The interface works against a configured source: the Fields panel shows every table and column with its profile, dragging a column into a well rewrites the spec and runs it, clicking a mark asks the same question about what was clicked, the Data view is where a suggested relationship is confirmed, and the Dashboards view saves several specs under a name and opens them again. Asking a question in words needs a model endpoint, and so do the second opinion on a chart and the eval harness that scores one. The alpha is intended for a local machine; a deployment answered beyond it exists behind `VIZMITH_SHARED_MODE` and issued tokens — see [Serving beyond one person](#serving-beyond-one-person).
 
 ## Running it
 
@@ -92,6 +92,23 @@ npm run dev
 ```
 
 Vite proxies `/api` to port 8000. Building a wheel runs that build itself and puts the result inside the package, which is why `python -m build` needs Node and installing does not.
+
+### Serving beyond one person
+
+By default Vizmith is one person's local tool, and nothing authenticates because there is nobody else to be. A deployment that is deliberately reachable past loopback turns on shared mode:
+
+```
+VIZMITH_SHARED_MODE=1 vizmith user add ada
+VIZMITH_SHARED_MODE=1 vizmith serve --host 0.0.0.0
+```
+
+With the flag on, every request under `/api` except `/api/health` has to carry the token printed when its principal was issued, as `Authorization: Bearer <token>`. An unauthenticated request is refused before any source or model work starts, so it costs nothing. Each principal's dashboards and relationship answers land in their own directory in the state tree — `~/.vizmith/users/<name>/` by default — so one person's saved work cannot be read or overwritten by another. The profile cache stays shared, because a profile is metadata nobody asked a question of.
+
+What does not change with the flag: the host check (a request must be addressed to a name in `VIZMITH_ALLOWED_HOSTS`) and the origin check (a cross-site write is refused) both still apply, and no request ever writes configuration. Tokens come from `vizmith user add` on the machine running the server; they are shown once and stored only as a SHA-256 digest, so the users file cannot leak a working credential.
+
+The bundled interface asks for the token itself, once per visit, and keeps it in session storage, so closing the tab forgets it.
+
+**The trust boundary, plainly.** Shared mode says who a request came from; it does not say what that person may see. Every principal reads the same configured source through the same rules — the validator, the configured scope, confirmed joins only, profiles never rows — and warehouse-side authorisation stays the warehouse's job. Serve behind TLS wherever the server is reachable past the machine it runs on: the token is a bearer credential, and a bearer credential belongs to encrypted transport.
 
 ### Tests and lint
 

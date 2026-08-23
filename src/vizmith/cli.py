@@ -69,6 +69,20 @@ def main() -> None:
         "question, and never answered out of the cache.",
     )
 
+    user = commands.add_parser(
+        "user",
+        help="Manage who may ask, for a deployment served beyond one local user",
+    )
+    user_commands = user.add_subparsers(dest="user_command", required=True)
+    issue = user_commands.add_parser(
+        "add",
+        help="Issue a principal its token. Shown once, stored only as a digest.",
+    )
+    issue.add_argument("name")
+    user_commands.add_parser("list", help="Name every principal this deployment has issued")
+    revoke = user_commands.add_parser("remove", help="Take one principal's token back")
+    revoke.add_argument("name")
+
     args = parser.parse_args()
 
     if args.command == "configure":
@@ -76,6 +90,9 @@ def main() -> None:
 
     if args.command == "eval":
         sys.exit(_eval(args))
+
+    if args.command == "user":
+        sys.exit(_user(args))
 
     _warn_if_not_loopback(args.host)
 
@@ -96,20 +113,62 @@ def main() -> None:
 def _warn_if_not_loopback(host: str) -> None:
     """Say something when the server is bound somewhere a stranger can reach.
 
-    There is no authentication on this API. The server still refuses a request that did not
-    arrive addressed to a name it knows, so binding wide does not by itself open it, but a
-    person who binds wide is usually about to add the name too, and should hear once what
-    that combination is before they do."""
+    Without shared mode the server still refuses a request that did not arrive addressed
+    to a name it knows, so binding wide does not by itself open it, but a person who binds
+    wide is usually about to add the name too, and should hear once what stands between
+    the warehouse and whoever routes to this machine — and what to switch on instead."""
     if host in BOUND_TO_THIS_MACHINE:
         return
 
     print(
-        f"warning: serving on {host}, which is not loopback. This API has no "
-        "authentication, and requests are refused unless the host they name is in "
-        "VIZMITH_ALLOWED_HOSTS. Setting that on a reachable interface puts the "
-        "warehouse behind it within reach of anyone who can route to this machine.",
+        f"warning: serving on {host}, which is not loopback. Requests are refused unless "
+        "the host they name is in VIZMITH_ALLOWED_HOSTS, and nothing authenticates them "
+        "unless VIZMITH_SHARED_MODE is on. Serving other people takes both, plus "
+        "`vizmith user add` for each of them; see README.md, 'Serving beyond one person'.",
         file=sys.stderr,
     )
+
+
+def _user(args) -> int:
+    """Issue, list or revoke the tokens a shared deployment answers to.
+
+    This is the whole of what may write the users file, the same way `configure` is the
+    whole of what may write the configuration: nothing over HTTP touches it, so a request
+    can never mint itself a principal. The token is printed once because only its digest
+    is kept — `add` again replaces it rather than recovering it."""
+    from vizmith.auth import Principals, shared_mode
+
+    people = Principals()
+
+    if args.user_command == "add":
+        try:
+            token = people.issue(args.name)
+        except ValueError as failure:
+            print(failure, file=sys.stderr)
+            return 2
+        if not shared_mode():
+            print(
+                "note: VIZMITH_SHARED_MODE is not on, so this token is not being asked "
+                "for yet. The server stays single-user until it is.",
+                file=sys.stderr,
+            )
+        print(f"issued {args.name}: {token}")
+        print("shown once; it is stored only as a digest. Hand it to that person now.")
+        return 0
+
+    if args.user_command == "list":
+        named = people.names()
+        if not named:
+            print("no principals issued yet. `vizmith user add NAME` creates one.")
+        for name in named:
+            print(name)
+        return 0
+
+    if people.revoke(args.name):
+        print(f"revoked {args.name}. Their saved dashboards remain under users/{args.name}/.")
+        return 0
+    print(f"nothing was issued to '{args.name}'.", file=sys.stderr)
+    return 2
 
 
 def _configure(args) -> int:

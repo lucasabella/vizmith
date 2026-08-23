@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { accessToken } from "./api";
 
 /**
  * The application, driven far enough to reach the things that only exist between two
@@ -347,5 +348,61 @@ describe("building a chart from the keyboard", () => {
     await user.click(screen.getByRole("button", { name: "Put down status" }));
 
     expect(screen.getByRole("button", { name: "Pick up status" })).toBeTruthy();
+  });
+});
+
+/**
+ * A server that answers to more than one person.
+ *
+ * Health is the one answer that stays open, and `shared` on it is what decides whether
+ * the app draws at all: until a token is held, every request that reads data or state
+ * would only earn a refusal, so nothing else is asked for. What is under test is that
+ * order � sign-in first, schema after � and that the token rides on what follows it.
+ */
+describe("a server that answers to more than one person", () => {
+  afterEach(() => accessToken.clear());
+
+  function sharedServing() {
+    return vi.fn((url: string) => {
+      const path = String(url);
+      if (path.endsWith("/api/health")) return answered({ ...HEALTH, shared: true });
+      if (path.endsWith("/api/shape")) return answered(SHAPE);
+      if (path.endsWith("/api/tables")) return answered({ tables: [] });
+      return answered({});
+    });
+  }
+
+  it("asks for the access token before anything else", async () => {
+    const fetching = sharedServing();
+    vi.stubGlobal("fetch", fetching);
+
+    render(<App />);
+
+    expect(await screen.findByLabelText("Access token")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /orders/ })).toBeNull();
+    // Health was the only request made: an unauthenticated one would only be refused,
+    // and asking for a schema nobody can read yet would be spending to fail.
+    const asked = fetching.mock.calls.map(([url]) => String(url));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((url) => url.endsWith("/api/health"))).toBe(true);
+  });
+
+  it("loads once the token is given, and the token rides on what follows", async () => {
+    const user = userEvent.setup();
+    const fetching = sharedServing();
+    vi.stubGlobal("fetch", fetching);
+
+    render(<App />);
+    await user.type(await screen.findByLabelText("Access token"), "issued-once");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("button", { name: /orders/ })).toBeTruthy();
+    const carried = (fetching.mock.calls as unknown as [string, RequestInit][]).filter(
+      ([, options]) =>
+        String(
+          ((options?.headers ?? {}) as Record<string, string>).Authorization ?? "",
+        ).endsWith("issued-once"),
+    );
+    expect(carried.length).toBeGreaterThan(0);
   });
 });
