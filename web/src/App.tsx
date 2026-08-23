@@ -12,14 +12,15 @@ import { fromProfiles, fromShape, merged, type TableFields } from "./panels/fiel
 import Visual from "./chart/Visual";
 import Fields from "./panels/Fields";
 import Wells from "./panels/Wells";
-import Data from "./views/Data";
+import Relationships from "./views/Data";
+import DataBrowser from "./views/DataBrowser";
 import Dashboards from "./views/Dashboards";
 import { drawable, type Field, type Spec } from "./spec/spec";
 import Boundary from "./Boundary";
 import { counted } from "./counted";
 import { announced, waiting, type Outcome, type Working as WorkingState } from "./outcome";
 import { useAsked } from "./asked";
-import { ChartIcon, DashboardIcon, DataIcon } from "./icons";
+import { ChartIcon, DashboardIcon, DataIcon, RelationshipIcon } from "./icons";
 import {
   NOTHING,
   editingIndex,
@@ -40,7 +41,7 @@ import {
  * blank canvas. It is the same exhaustiveness check `STEP` and `SAID` in `outcome.ts` get
  * from being keyed by the server's own unions.
  */
-const VIEWS = ["chart", "dashboards", "data"] as const;
+const VIEWS = ["chart", "dashboards", "data", "relationships"] as const;
 
 type ViewId = (typeof VIEWS)[number];
 
@@ -191,12 +192,15 @@ export default function App() {
   // Both halves have to be there: the model writes the spec and the source answers it.
   const askable = source && model;
 
-  const columnsFor = [
-    "var(--w-rail)",
-    "1fr",
-    visualisationOpen ? "var(--w-visualisation)" : "var(--w-shutter)",
-    fieldsOpen ? "var(--w-fields)" : "var(--w-shutter)",
-  ].join(" ");
+  const columnsFor =
+    view === "chart"
+      ? [
+          "var(--w-rail)",
+          "minmax(0, 1fr)",
+          visualisationOpen ? "var(--w-visualisation)" : "var(--w-shutter)",
+          fieldsOpen ? "var(--w-fields)" : "var(--w-shutter)",
+        ].join(" ")
+      : ["var(--w-rail)", "minmax(0, 1fr)"].join(" ");
 
   const views: Record<ViewId, View> = {
     chart: {
@@ -205,22 +209,38 @@ export default function App() {
       page: false,
       render: () => (
         <>
-          <div className="ask">
+          <form
+            className="ask"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (askable && !asked.running && question.trim() !== "") {
+                asked.askQuestion(question);
+              }
+            }}
+          >
             <div className="ask__field">
-              <span className="ask__caret">&rsaquo;</span>
+              <label className="ask__label" htmlFor="analysis-question">
+                Question
+              </label>
               <input
+                id="analysis-question"
                 className="ask__input"
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && asked.askQuestion(question)}
                 placeholder={
                   askable ? "Ask a question about your data" : "Finish setting Vizmith up to ask a question"
                 }
                 disabled={!askable || asked.running}
               />
-              <span className="ask__key">Return</span>
+              <button
+                type="submit"
+                className="ask__run"
+                disabled={!askable || asked.running || question.trim() === ""}
+              >
+                {asked.running ? "Running" : "Run"}
+              </button>
             </div>
-          </div>
+          </form>
 
           {/* `aria-busy` while a run is in flight, so what is under it is reported as
               changing rather than as the answer. */}
@@ -303,7 +323,15 @@ export default function App() {
       label: "Data",
       icon: <DataIcon />,
       page: true,
-      render: () => <Data />,
+      render: () => (
+        <DataBrowser tables={source ? tables : []} failure={schemaFailure} connected={source} />
+      ),
+    },
+    relationships: {
+      label: "Relationships",
+      icon: <RelationshipIcon />,
+      page: true,
+      render: () => <Relationships />,
     },
   };
 
@@ -351,14 +379,20 @@ export default function App() {
       </header>
 
       <div className="strip">
+        <span className="strip__title">Method record</span>
+        <span className="strip__text">Column profiles may go to the model</span>
+        <span className="strip__text">Raw rows stay local</span>
         <span className="strip__text">
-          The model writes <b>the query and the chart spec</b>. Everything else on this screen is code.
+          The model writes <b>the query and chart spec</b>
         </span>
         <Badge outcome={asked.outcome} />
       </div>
 
-      <div className="body" style={{ gridTemplateColumns: columnsFor }}>
-        <nav className="rail">
+      <div
+        className={current.page ? "body body--page" : "body"}
+        style={{ gridTemplateColumns: columnsFor }}
+      >
+        <nav className="rail" aria-label="Primary">
           {VIEWS.map((id) => (
             <button
               key={id}
@@ -369,6 +403,7 @@ export default function App() {
               onClick={() => setView(id)}
             >
               {views[id].icon}
+              <span className="rail__label">{views[id].label}</span>
             </button>
           ))}
         </nav>
@@ -425,9 +460,15 @@ export default function App() {
                   dragging={dragging}
                   onChange={asked.edited}
                   onDrag={setDragging}
-                  onRelationships={() => setView("data")}
+                  onRelationships={() => setView("relationships")}
                 />
               )}
+            </div>
+            <div className="panel__foot">
+              <span className="panel__foot-h">Visible settings</span>
+              <p className="panel__foot-b">
+                Inferred aggregations, date units and row limits stay adjustable here.
+              </p>
             </div>
           </section>
         ) : (

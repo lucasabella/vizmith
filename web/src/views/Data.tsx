@@ -55,14 +55,34 @@ export default function Data() {
     );
   }
 
+  const suggested = relationships.filter(
+    (relationship) => relationship.kind === "suggested" && relationship.state === "open",
+  ).length;
+  const confirmed = relationships.filter(
+    (relationship) => relationship.kind === "suggested" && relationship.state === "confirmed",
+  ).length;
+  const declared = relationships.filter((relationship) => relationship.kind === "declared").length;
+
   return (
     <div className="data">
+      <p className="data__eyebrow">Connection control</p>
       <h1 className="data__head">Relationships</h1>
       <p className="data__lead">
         A column dragged from one table into a chart built on another needs a way between
         them. Only what is confirmed here is used, because a wrong join produces a plausible
         number rather than an error.
       </p>
+      <div className="data__summary" aria-label="Relationship summary">
+        <span>
+          <b>{suggested}</b> awaiting review
+        </span>
+        <span>
+          <b>{confirmed}</b> confirmed
+        </span>
+        <span>
+          <b>{declared}</b> declared by source
+        </span>
+      </div>
       <Sections relationships={relationships} working={working} onAnswer={answer} />
     </div>
   );

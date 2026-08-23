@@ -10,10 +10,12 @@
   --chrome-ink: #c3d2df;
   --chrome-ink-2: #7d93a8;
   --brass: #e8b04b;
+  --calibration: #d35a28;
+  --instrument-good: #2f6b4f;
 
   --canvas: #e4e9ee;
   --surf: #ffffff;
-  --surf-2: #f4f6f9;
+  --surf-2: #f1f3f2;
 
   --ink: #14202b;
   --ink-2: #5c6b7a;
@@ -48,13 +50,13 @@
   --radius-card: 3px;
   --shadow-card: 0 1px 2px rgba(20, 32, 43, 0.06);
 
-  --h-chrome: 44px;
-  --h-strip: 30px;
-  --h-panel-head: 34px;
-  --h-pages: 34px;
-  --w-rail: 44px;
-  --w-visualisation: 252px;
-  --w-fields: 232px;
+  --h-chrome: 48px;
+  --h-strip: 34px;
+  --h-panel-head: 38px;
+  --h-pages: 36px;
+  --w-rail: 48px;
+  --w-visualisation: 270px;
+  --w-fields: 250px;
   --w-shutter: 32px;
 
   color-scheme: light;

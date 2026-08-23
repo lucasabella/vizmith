@@ -364,6 +364,28 @@ export function buildOption(spec: Spec, rows: Row[]): EChartsOption | null {
     },
     yAxis: axis(y),
     series: series as SeriesOption[],
+    ...(categorical
+      ? {
+          media: [
+            {
+              query: { maxWidth: 480 },
+              option: {
+                grid: { left: 4, right: 8, bottom: 50, containLabel: true },
+                xAxis: {
+                  axisLabel: {
+                    ...LABEL,
+                    interval: 0,
+                    hideOverlap: false,
+                    rotate: 45,
+                    width: 90,
+                    overflow: "truncate" as const,
+                  },
+                },
+              },
+            },
+          ],
+        }
+      : {}),
   };
 }
 

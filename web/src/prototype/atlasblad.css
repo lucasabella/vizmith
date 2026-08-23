@@ -1,0 +1,1018 @@
+.atlas-root {
+  --atlas-desk: #dfe5e3;
+  --atlas-paper: #fffef8;
+  --atlas-ink: #1d282d;
+  --atlas-green: #285b63;
+  --atlas-proof: #b12f2b;
+  --atlas-rule: #b9c4c1;
+  min-height: 100vh;
+  padding-bottom: 86px;
+  color: var(--atlas-ink);
+  background: var(--atlas-desk);
+  font-family: "Source Sans 3", "Avenir Next", sans-serif;
+}
+
+.atlas-root button,
+.atlas-root input {
+  color: inherit;
+}
+
+.atlas-root button:focus-visible,
+.atlas-root input:focus-visible {
+  outline: 2px solid var(--atlas-proof);
+  outline-offset: 2px;
+}
+
+.atlas-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  min-height: 64px;
+  align-items: stretch;
+  color: var(--atlas-paper);
+  background: var(--atlas-green);
+  border-bottom: 4px solid #173f45;
+}
+
+.atlas-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  padding: 0 24px;
+}
+
+.atlas-brand strong {
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 23px;
+  letter-spacing: -0.04em;
+}
+
+.atlas-brand span {
+  color: #bfd0cc;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.atlas-nav {
+  display: flex;
+}
+
+.atlas-nav button {
+  min-width: 90px;
+  padding: 0 15px;
+  color: #d7e3e0;
+  border-left: 1px solid #4c7479;
+  font-weight: 600;
+}
+
+.atlas-nav button:last-child {
+  border-right: 1px solid #4c7479;
+}
+
+.atlas-nav button.is-on {
+  color: var(--atlas-ink);
+  background: var(--atlas-paper);
+}
+
+.atlas-save {
+  justify-self: end;
+  align-self: center;
+  margin-right: 20px;
+  padding: 8px 12px;
+  color: var(--atlas-paper) !important;
+  border: 1px solid #86a6a8;
+  font-size: 12px;
+}
+
+.atlas-save span {
+  margin-left: 8px;
+}
+
+.atlas-studio {
+  display: grid;
+  grid-template-columns: 112px minmax(560px, 1fr) 260px;
+  grid-template-rows: 1fr auto;
+  gap: 22px;
+  width: min(1480px, 100%);
+  min-height: calc(100vh - 150px);
+  margin: 0 auto;
+  padding: 26px 28px 0;
+}
+
+.atlas-margin {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  background: #cbd6d3;
+  border-top: 5px solid var(--atlas-green);
+}
+
+.atlas-margin__title,
+.atlas-plate__head > span,
+.atlas-catalogue header span,
+.atlas-profile > span,
+.atlas-page-title > span,
+.atlas-folio-index > span,
+.atlas-dashboard-sheet > header span,
+.atlas-data-book article > header span {
+  color: #566b6c;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.atlas-margin > div {
+  margin-top: 22px;
+  padding-top: 9px;
+  border-top: 1px solid #9eb0ac;
+}
+
+.atlas-margin small {
+  display: block;
+  margin-bottom: 5px;
+  color: #6d8180;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 8px;
+}
+
+.atlas-margin strong {
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 14px;
+}
+
+.atlas-margin p {
+  margin: 4px 0 0;
+  color: #4d6261;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.atlas-margin .atlas-proof {
+  color: var(--atlas-proof);
+  font-weight: 700;
+}
+
+.atlas-margin footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid #9eb0ac;
+  color: #637675;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.atlas-plate {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 30px 38px 22px;
+  background: var(--atlas-paper);
+  box-shadow: 0 3px 10px rgb(29 40 45 / 13%);
+}
+
+.atlas-plate__head {
+  padding-bottom: 22px;
+  border-bottom: 2px solid var(--atlas-ink);
+}
+
+.atlas-plate__head label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.atlas-plate__head input {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  outline-offset: 5px;
+  background: transparent;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: clamp(24px, 3.1vw, 42px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.atlas-plate__head button {
+  padding: 5px 0 3px 12px;
+  color: var(--atlas-green);
+  border-bottom: 1px solid var(--atlas-green);
+  font-size: 11px;
+}
+
+.atlas-plate__head p {
+  max-width: 62ch;
+  margin: 8px 0 0;
+  color: #667679;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.atlas-figure {
+  flex: 1;
+  display: flex;
+  min-height: 440px;
+  flex-direction: column;
+  padding-top: 24px;
+}
+
+.atlas-figure > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.atlas-figure > header > div:first-child > span {
+  color: var(--atlas-proof);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.atlas-figure h1 {
+  margin: 3px 0 0;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 20px;
+}
+
+.atlas-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 12px;
+  max-width: 320px;
+  color: #617174;
+  font-size: 10px;
+}
+
+.atlas-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.atlas-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.atlas-legend .a1 { background: #2a78d6; }
+.atlas-legend .a2 { background: #eb6834; }
+.atlas-legend .a3 { background: #1baf7a; }
+.atlas-legend .a4 { background: #eda100; }
+
+.atlas-figure__body {
+  flex: 1;
+  min-height: 310px;
+  margin-top: 8px;
+}
+
+.atlas-caption {
+  margin: 0;
+  padding: 8px 0;
+  color: #5e6e71;
+  border-top: 1px solid var(--atlas-ink);
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 10px;
+  font-style: italic;
+}
+
+.atlas-colophon {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 8px;
+  border-top: 1px solid var(--atlas-rule);
+  border-bottom: 1px solid var(--atlas-rule);
+}
+
+.atlas-binding {
+  display: flex;
+  min-height: 52px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 10px;
+  border-right: 1px solid var(--atlas-rule);
+  text-align: left;
+}
+
+.atlas-binding:last-child {
+  border-right: 0;
+}
+
+.atlas-binding span {
+  color: #728183;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.atlas-binding strong {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9px;
+}
+
+.atlas-binding--muted strong {
+  color: #889496;
+  font-weight: 400;
+}
+
+.atlas-catalogue {
+  display: flex;
+  flex-direction: column;
+  background: var(--atlas-paper);
+  border-top: 5px solid var(--atlas-green);
+  box-shadow: 0 3px 10px rgb(29 40 45 / 10%);
+}
+
+.atlas-catalogue > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--atlas-rule);
+}
+
+.atlas-catalogue header button {
+  color: var(--atlas-green);
+  font-size: 10px;
+}
+
+.atlas-catalogue section {
+  border-bottom: 1px solid #d5dcda;
+}
+
+.atlas-catalogue__table,
+.atlas-catalogue__column {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 13px;
+  text-align: left;
+}
+
+.atlas-catalogue__table small,
+.atlas-catalogue__column small {
+  color: #7c8a8b;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 8px;
+}
+
+.atlas-catalogue section.is-open .atlas-catalogue__table {
+  color: var(--atlas-paper);
+  background: var(--atlas-green);
+}
+
+.atlas-catalogue__column {
+  padding-left: 22px;
+  border-top: 1px solid #e2e6e4;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9px;
+}
+
+.atlas-catalogue__column.is-on {
+  color: var(--atlas-proof);
+  background: #f4f1e9;
+  box-shadow: inset 3px 0 var(--atlas-proof);
+}
+
+.atlas-profile {
+  margin-top: auto;
+  padding: 15px;
+  background: #edf0eb;
+  border-top: 1px solid var(--atlas-rule);
+}
+
+.atlas-profile strong {
+  display: block;
+  margin: 6px 0 9px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.atlas-profile p {
+  margin: 3px 0;
+  color: #5e6f70;
+  font-size: 10px;
+}
+
+.atlas-tools {
+  grid-column: 2 / 3;
+  display: grid;
+  grid-template-columns: repeat(4, auto) 1fr repeat(2, auto);
+  align-items: center;
+  background: var(--atlas-paper);
+  box-shadow: 0 3px 10px rgb(29 40 45 / 10%);
+}
+
+.atlas-tools button {
+  min-height: 42px;
+  padding: 0 16px;
+  border-right: 1px solid var(--atlas-rule);
+  color: #617174;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.atlas-tools button.is-on {
+  color: var(--atlas-paper);
+  background: var(--atlas-green);
+}
+
+.atlas-page {
+  width: min(1360px, 100%);
+  margin: 0 auto;
+  padding: 42px 34px 56px;
+}
+
+.atlas-page-title {
+  margin-bottom: 28px;
+}
+
+.atlas-page-title h1 {
+  margin: 3px 0 4px;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: clamp(34px, 5vw, 58px);
+  letter-spacing: -0.045em;
+}
+
+.atlas-page-title p {
+  max-width: 62ch;
+  margin: 0;
+  color: #586c6d;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 14px;
+}
+
+.atlas-folio-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 24px;
+}
+
+.atlas-folio-index {
+  display: flex;
+  flex-direction: column;
+}
+
+.atlas-folio-index > span {
+  margin-bottom: 8px;
+}
+
+.atlas-folio-index button {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 3px 8px;
+  padding: 13px 11px;
+  background: #f2f4ef;
+  border-bottom: 1px solid var(--atlas-rule);
+  text-align: left;
+}
+
+.atlas-folio-index button b {
+  grid-row: 1 / 3;
+  color: #6e8080;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 18px;
+}
+
+.atlas-folio-index button small {
+  color: #748485;
+}
+
+.atlas-folio-index button.is-on {
+  color: var(--atlas-paper);
+  background: var(--atlas-green);
+}
+
+.atlas-folio-index button.is-on b,
+.atlas-folio-index button.is-on small {
+  color: #d4e0dd;
+}
+
+.atlas-dashboard-sheet {
+  padding: 26px 30px;
+  background: var(--atlas-paper);
+  box-shadow: 0 3px 12px rgb(29 40 45 / 12%);
+}
+
+.atlas-dashboard-sheet > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--atlas-ink);
+}
+
+.atlas-dashboard-sheet > header input {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.atlas-dashboard-sheet nav {
+  display: flex;
+  gap: 7px;
+}
+
+.atlas-dashboard-sheet nav button,
+.atlas-running-filter button,
+.atlas-folio-tile button,
+.atlas-register button {
+  padding: 6px 9px;
+  border: 1px solid var(--atlas-rule);
+  background: var(--atlas-paper);
+  font-size: 10px;
+}
+
+.atlas-accent {
+  color: var(--atlas-paper) !important;
+  background: var(--atlas-green) !important;
+  border-color: var(--atlas-green) !important;
+}
+
+.atlas-running-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--atlas-rule);
+  font-size: 11px;
+}
+
+.atlas-running-filter b {
+  color: var(--atlas-proof);
+  text-transform: uppercase;
+}
+
+.atlas-running-filter small {
+  color: #6b7b7c;
+}
+
+.atlas-running-filter button {
+  margin-left: auto;
+}
+
+.atlas-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 26px 20px;
+  padding: 25px 0;
+}
+
+.atlas-folio-tile {
+  margin: 0;
+  min-width: 0;
+}
+
+.atlas-folio-tile--wide {
+  grid-column: 1 / -1;
+}
+
+.atlas-folio-tile > div {
+  height: 220px;
+  border: 1px solid var(--atlas-rule);
+}
+
+.atlas-folio-tile figcaption {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding-top: 8px;
+  border-top: 1px solid var(--atlas-ink);
+}
+
+.atlas-folio-tile figcaption > b {
+  color: var(--atlas-proof);
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+}
+
+.atlas-folio-tile figcaption span {
+  display: grid;
+  gap: 2px;
+}
+
+.atlas-folio-tile figcaption small,
+.atlas-dashboard-sheet > footer {
+  color: #718081;
+  font-size: 9px;
+}
+
+.atlas-dashboard-sheet > footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--atlas-rule);
+}
+
+.atlas-data-book {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  min-height: 600px;
+  background: var(--atlas-paper);
+  box-shadow: 0 3px 12px rgb(29 40 45 / 12%);
+}
+
+.atlas-data-book > aside {
+  padding: 20px 14px;
+  border-right: 1px solid var(--atlas-rule);
+}
+
+.atlas-data-book > aside label {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+  color: #647778;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.atlas-data-book > aside input {
+  padding: 8px;
+  border: 1px solid var(--atlas-rule);
+  background: #f3f4ef;
+}
+
+.atlas-data-book > aside button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  padding: 10px 8px;
+  border-bottom: 1px solid #d9deda;
+  text-align: left;
+}
+
+.atlas-data-book > aside button small {
+  color: #748283;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.atlas-data-book > aside button.is-on {
+  color: var(--atlas-paper);
+  background: var(--atlas-green);
+}
+
+.atlas-data-book > article {
+  padding: 34px 38px;
+}
+
+.atlas-data-book article > header {
+  padding-bottom: 18px;
+  border-bottom: 2px solid var(--atlas-ink);
+}
+
+.atlas-data-book article h2 {
+  margin: 4px 0;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  font-size: 34px;
+}
+
+.atlas-data-book article header p {
+  margin: 0;
+  color: #667778;
+}
+
+.atlas-column-list section {
+  display: grid;
+  grid-template-columns: 34px minmax(150px, 1fr) 90px 2fr;
+  align-items: baseline;
+  gap: 12px;
+  padding: 15px 8px;
+  border-bottom: 1px solid var(--atlas-rule);
+}
+
+.atlas-column-list section.is-on {
+  background: #f2f1e9;
+  box-shadow: inset 3px 0 var(--atlas-proof);
+}
+
+.atlas-column-list section b {
+  color: var(--atlas-proof);
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+}
+
+.atlas-column-list section strong,
+.atlas-column-list section span {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.atlas-column-list section small {
+  color: #68797a;
+}
+
+.atlas-data-book article > footer {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 14px;
+  margin-top: 30px;
+  padding: 15px;
+  background: #edf0eb;
+  font-size: 11px;
+}
+
+.atlas-register-page {
+  max-width: 1160px;
+}
+
+.atlas-register {
+  background: var(--atlas-paper);
+  box-shadow: 0 3px 12px rgb(29 40 45 / 12%);
+}
+
+.atlas-register > header,
+.atlas-register > article {
+  display: grid;
+  grid-template-columns: 1fr 1fr 180px 180px;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 20px;
+}
+
+.atlas-register > header {
+  color: #647678;
+  background: #edf0eb;
+  border-bottom: 2px solid var(--atlas-ink);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.atlas-register > article {
+  min-height: 70px;
+  border-bottom: 1px solid var(--atlas-rule);
+}
+
+.atlas-register article strong {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.atlas-register article > span {
+  color: var(--atlas-green);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.atlas-register article > span.is-proof {
+  color: var(--atlas-proof);
+}
+
+.atlas-register article > div {
+  display: flex;
+  gap: 5px;
+}
+
+.atlas-register-note {
+  width: min(500px, 100%);
+  margin: 22px 0 0 auto;
+  padding-left: 18px;
+  border-left: 4px solid var(--atlas-proof);
+}
+
+.atlas-register-note p {
+  margin: 5px 0 0;
+  color: #596c6d;
+  font-family: Charter, "Bitstream Charter", Georgia, serif;
+  line-height: 1.5;
+}
+
+@media (max-width: 1050px) {
+  .atlas-header {
+    grid-template-columns: 1fr auto;
+  }
+
+  .atlas-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    overflow-x: auto;
+    border-top: 1px solid #4c7479;
+  }
+
+  .atlas-nav button {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  .atlas-studio {
+    grid-template-columns: 90px minmax(0, 1fr);
+  }
+
+  .atlas-catalogue {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .atlas-catalogue > header,
+  .atlas-profile {
+    grid-column: 1 / -1;
+  }
+
+  .atlas-tools {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .atlas-root {
+    padding-bottom: 72px;
+  }
+
+  .atlas-header {
+    position: static;
+  }
+
+  .atlas-brand {
+    padding: 0 14px;
+  }
+
+  .atlas-brand span {
+    display: none;
+  }
+
+  .atlas-save {
+    margin-right: 10px;
+  }
+
+  .atlas-studio {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+  }
+
+  .atlas-margin {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 14px;
+    order: 2;
+  }
+
+  .atlas-margin__title,
+  .atlas-margin footer {
+    grid-column: 1 / -1;
+  }
+
+  .atlas-margin > div {
+    margin-top: 0;
+  }
+
+  .atlas-plate {
+    padding: 22px 18px 16px;
+  }
+
+  .atlas-plate__head label {
+    grid-template-columns: 1fr;
+  }
+
+  .atlas-plate__head input {
+    font-size: 27px;
+  }
+
+  .atlas-plate__head button {
+    justify-self: start;
+    padding-left: 0;
+    margin-top: 8px;
+  }
+
+  .atlas-figure > header {
+    flex-direction: column;
+  }
+
+  .atlas-legend {
+    justify-content: flex-start;
+  }
+
+  .atlas-colophon {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .atlas-binding {
+    min-width: 145px;
+  }
+
+  .atlas-catalogue {
+    order: 3;
+    display: block;
+  }
+
+  .atlas-tools {
+    order: 1;
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .atlas-tools span {
+    display: none;
+  }
+
+  .atlas-page {
+    padding: 28px 14px 44px;
+  }
+
+  .atlas-folio-layout,
+  .atlas-data-book {
+    grid-template-columns: 1fr;
+  }
+
+  .atlas-folio-index {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .atlas-folio-index > span {
+    display: none;
+  }
+
+  .atlas-folio-index button {
+    min-width: 185px;
+  }
+
+  .atlas-dashboard-sheet {
+    padding: 20px 14px;
+  }
+
+  .atlas-dashboard-sheet > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .atlas-dashboard-sheet nav,
+  .atlas-running-filter {
+    flex-wrap: wrap;
+  }
+
+  .atlas-running-filter button {
+    margin-left: 0;
+  }
+
+  .atlas-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .atlas-folio-tile--wide {
+    grid-column: auto;
+  }
+
+  .atlas-data-book > aside {
+    display: flex;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--atlas-rule);
+  }
+
+  .atlas-data-book > aside label {
+    min-width: 170px;
+    margin-right: 8px;
+    margin-bottom: 0;
+  }
+
+  .atlas-data-book > aside button {
+    min-width: 145px;
+  }
+
+  .atlas-data-book > article {
+    padding: 24px 16px;
+  }
+
+  .atlas-column-list section {
+    grid-template-columns: 30px 1fr auto;
+  }
+
+  .atlas-column-list section small {
+    grid-column: 2 / -1;
+  }
+
+  .atlas-register > header {
+    display: none;
+  }
+
+  .atlas-register > article {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}

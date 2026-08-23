@@ -116,6 +116,7 @@ export default function Visual({
             Chart as PNG
           </button>
         </span>
+        <span className="visual__valid">Spec validated</span>
         <span className="visual__tabs">
           <button
             className={view === "chart" ? "visual__tab visual__tab--on" : "visual__tab"}
@@ -132,6 +133,12 @@ export default function Visual({
             Table
           </button>
         </span>
+      </div>
+
+      <div className="visual__calibration" aria-hidden="true">
+        {Array.from({ length: 31 }, (_, index) => (
+          <i key={index} />
+        ))}
       </div>
 
       <div className="visual__body">

@@ -41,3 +41,13 @@ export function DataIcon() {
     </svg>
   );
 }
+
+export function RelationshipIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="4.5" cy="9" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="13.5" cy="9" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <line x1="7" y1="9" x2="11" y2="9" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
