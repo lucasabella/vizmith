@@ -153,6 +153,22 @@ clock fails on whatever else the machine was doing.
 
 ## Commits and pull requests
 
+### Main takes what a pull request gives it
+
+`main` is protected: it accepts merges, not pushes. A change lands as a pull request even when
+its author could have pushed it, because the record of how `main` moved is then reviewable in
+one place, and a history nobody can rewrite is the one a quoted hash can point into. Force
+pushes to `main` and deletion of the branch are refused outright. The repository owner holds
+bypass authority for an emergency, which is a configured exception rather than the absence of
+a rule.
+
+What is deliberately **not** in place yet is the three CI jobs as *required* status checks.
+While Actions do not run on this account, a check that never reports is a gate nothing can
+pass, so requiring one would close the repository rather than protect it. The checks become
+required when Actions work again; [#139](https://github.com/lucasabella/vizmith/issues/139)
+tracks that half. Until then the five local commands above are the gate a pull request is
+held to, by whoever opens it.
+
 A commit subject is a sentence about behaviour, not a component and a verb. *"An unanswered
 request is sent again, and a burst holds what it read"* rather than *"fix retry logic"*. The
 body says what was wrong, what changed, and what it cost — the diff already says how.
