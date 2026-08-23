@@ -1,0 +1,110 @@
+{
+  "recorded": [
+    {
+      "chosen": [
+        "customers",
+        "order_items",
+        "orders",
+        "returns",
+        "shipments"
+      ],
+      "missing": [],
+      "name": "turnover_by_country",
+      "needs": [
+        "orders",
+        "customers"
+      ],
+      "words_matched": true
+    },
+    {
+      "chosen": [
+        "customers",
+        "order_items",
+        "orders",
+        "shipment_scans"
+      ],
+      "missing": [],
+      "name": "purchases_per_month",
+      "needs": [
+        "orders"
+      ],
+      "words_matched": true
+    },
+    {
+      "chosen": [
+        "customers",
+        "order_items",
+        "orders",
+        "returns",
+        "shipments"
+      ],
+      "missing": [],
+      "name": "overall_turnover",
+      "needs": [
+        "orders"
+      ],
+      "words_matched": true
+    },
+    {
+      "chosen": [
+        "order_items",
+        "orders",
+        "shipment_scans",
+        "shipments"
+      ],
+      "missing": [
+        "returns"
+      ],
+      "name": "refunds_by_cause",
+      "needs": [
+        "returns"
+      ],
+      "words_matched": false
+    },
+    {
+      "chosen": [
+        "order_items",
+        "orders",
+        "shipment_scans",
+        "shipments"
+      ],
+      "missing": [
+        "carriers"
+      ],
+      "name": "parcels_per_courier",
+      "needs": [
+        "shipments",
+        "carriers"
+      ],
+      "words_matched": false
+    },
+    {
+      "chosen": [
+        "order_items",
+        "orders",
+        "shipment_scans",
+        "shipments"
+      ],
+      "missing": [],
+      "name": "delivery_charge_trend",
+      "needs": [
+        "shipments"
+      ],
+      "words_matched": false
+    },
+    {
+      "chosen": [
+        "order_items",
+        "orders",
+        "shipment_scans",
+        "shipments"
+      ],
+      "missing": [],
+      "name": "reads_by_depot",
+      "needs": [
+        "shipment_scans"
+      ],
+      "words_matched": false
+    }
+  ]
+}

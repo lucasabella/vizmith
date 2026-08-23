@@ -1,0 +1,77 @@
+{
+  "_": [
+    "Questions whose business vocabulary shares no stem with the identifiers they are about.",
+    "",
+    "This set exists because #121 asked for a measurement the fixed question set cannot",
+    "make: every question there uses the schema's own words, so a selector that bridges no",
+    "vocabulary gap still scores perfectly on it. Each entry here asks its twin's question",
+    "out of a different vocabulary — turnover rather than revenue, parcels rather than",
+    "shipments, depots rather than locations — and reuses the twin's reference spec, since",
+    "the expected result is the same rows whatever the question called them.",
+    "",
+    "What is deliberately not here is a fix. Choosing between a synonym index, a model-",
+    "assisted first call and embeddings is gated on the live baseline in #61, so this set",
+    "measures the current selector's behaviour and records it; tests/test_vocabulary.py",
+    "holds the record current. Run with:",
+    "",
+    "  vizmith eval --questions tests/fixtures/evals/questions-vocabulary.json"
+  ],
+  "questions": [
+    {
+      "name": "turnover_by_country",
+      "question": "Which ten countries generated the most turnover? Count an order's value as turnover, count only orders placed on or after 1 January 2025, and leave out orders that were cancelled or refunded.",
+      "tables": ["orders", "customers"],
+      "columns": ["customers.country", "orders.total", "orders.order_date", "orders.status"],
+      "reference": "../specs/valid/revenue_by_country.json",
+      "notes": "Turnover for revenue and value for total; neither stem appears in any identifier. The reference is the plain-language twin's."
+    },
+    {
+      "name": "purchases_per_month",
+      "question": "How many purchases were made in each month? Leave out purchases that carry no purchase date.",
+      "tables": ["orders"],
+      "columns": ["orders.order_date"],
+      "reference": "../specs/valid/orders_per_month.json",
+      "notes": "Purchases for orders and purchase date for order date; 'month' names nothing in the schema either way."
+    },
+    {
+      "name": "overall_turnover",
+      "question": "What was the overall turnover, counting an order's value as turnover, over orders placed on or after 1 January 2025 that were not cancelled or refunded?",
+      "tables": ["orders"],
+      "columns": ["orders.total", "orders.order_date", "orders.status"],
+      "reference": "../specs/valid/total_revenue.json",
+      "notes": "'Overall' rather than 'total' keeps even the aggregate noun out of the match."
+    },
+    {
+      "name": "refunds_by_cause",
+      "question": "How many refunds were requested for each cause of refund?",
+      "tables": ["returns"],
+      "columns": ["returns.reason"],
+      "notes": "Refunds for returns and cause for reason — the two nouns a person outside the schema would reach for first.",
+      "reference": "../specs/valid/returns_share_by_reason.json"
+    },
+    {
+      "name": "parcels_per_courier",
+      "question": "How many parcels did each courier firm handle? Parcels whose courier reference matches no courier firm are their own group rather than dropped.",
+      "tables": ["shipments", "carriers"],
+      "columns": ["carriers.name", "shipments.carrier_id"],
+      "reference": "../specs/valid/shipments_by_carrier.json",
+      "notes": "Parcels for shipments and courier for carrier. The left-join sentence is kept, because the twin's reference is a left join and the expected rows are the same rows."
+    },
+    {
+      "name": "delivery_charge_trend",
+      "question": "What was the typical delivery charge per month? Leave out deliveries that have not been sent yet.",
+      "tables": ["shipments"],
+      "columns": ["shipments.cost", "shipments.shipped_at"],
+      "notes": "Delivery charge for shipping cost and sent for shipped; 'typical' stands in for average without naming an aggregate the schema could match.",
+      "reference": "../specs/valid/shipping_cost_over_time.json"
+    },
+    {
+      "name": "reads_by_depot",
+      "question": "Which ten depots recorded the most barcode reads?",
+      "tables": ["shipment_scans"],
+      "columns": ["shipment_scans.location_code"],
+      "reference": "../specs/valid/scans_per_location.json",
+      "notes": "Depots for locations and barcode reads for shipment scans; the ten is what makes this the twin's question rather than a different one."
+    }
+  ]
+}

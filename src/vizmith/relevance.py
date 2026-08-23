@@ -70,10 +70,18 @@ STOP = frozenset(
 
 @dataclass(frozen=True)
 class Selection:
-    """The tables that go in the prompt, and what was left out of it."""
+    """The tables that go in the prompt, and what was left out of it.
+
+    `words_matched` is whether any word of the question scored against any name. False
+    means the tables below arrived through the floor rather than through anything the
+    question said, which is the one fact about a selection a reader cannot recover from
+    the tables themselves — four chosen tables look identical whether the words chose
+    them or the floor did, and only one of those is an answer worth trusting.
+    """
 
     tables: tuple[TableProfile, ...]
     withheld: int
+    words_matched: bool = True
 
     @property
     def whole_schema(self) -> bool:
@@ -94,10 +102,13 @@ def select(
     listed. Nothing is truncated: a table is in the prompt whole or not at all, because
     half a column list is a column list a model will read as complete."""
     if not tables:
-        return Selection(tables=(), withheld=0)
+        return Selection(tables=(), withheld=0, words_matched=False)
 
     words = _words(question)
     scored = {table.table: _score(table, words) for table in tables}
+    # Recorded before the floor can bury it: whether the question said anything at all is
+    # what separates a selection from a guess wearing one.
+    words_matched = any(score > 0 for score in scored.values())
     reachable = _one_hop({name for name, score in scored.items() if score > 0}, relationships)
 
     def rank(table: TableProfile) -> tuple[int, int, int]:
@@ -123,7 +134,9 @@ def select(
     # a prompt that reordered the schema per question would make two prompts differ by more
     # than the tables they hold.
     chosen = tuple(table for table in tables if table in kept)
-    return Selection(tables=chosen, withheld=len(tables) - len(chosen))
+    return Selection(
+        tables=chosen, withheld=len(tables) - len(chosen), words_matched=words_matched
+    )
 
 
 def _words(question: str) -> set[str]:
